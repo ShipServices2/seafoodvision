@@ -11,6 +11,7 @@ import type {
   CollectionItem,
   CatalogStats,
   Category,
+  ImportBatch,
 } from './types';
 
 // ============================================================
@@ -572,4 +573,70 @@ export async function fetchAdminCategories(): Promise<Category[]> {
     return [];
   }
   return (data as Category[]) || [];
+}
+
+// ============================================================
+// EXTENDED CATALOG STATS (real vs demo separation)
+// ============================================================
+
+export async function fetchExtendedCatalogStats(): Promise<{
+  realAssets: number;
+  demoAssets: number;
+  realSpecies: number;
+  demoSpecies: number;
+  underReview: number;
+  previewOnly: number;
+}> {
+  const supabase = createClient();
+
+  const [realAssetsRes, demoAssetsRes, realSpeciesRes, demoSpeciesRes, underReviewRes, previewOnlyRes] =
+    await Promise.all([
+      supabase.from('assets').select('*', { count: 'exact', head: true }).eq('is_demo', false),
+      supabase.from('assets').select('*', { count: 'exact', head: true }).eq('is_demo', true),
+      supabase.from('species').select('*', { count: 'exact', head: true }).eq('is_demo', false),
+      supabase.from('species').select('*', { count: 'exact', head: true }).eq('is_demo', true),
+      supabase.from('assets').select('*', { count: 'exact', head: true }).eq('is_demo', false).eq('review_status', 'under_review'),
+      supabase.from('assets').select('*', { count: 'exact', head: true }).eq('is_demo', false).eq('review_status', 'preview_only'),
+    ]);
+
+  return {
+    realAssets: realAssetsRes.count ?? 0,
+    demoAssets: demoAssetsRes.count ?? 0,
+    realSpecies: realSpeciesRes.count ?? 0,
+    demoSpecies: demoSpeciesRes.count ?? 0,
+    underReview: underReviewRes.count ?? 0,
+    previewOnly: previewOnlyRes.count ?? 0,
+  };
+}
+
+// ============================================================
+// IMPORT BATCHES
+// ============================================================
+
+export async function fetchImportBatches(limit = 10): Promise<ImportBatch[]> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('import_batches')
+    .select('*')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error('fetchImportBatches error:', error.message);
+    return [];
+  }
+  return (data as ImportBatch[]) || [];
+}
+
+// ============================================================
+// ASSET STATUS PROMOTION (admin)
+// ============================================================
+
+export async function promoteAssetStatus(
+  assetId: string,
+  newStatus: string,
+  changedBy: string,
+  reason?: string
+): Promise<boolean> {
+  return updateAssetStatus(assetId, newStatus, changedBy, reason);
 }

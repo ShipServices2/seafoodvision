@@ -316,6 +316,10 @@ export const ALLOWED_CSV_COLUMNS = [
   'review_status',
   'rights_status',
   'publication_status',
+  'confidence_score',
+  'technical_score',
+  'commercial_score',
+  'description',
 ] as const;
 
 export type AllowedCsvColumn = (typeof ALLOWED_CSV_COLUMNS)[number];
@@ -327,4 +331,12 @@ export interface CsvValidationResult {
   preview: Record<string, string>[];
   totalRows: number;
   rejectedRows: number;
+}
+
+// ---- Extended Catalog Stats (real vs demo) ----
+export interface ExtendedCatalogStats extends CatalogStats {
+  realAssets: number;
+  demoAssets: number;
+  realSpecies: number;
+  demoSpecies: number;
 }

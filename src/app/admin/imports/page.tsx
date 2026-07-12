@@ -1,87 +1,179 @@
 'use client';
 
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Upload, AlertCircle, CheckCircle2, XCircle, FileText, Eye } from 'lucide-react';
+import {
+  ArrowLeft, Upload, AlertCircle, CheckCircle2, XCircle, FileText, Eye,
+  Play, Loader2, ChevronDown, ChevronUp, Package, Fish, Tag, Hash,
+  Image, FileImage, ClipboardList, RefreshCw,
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
-import type { CsvValidationResult } from '@/lib/supabase/types';
+import { createClient } from '@/lib/supabase/client';
+import type { ImportBatch } from '@/lib/supabase/types';
 import { ALLOWED_CSV_COLUMNS } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import Icon from '@/components/ui/AppIcon';
 
-// Patterns that must be rejected
+
+// ============================================================
+// SECURITY PATTERNS
+// ============================================================
 const REJECT_PATTERNS = [
-  { pattern: /^[A-Za-z]:\\/, label: 'Windows absolute path (C:\\...)' },
+  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path' },
   { pattern: /\/Users\//, label: 'macOS user path' },
   { pattern: /dropbox/i, label: 'Dropbox path' },
   { pattern: /\b\d{2,3}\.\d{4,6},\s*\d{2,3}\.\d{4,6}\b/, label: 'GPS coordinates' },
   { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, label: 'Email address' },
   { pattern: /\+?\d[\d\s\-().]{7,}\d/, label: 'Phone number' },
+  { pattern: /secret|api[_-]?key|password|token/i, label: 'Secret/credential' },
+  { pattern: /C:\\/, label: 'Windows C: path' },
 ];
 
-function validateCsvContent(rows: Record<string, string>[]): CsvValidationResult {
+// ============================================================
+// TYPES
+// ============================================================
+interface DryRunReport {
+  totalRows: number;
+  validRows: number;
+  rejectedRows: number;
+  rejectionDetails: { row: number; reason: string }[];
+  duplicatesDetected: number;
+  duplicates: string[];
+  newSpecies: string[];
+  newCategories: string[];
+  newKeywords: string[];
+  preview: Record<string, string>[];
+}
+
+interface ImportReport extends DryRunReport {
+  importedCount: number;
+  speciesCreated: number;
+  keywordsCreated: number;
+  importErrors: string[];
+  finalStatus: string;
+}
+
+type Step = 'upload' | 'dry_run' | 'confirm' | 'importing' | 'done';
+
+// ============================================================
+// CSV PARSER
+// ============================================================
+function parseCsv(text: string): Record<string, string>[] {
+  const lines = text.trim().split(/\r?\n/);
+  if (lines.length < 2) return [];
+  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
+  return lines.slice(1)
+    .filter((l) => l.trim())
+    .map((line) => {
+      const values: string[] = [];
+      let current = '';
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') {
+          inQuotes = !inQuotes;
+        } else if (line[i] === ',' && !inQuotes) {
+          values.push(current.trim());
+          current = '';
+        } else {
+          current += line[i];
+        }
+      }
+      values.push(current.trim());
+      return Object.fromEntries(headers.map((h, i) => [h, values[i] || '']));
+    });
+}
+
+// ============================================================
+// CLIENT-SIDE PRE-VALIDATION
+// ============================================================
+function clientValidate(rows: Record<string, string>[]): { errors: string[]; warnings: string[] } {
   const errors: string[] = [];
   const warnings: string[] = [];
-  let rejectedRows = 0;
 
   if (rows.length === 0) {
     errors.push('CSV file is empty or has no data rows');
-    return { valid: false, errors, warnings, preview: [], totalRows: 0, rejectedRows: 0 };
+    return { errors, warnings };
   }
 
   const headers = Object.keys(rows[0]);
-
-  // Check for unknown columns
-  const unknownCols = headers.filter((h) => !ALLOWED_CSV_COLUMNS.includes(h as any));
+  const unknownCols = headers.filter((h) => !ALLOWED_CSV_COLUMNS.includes(h as never));
   if (unknownCols.length > 0) {
-    warnings.push(`Unknown columns detected: ${unknownCols.join(', ')} — these will be ignored`);
+    warnings.push(`Unknown columns (will be ignored): ${unknownCols.join(', ')}`);
   }
-
-  // Check required columns
   if (!headers.includes('title')) {
     errors.push('Missing required column: title');
   }
 
-  // Scan each row for rejected patterns
   rows.forEach((row, idx) => {
     const rowStr = Object.values(row).join(' ');
-    REJECT_PATTERNS.forEach(({ pattern, label }) => {
+    for (const { pattern, label } of REJECT_PATTERNS) {
       if (pattern.test(rowStr)) {
         errors.push(`Row ${idx + 1}: Contains rejected data (${label})`);
-        rejectedRows++;
+        break;
       }
-    });
+    }
   });
 
-  return {
-    valid: errors.length === 0,
-    errors,
-    warnings,
-    preview: rows.slice(0, 5),
-    totalRows: rows.length,
-    rejectedRows,
-  };
+  return { errors, warnings };
 }
 
-function parseCsv(text: string): Record<string, string>[] {
-  const lines = text.trim().split('\n');
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(',').map((h) => h.trim().replace(/^"|"$/g, ''));
-  return lines.slice(1).map((line) => {
-    const values = line.split(',').map((v) => v.trim().replace(/^"|"$/g, ''));
-    return Object.fromEntries(headers.map((h, i) => [h, values[i] || '']));
-  });
-}
+// ============================================================
+// STATUS BADGE
+// ============================================================
+const batchStatusColors: Record<string, string> = {
+  pending: 'bg-gray-100 text-gray-600',
+  processing: 'bg-blue-100 text-blue-700',
+  completed: 'bg-green-100 text-green-700',
+  failed: 'bg-red-100 text-red-700',
+  partial: 'bg-amber-100 text-amber-700',
+};
 
+// ============================================================
+// MAIN PAGE
+// ============================================================
 export default function AdminImportsPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const [file, setFile] = useState<File | null>(null);
-  const [result, setResult] = useState<CsvValidationResult | null>(null);
-  const [processing, setProcessing] = useState(false);
-  const [showPreview, setShowPreview] = useState(false);
 
+  // Step state
+  const [step, setStep] = useState<Step>('upload');
+
+  // CSV file state
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
+  const [clientErrors, setClientErrors] = useState<string[]>([]);
+  const [clientWarnings, setClientWarnings] = useState<string[]>([]);
+
+  // Media files state
+  const [thumbnailFiles, setThumbnailFiles] = useState<File[]>([]);
+  const [previewFiles, setPreviewFiles] = useState<File[]>([]);
+
+  // Batch config
+  const [batchName, setBatchName] = useState('Codex Pilot 100');
+  const [batchNotes, setBatchNotes] = useState('First controlled pilot import — Phase 4.3');
+
+  // Dry run report
+  const [dryRunReport, setDryRunReport] = useState<DryRunReport | null>(null);
+  const [dryRunLoading, setDryRunLoading] = useState(false);
+
+  // Import state
+  const [importReport, setImportReport] = useState<ImportReport | null>(null);
+  const [importLoading, setImportLoading] = useState(false);
+  const [importProgress, setImportProgress] = useState(0);
+  const [importProgressLabel, setImportProgressLabel] = useState('');
+
+  // Batch history
+  const [batches, setBatches] = useState<ImportBatch[]>([]);
+  const [batchesLoading, setBatchesLoading] = useState(true);
+
+  // UI
+  const [showPreview, setShowPreview] = useState(false);
+  const [showRejections, setShowRejections] = useState(false);
+  const [showBatchHistory, setShowBatchHistory] = useState(false);
+
+  // Auth guard
   useEffect(() => {
     if (!loading && !user) router.replace('/auth?next=/admin/imports');
     if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role)) {
@@ -89,51 +181,228 @@ export default function AdminImportsPage() {
     }
   }, [user, profile, loading, router]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Load batch history
+  const loadBatches = useCallback(async () => {
+    if (!profile || !['administrator', 'super_admin'].includes(profile.role)) return;
+    setBatchesLoading(true);
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('import_batches')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(10);
+    setBatches((data as ImportBatch[]) || []);
+    setBatchesLoading(false);
+  }, [profile]);
+
+  useEffect(() => { loadBatches(); }, [loadBatches]);
+
+  // ---- CSV FILE HANDLER ----
+  const handleCsvChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const f = e.target.files?.[0];
     if (!f) return;
     if (!f.name.endsWith('.csv')) {
-      setResult({
-        valid: false,
-        errors: ['Only CSV files are accepted'],
-        warnings: [],
-        preview: [],
-        totalRows: 0,
-        rejectedRows: 0,
-      });
+      setClientErrors(['Only .csv files are accepted']);
       return;
     }
-    setFile(f);
-    setResult(null);
+    setCsvFile(f);
+    setDryRunReport(null);
+    setImportReport(null);
+    setStep('upload');
+
+    const text = await f.text();
+    const rows = parseCsv(text);
+    setCsvRows(rows);
+    const { errors, warnings } = clientValidate(rows);
+    setClientErrors(errors);
+    setClientWarnings(warnings);
   };
 
-  const handleValidate = async () => {
-    if (!file) return;
-    setProcessing(true);
+  // ---- THUMBNAIL FILES HANDLER ----
+  const handleThumbnailFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setThumbnailFiles(files);
+  };
+
+  // ---- PREVIEW FILES HANDLER ----
+  const handlePreviewFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
+    setPreviewFiles(files);
+  };
+
+  // ---- DRY RUN ----
+  const handleDryRun = async () => {
+    if (!csvRows.length || clientErrors.length > 0) return;
+    setDryRunLoading(true);
+    setStep('dry_run');
+
     try {
-      const text = await file.text();
-      const rows = parseCsv(text);
-      const validation = validateCsvContent(rows);
-      setResult(validation);
-    } catch {
-      setResult({
-        valid: false,
-        errors: ['Failed to parse CSV file. Ensure it is valid UTF-8 CSV format.'],
-        warnings: [],
-        preview: [],
-        totalRows: 0,
-        rejectedRows: 0,
+      const res = await fetch('/api/admin/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: 'dry_run', rows: csvRows }),
       });
+      const data = await res.json();
+      if (!res.ok) {
+        setClientErrors([data.error || 'Dry run failed']);
+        setStep('upload');
+      } else {
+        setDryRunReport(data.report);
+        setStep('confirm');
+      }
+    } catch (err) {
+      setClientErrors(['Network error during dry run']);
+      setStep('upload');
     } finally {
-      setProcessing(false);
+      setDryRunLoading(false);
     }
+  };
+
+  // ---- IMPORT ----
+  const handleImport = async () => {
+    if (!dryRunReport || dryRunReport.validRows === 0) return;
+    setImportLoading(true);
+    setStep('importing');
+    setImportProgress(10);
+    setImportProgressLabel('Creating import batch…');
+
+    try {
+      // Step 1: Insert assets via API
+      setImportProgress(30);
+      setImportProgressLabel('Inserting assets, species, keywords…');
+
+      const res = await fetch('/api/admin/import', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          mode: 'import',
+          rows: csvRows,
+          batchName,
+          batchNotes,
+        }),
+      });
+      const data = await res.json();
+
+      if (!res.ok) {
+        setClientErrors([data.error || 'Import failed']);
+        setStep('confirm');
+        setImportLoading(false);
+        return;
+      }
+
+      setImportProgress(60);
+      setImportProgressLabel('Uploading thumbnails…');
+
+      // Step 2: Upload thumbnail files
+      let thumbUploaded = 0;
+      let previewUploaded = 0;
+
+      if (thumbnailFiles.length > 0 && data.batchId) {
+        // Fetch the newly created assets to map filenames to asset IDs
+        const supabase = createClient();
+        const { data: newAssets } = await supabase
+          .from('assets')
+          .select('id, public_asset_id, slug')
+          .eq('is_demo', false)
+          .order('created_at', { ascending: false })
+          .limit(csvRows.length + 10);
+
+        const assetMap = new Map<string, string>();
+        (newAssets || []).forEach((a: { id: string; public_asset_id: string | null; slug: string }) => {
+          if (a.public_asset_id) assetMap.set(a.public_asset_id.toLowerCase(), a.id);
+          assetMap.set(a.slug, a.id);
+        });
+
+        for (const file of thumbnailFiles) {
+          const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
+          const assetId = assetMap.get(baseName) || assetMap.get(baseName.replace(/_thumb$/, ''));
+          if (!assetId) continue;
+
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('assetId', assetId);
+          fd.append('fileLevel', 'thumbnail');
+
+          const uploadRes = await fetch('/api/admin/import/upload', { method: 'POST', body: fd });
+          if (uploadRes.ok) thumbUploaded++;
+        }
+      }
+
+      setImportProgress(80);
+      setImportProgressLabel('Uploading watermarked previews…');
+
+      if (previewFiles.length > 0 && data.batchId) {
+        const supabase = createClient();
+        const { data: newAssets } = await supabase
+          .from('assets')
+          .select('id, public_asset_id, slug')
+          .eq('is_demo', false)
+          .order('created_at', { ascending: false })
+          .limit(csvRows.length + 10);
+
+        const assetMap = new Map<string, string>();
+        (newAssets || []).forEach((a: { id: string; public_asset_id: string | null; slug: string }) => {
+          if (a.public_asset_id) assetMap.set(a.public_asset_id.toLowerCase(), a.id);
+          assetMap.set(a.slug, a.id);
+        });
+
+        for (const file of previewFiles) {
+          const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
+          const assetId = assetMap.get(baseName) || assetMap.get(baseName.replace(/_preview$/, '').replace(/_watermark$/, ''));
+          if (!assetId) continue;
+
+          const fd = new FormData();
+          fd.append('file', file);
+          fd.append('assetId', assetId);
+          fd.append('fileLevel', 'preview');
+
+          const uploadRes = await fetch('/api/admin/import/upload', { method: 'POST', body: fd });
+          if (uploadRes.ok) previewUploaded++;
+        }
+      }
+
+      setImportProgress(100);
+      setImportProgressLabel('Import complete');
+
+      setImportReport({
+        ...data.report,
+        thumbnailsUploaded: thumbUploaded,
+        previewsUploaded: previewUploaded,
+      } as ImportReport & { thumbnailsUploaded: number; previewsUploaded: number });
+
+      setStep('done');
+      loadBatches();
+    } catch (err) {
+      setClientErrors(['Network error during import']);
+      setStep('confirm');
+    } finally {
+      setImportLoading(false);
+    }
+  };
+
+  // ---- RESET ----
+  const handleReset = () => {
+    setCsvFile(null);
+    setCsvRows([]);
+    setClientErrors([]);
+    setClientWarnings([]);
+    setThumbnailFiles([]);
+    setPreviewFiles([]);
+    setDryRunReport(null);
+    setImportReport(null);
+    setStep('upload');
+    setImportProgress(0);
   };
 
   if (loading || !user || !profile) {
-    return <div className="min-h-screen bg-background flex items-center justify-center">
-      <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin" />
-    </div>;
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin" />
+      </div>
+    );
   }
+
+  const isAdmin = ['administrator', 'super_admin'].includes(profile.role);
 
   return (
     <div className="min-h-screen bg-background">
@@ -144,186 +413,550 @@ export default function AdminImportsPage() {
           Back to admin
         </Link>
 
-        <div className="max-w-2xl">
-          <div className="flex items-center gap-3 mb-8">
+        <div className="flex items-center justify-between mb-8">
+          <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
               <Upload size={18} className="text-muted-foreground" />
             </div>
             <div>
-              <h1 className="text-xl font-bold text-foreground">CSV Import Validator</h1>
-              <p className="text-sm text-muted-foreground">Validate Codex CSV exports before import</p>
+              <h1 className="text-xl font-bold text-foreground">Secure Import Pipeline</h1>
+              <p className="text-sm text-muted-foreground">Phase 4.3 — Codex Pilot Batch Import</p>
             </div>
           </div>
+          {step !== 'upload' && (
+            <button onClick={handleReset} className="btn-outline text-xs flex items-center gap-1.5">
+              <RefreshCw size={12} />
+              New Import
+            </button>
+          )}
+        </div>
 
-          {/* Security notice */}
-          <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6">
-            <div className="flex items-start gap-3">
-              <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
-              <div>
-                <p className="text-sm font-semibold text-amber-800 mb-1">Security validation active</p>
-                <p className="text-xs text-amber-700 leading-relaxed">
-                  Files are validated client-side. Rejected patterns: Windows paths, Dropbox paths, GPS coordinates, email addresses, phone numbers, and unknown sensitive columns.
-                </p>
+        {/* Step indicator */}
+        <div className="flex items-center gap-2 mb-8 overflow-x-auto pb-1">
+          {(['upload', 'dry_run', 'confirm', 'importing', 'done'] as Step[]).map((s, i) => {
+            const labels: Record<Step, string> = {
+              upload: '1. Upload Files',
+              dry_run: '2. Dry Run',
+              confirm: '3. Review & Confirm',
+              importing: '4. Importing',
+              done: '5. Complete',
+            };
+            const isActive = step === s;
+            const isPast = ['upload', 'dry_run', 'confirm', 'importing', 'done'].indexOf(step) > i;
+            return (
+              <React.Fragment key={s}>
+                <div className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
+                  isActive ? 'bg-secondary text-white' : isPast ?'bg-green-100 text-green-700': 'bg-muted text-muted-foreground'
+                }`}>
+                  {isPast && !isActive && <CheckCircle2 size={12} />}
+                  {labels[s]}
+                </div>
+                {i < 4 && <div className="w-4 h-px bg-border shrink-0" />}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Main panel */}
+          <div className="lg:col-span-2 space-y-6">
+
+            {/* Security notice */}
+            <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+              <div className="flex items-start gap-3">
+                <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-amber-800 mb-1">Security validation active</p>
+                  <p className="text-xs text-amber-700 leading-relaxed">
+                    Rejected: Windows paths, Dropbox paths, GPS coordinates, emails, phones, secrets, original file paths.
+                    All assets imported with <code className="bg-amber-100 px-1 rounded">is_demo=false</code>, <code className="bg-amber-100 px-1 rounded">review_status=under_review</code>, <code className="bg-amber-100 px-1 rounded">publication_status=preview_only</code>.
+                    No auto-approval. No originals uploaded.
+                  </p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* File upload */}
-          <div className="bg-card rounded-xl border border-border p-6 mb-6">
-            <label className="block text-xs font-semibold text-foreground mb-3 uppercase tracking-wide">
-              Select CSV File
-            </label>
-            <div className="border-2 border-dashed border-border rounded-xl p-8 text-center hover:border-secondary/40 transition-colors cursor-pointer"
-              onClick={() => document.getElementById('csv-input')?.click()}>
-              <FileText size={32} className="text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm font-medium text-foreground mb-1">
-                {file ? file.name : 'Click to select a CSV file'}
-              </p>
-              <p className="text-xs text-muted-foreground">
-                {file ? `${(file.size / 1024).toFixed(1)} KB` : 'Only .csv files accepted'}
-              </p>
-              <input
-                id="csv-input"
-                type="file"
-                accept=".csv"
-                onChange={handleFileChange}
-                className="hidden"
-              />
-            </div>
+            {/* STEP: UPLOAD */}
+            {(step === 'upload' || step === 'dry_run') && (
+              <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+                <h2 className="text-sm font-semibold text-foreground">Step 1 — Select Files</h2>
 
-            {file && (
-              <button
-                onClick={handleValidate}
-                disabled={processing}
-                className="btn-primary w-full justify-center mt-4"
-              >
-                {processing ? (
-                  <span className="flex items-center gap-2">
-                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z" />
-                    </svg>
-                    Validating…
-                  </span>
-                ) : (
-                  'Validate CSV'
+                {/* CSV Upload */}
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                    Pilot Assets CSV <span className="text-red-500">*</span>
+                  </label>
+                  <div
+                    className="border-2 border-dashed border-border rounded-xl p-6 text-center hover:border-secondary/40 transition-colors cursor-pointer"
+                    onClick={() => document.getElementById('csv-input')?.click()}
+                  >
+                    <FileText size={28} className="text-muted-foreground mx-auto mb-2" />
+                    <p className="text-sm font-medium text-foreground">
+                      {csvFile ? csvFile.name : 'Click to select pilot_assets.csv'}
+                    </p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      {csvFile ? `${(csvFile.size / 1024).toFixed(1)} KB · ${csvRows.length} rows detected` : 'Only .csv files accepted'}
+                    </p>
+                    <input id="csv-input" type="file" accept=".csv" onChange={handleCsvChange} className="hidden" />
+                  </div>
+                </div>
+
+                {/* Thumbnail Upload */}
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                    Thumbnails (optional) — bucket: asset-thumbnails
+                  </label>
+                  <div
+                    className="border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-secondary/40 transition-colors cursor-pointer"
+                    onClick={() => document.getElementById('thumb-input')?.click()}
+                  >
+                    <Image size={22} className="text-muted-foreground mx-auto mb-1" />
+                    <p className="text-xs text-muted-foreground">
+                      {thumbnailFiles.length > 0 ? `${thumbnailFiles.length} files selected` : 'Select thumbnail images (jpg, png, webp)'}
+                    </p>
+                    <input id="thumb-input" type="file" accept="image/*" multiple onChange={handleThumbnailFiles} className="hidden" />
+                  </div>
+                  {thumbnailFiles.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Files: {thumbnailFiles.slice(0, 3).map(f => f.name).join(', ')}{thumbnailFiles.length > 3 ? ` +${thumbnailFiles.length - 3} more` : ''}
+                    </p>
+                  )}
+                </div>
+
+                {/* Preview Upload */}
+                <div>
+                  <label className="block text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                    Watermarked Previews (optional) — bucket: asset-previews
+                  </label>
+                  <div
+                    className="border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-secondary/40 transition-colors cursor-pointer"
+                    onClick={() => document.getElementById('preview-input')?.click()}
+                  >
+                    <FileImage size={22} className="text-muted-foreground mx-auto mb-1" />
+                    <p className="text-xs text-muted-foreground">
+                      {previewFiles.length > 0 ? `${previewFiles.length} files selected` : 'Select watermarked preview images'}
+                    </p>
+                    <input id="preview-input" type="file" accept="image/*" multiple onChange={handlePreviewFiles} className="hidden" />
+                  </div>
+                  {previewFiles.length > 0 && (
+                    <p className="text-xs text-muted-foreground mt-1">
+                      Files: {previewFiles.slice(0, 3).map(f => f.name).join(', ')}{previewFiles.length > 3 ? ` +${previewFiles.length - 3} more` : ''}
+                    </p>
+                  )}
+                </div>
+
+                {/* Batch config */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5">Batch Name</label>
+                    <input
+                      type="text"
+                      value={batchName}
+                      onChange={(e) => setBatchName(e.target.value)}
+                      className="input-base w-full text-sm"
+                      placeholder="Codex Pilot 100"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5">Notes</label>
+                    <input
+                      type="text"
+                      value={batchNotes}
+                      onChange={(e) => setBatchNotes(e.target.value)}
+                      className="input-base w-full text-sm"
+                      placeholder="Import notes…"
+                    />
+                  </div>
+                </div>
+
+                {/* Client-side errors */}
+                {clientErrors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-red-700 mb-2 flex items-center gap-2">
+                      <XCircle size={14} />
+                      Validation errors ({clientErrors.length})
+                    </p>
+                    <ul className="space-y-1">
+                      {clientErrors.map((e, i) => (
+                        <li key={i} className="text-xs text-red-600">• {e}</li>
+                      ))}
+                    </ul>
+                  </div>
                 )}
-              </button>
+
+                {/* Client-side warnings */}
+                {clientWarnings.length > 0 && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-amber-700 mb-2 flex items-center gap-2">
+                      <AlertCircle size={14} />
+                      Warnings ({clientWarnings.length})
+                    </p>
+                    <ul className="space-y-1">
+                      {clientWarnings.map((w, i) => (
+                        <li key={i} className="text-xs text-amber-600">• {w}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {/* Dry run button */}
+                {csvFile && csvRows.length > 0 && clientErrors.length === 0 && isAdmin && (
+                  <button
+                    onClick={handleDryRun}
+                    disabled={dryRunLoading}
+                    className="btn-primary w-full justify-center"
+                  >
+                    {dryRunLoading ? (
+                      <span className="flex items-center gap-2">
+                        <Loader2 size={14} className="animate-spin" />
+                        Running dry run analysis…
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-2">
+                        <Eye size={14} />
+                        Run Dry Run Analysis ({csvRows.length} rows)
+                      </span>
+                    )}
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* STEP: CONFIRM (dry run results) */}
+            {(step === 'confirm' || step === 'done') && dryRunReport && (
+              <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+                <h2 className="text-sm font-semibold text-foreground">Step 2 — Dry Run Report</h2>
+
+                {/* Summary grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Total rows', value: dryRunReport.totalRows, color: 'text-foreground' },
+                    { label: 'Valid rows', value: dryRunReport.validRows, color: 'text-green-600' },
+                    { label: 'Rejected', value: dryRunReport.rejectedRows, color: 'text-red-600' },
+                    { label: 'Duplicates', value: dryRunReport.duplicatesDetected, color: 'text-amber-600' },
+                  ].map((s) => (
+                    <div key={s.label} className="bg-muted/50 rounded-xl p-3 text-center">
+                      <p className={`text-2xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+                    </div>
+                  ))}
+                </div>
+
+                {/* New entities */}
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="flex items-center gap-2 bg-muted/30 rounded-xl p-3">
+                    <Fish size={14} className="text-secondary shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">{dryRunReport.newSpecies.length} new species</p>
+                      {dryRunReport.newSpecies.length > 0 && (
+                        <p className="text-xs text-muted-foreground truncate">{dryRunReport.newSpecies.slice(0, 2).join(', ')}{dryRunReport.newSpecies.length > 2 ? '…' : ''}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 bg-muted/30 rounded-xl p-3">
+                    <Tag size={14} className="text-secondary shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">{dryRunReport.newCategories.length} categories</p>
+                      {dryRunReport.newCategories.length > 0 && (
+                        <p className="text-xs text-muted-foreground truncate">{dryRunReport.newCategories.slice(0, 2).join(', ')}{dryRunReport.newCategories.length > 2 ? '…' : ''}</p>
+                      )}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 bg-muted/30 rounded-xl p-3">
+                    <Hash size={14} className="text-secondary shrink-0" />
+                    <div>
+                      <p className="text-xs font-semibold text-foreground">{dryRunReport.newKeywords.length} keywords</p>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Rejection details */}
+                {dryRunReport.rejectionDetails.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setShowRejections(!showRejections)}
+                      className="flex items-center gap-2 text-sm font-semibold text-red-600 mb-2"
+                    >
+                      <XCircle size={14} />
+                      Rejection details ({dryRunReport.rejectionDetails.length})
+                      {showRejections ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    {showRejections && (
+                      <div className="bg-red-50 border border-red-200 rounded-xl p-3 max-h-48 overflow-y-auto">
+                        {dryRunReport.rejectionDetails.map((r, i) => (
+                          <p key={i} className="text-xs text-red-700 py-0.5">• {r.reason}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Preview */}
+                {dryRunReport.preview.length > 0 && (
+                  <div>
+                    <button
+                      onClick={() => setShowPreview(!showPreview)}
+                      className="flex items-center gap-2 text-sm font-semibold text-foreground mb-2"
+                    >
+                      <Eye size={14} />
+                      Preview first {dryRunReport.preview.length} valid rows
+                      {showPreview ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                    </button>
+                    {showPreview && (
+                      <div className="overflow-x-auto border border-border rounded-xl">
+                        <table className="w-full text-xs">
+                          <thead>
+                            <tr className="bg-muted/50 border-b border-border">
+                              {Object.keys(dryRunReport.preview[0]).slice(0, 6).map((col) => (
+                                <th key={col} className="text-left px-3 py-2 text-muted-foreground font-semibold whitespace-nowrap">{col}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {dryRunReport.preview.map((row, i) => (
+                              <tr key={i} className="border-b border-border">
+                                {Object.values(row).slice(0, 6).map((val, j) => (
+                                  <td key={j} className="px-3 py-2 text-foreground max-w-32 truncate">{val || '—'}</td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Statuses notice */}
+                <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-blue-800 mb-1">Import statuses (enforced)</p>
+                  <div className="flex flex-wrap gap-2 mt-1">
+                    {['is_demo = false', 'review_status = under_review', 'publication_status = preview_only', 'rights_info = review_required', 'commercial_use = false'].map((s) => (
+                      <span key={s} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-mono-data">{s}</span>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Confirm import button */}
+                {step === 'confirm' && dryRunReport.validRows > 0 && isAdmin && (
+                  <div className="border-t border-border pt-4">
+                    <p className="text-sm text-muted-foreground mb-3">
+                      Ready to import <strong className="text-foreground">{dryRunReport.validRows} assets</strong> into Supabase.
+                      {thumbnailFiles.length > 0 && ` ${thumbnailFiles.length} thumbnails`}
+                      {previewFiles.length > 0 && ` + ${previewFiles.length} previews`}
+                      {' '}will be uploaded.
+                    </p>
+                    <button
+                      onClick={handleImport}
+                      disabled={importLoading}
+                      className="btn-primary w-full justify-center"
+                    >
+                      <Play size={14} />
+                      Confirm Import — {dryRunReport.validRows} assets
+                    </button>
+                  </div>
+                )}
+
+                {step === 'confirm' && dryRunReport.validRows === 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4 text-sm text-red-700">
+                    No valid rows to import. Fix the errors above and re-run the dry run.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* STEP: IMPORTING */}
+            {step === 'importing' && (
+              <div className="bg-card rounded-xl border border-border p-8 text-center">
+                <Loader2 size={32} className="text-secondary animate-spin mx-auto mb-4" />
+                <h2 className="text-lg font-semibold text-foreground mb-2">Import in progress…</h2>
+                <p className="text-sm text-muted-foreground mb-4">{importProgressLabel}</p>
+                <div className="w-full bg-muted rounded-full h-2 mb-2">
+                  <div
+                    className="bg-secondary h-2 rounded-full transition-all duration-500"
+                    style={{ width: `${importProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">{importProgress}%</p>
+              </div>
+            )}
+
+            {/* STEP: DONE */}
+            {step === 'done' && importReport && (
+              <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+                <div className={`flex items-start gap-3 p-4 rounded-xl border ${
+                  importReport.finalStatus === 'completed' ? 'bg-green-50 border-green-200' :
+                  importReport.finalStatus === 'partial'? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'
+                }`}>
+                  {importReport.finalStatus === 'completed' ? (
+                    <CheckCircle2 size={20} className="text-green-600 shrink-0 mt-0.5" />
+                  ) : importReport.finalStatus === 'partial' ? (
+                    <AlertCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
+                  ) : (
+                    <XCircle size={20} className="text-red-600 shrink-0 mt-0.5" />
+                  )}
+                  <div>
+                    <p className={`font-semibold ${
+                      importReport.finalStatus === 'completed' ? 'text-green-800' :
+                      importReport.finalStatus === 'partial' ? 'text-amber-800' : 'text-red-800'
+                    }`}>
+                      Import {importReport.finalStatus}
+                    </p>
+                    <p className="text-sm text-muted-foreground mt-0.5">
+                      {importReport.importedCount} assets imported · {importReport.rejectedRows} rejected
+                    </p>
+                  </div>
+                </div>
+
+                {/* Import report grid */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    { label: 'Assets imported', value: importReport.importedCount, icon: FileImage },
+                    { label: 'Species created', value: importReport.speciesCreated, icon: Fish },
+                    { label: 'Keywords created', value: importReport.keywordsCreated, icon: Hash },
+                    { label: 'Rejected rows', value: importReport.rejectedRows, icon: XCircle },
+                  ].map((s) => {
+                    const Icon = s.icon;
+                    return (
+                      <div key={s.label} className="bg-muted/50 rounded-xl p-3">
+                        <div className="flex items-center gap-1.5 mb-1">
+                          <Icon size={12} className="text-muted-foreground" />
+                          <p className="text-xs text-muted-foreground">{s.label}</p>
+                        </div>
+                        <p className="text-xl font-bold font-mono-data text-foreground">{s.value}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Confirmations */}
+                <div className="space-y-2">
+                  {[
+                    '✓ No original files imported',
+                    '✓ No Dropbox access used',
+                    '✓ No Windows paths imported',
+                    '✓ No GPS coordinates imported',
+                    '✓ All assets set to is_demo=false',
+                    '✓ All assets set to review_status=under_review',
+                    '✓ No asset auto-approved or auto-published',
+                  ].map((c) => (
+                    <p key={c} className="text-xs text-green-700 flex items-center gap-1.5">
+                      <CheckCircle2 size={11} className="shrink-0" />
+                      {c.replace('✓ ', '')}
+                    </p>
+                  ))}
+                </div>
+
+                {importReport.importErrors.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-red-700 mb-2">Import errors ({importReport.importErrors.length})</p>
+                    {importReport.importErrors.map((e, i) => (
+                      <p key={i} className="text-xs text-red-600">• {e}</p>
+                    ))}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-2">
+                  <Link href="/admin/assets" className="btn-primary flex-1 justify-center text-sm">
+                    View Imported Assets
+                  </Link>
+                  <button onClick={handleReset} className="btn-outline flex-1 justify-center text-sm">
+                    New Import
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
-          {/* Results */}
-          {result && (
-            <div className="space-y-4">
-              {/* Summary */}
-              <div className={`rounded-xl border p-4 flex items-start gap-3 ${result.valid ? 'bg-green-50 border-green-200' : 'bg-red-50 border-red-200'}`}>
-                {result.valid ? (
-                  <CheckCircle2 size={18} className="text-green-600 shrink-0 mt-0.5" />
-                ) : (
-                  <XCircle size={18} className="text-red-600 shrink-0 mt-0.5" />
-                )}
-                <div>
-                  <p className={`text-sm font-semibold ${result.valid ? 'text-green-800' : 'text-red-800'}`}>
-                    {result.valid ? 'Validation passed' : 'Validation failed'}
-                  </p>
-                  <p className={`text-xs mt-0.5 ${result.valid ? 'text-green-700' : 'text-red-700'}`}>
-                    {result.totalRows} rows · {result.rejectedRows} rejected · {result.errors.length} errors · {result.warnings.length} warnings
-                  </p>
-                </div>
-              </div>
-
-              {/* Errors */}
-              {result.errors.length > 0 && (
-                <div className="bg-card rounded-xl border border-border p-4">
-                  <h3 className="text-sm font-semibold text-red-600 mb-3 flex items-center gap-2">
-                    <XCircle size={14} />
-                    Errors ({result.errors.length})
-                  </h3>
-                  <ul className="space-y-1.5">
-                    {result.errors.map((err, i) => (
-                      <li key={`err-${i}`} className="text-xs text-red-700 flex items-start gap-2">
-                        <span className="text-red-400 shrink-0 mt-0.5">•</span>
-                        {err}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Warnings */}
-              {result.warnings.length > 0 && (
-                <div className="bg-card rounded-xl border border-border p-4">
-                  <h3 className="text-sm font-semibold text-amber-600 mb-3 flex items-center gap-2">
-                    <AlertCircle size={14} />
-                    Warnings ({result.warnings.length})
-                  </h3>
-                  <ul className="space-y-1.5">
-                    {result.warnings.map((w, i) => (
-                      <li key={`warn-${i}`} className="text-xs text-amber-700 flex items-start gap-2">
-                        <span className="text-amber-400 shrink-0 mt-0.5">•</span>
-                        {w}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Preview */}
-              {result.preview.length > 0 && (
-                <div className="bg-card rounded-xl border border-border p-4">
-                  <button
-                    onClick={() => setShowPreview(!showPreview)}
-                    className="flex items-center gap-2 text-sm font-semibold text-foreground mb-3"
-                  >
-                    <Eye size={14} />
-                    Preview (first {result.preview.length} rows)
-                    <span className="text-muted-foreground font-normal">{showPreview ? '▲' : '▼'}</span>
-                  </button>
-                  {showPreview && (
-                    <div className="overflow-x-auto">
-                      <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-border">
-                            {Object.keys(result.preview[0]).map((col) => (
-                              <th key={col} className="text-left px-2 py-1.5 text-muted-foreground font-semibold whitespace-nowrap">
-                                {col}
-                              </th>
-                            ))}
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {result.preview.map((row, i) => (
-                            <tr key={`prev-${i}`} className="border-b border-border">
-                              {Object.values(row).map((val, j) => (
-                                <td key={`cell-${j}`} className="px-2 py-1.5 text-foreground max-w-32 truncate">
-                                  {val || '—'}
-                                </td>
-                              ))}
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* No auto-insert notice */}
-              <div className="bg-muted/50 rounded-xl p-4 text-xs text-muted-foreground leading-relaxed">
-                <strong>Note:</strong> This validator only checks the CSV format and content. No data has been inserted into the database. Actual import requires manual review and confirmation by a super_admin.
+          {/* Sidebar */}
+          <div className="space-y-5">
+            {/* Allowed columns */}
+            <div className="bg-card rounded-xl border border-border p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <ClipboardList size={14} />
+                Allowed CSV Columns
+              </h3>
+              <div className="flex flex-wrap gap-1.5">
+                {ALLOWED_CSV_COLUMNS.map((col) => (
+                  <span key={col} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono-data">
+                    {col}
+                  </span>
+                ))}
               </div>
             </div>
-          )}
 
-          {/* Allowed columns reference */}
-          <div className="mt-8 bg-card rounded-xl border border-border p-5">
-            <h3 className="text-sm font-semibold text-foreground mb-3">Allowed CSV Columns</h3>
-            <div className="flex flex-wrap gap-1.5">
-              {ALLOWED_CSV_COLUMNS.map((col) => (
-                <span key={col} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full font-mono-data">
-                  {col}
-                </span>
-              ))}
+            {/* Storage buckets notice */}
+            <div className="bg-card rounded-xl border border-border p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Package size={14} />
+                Storage Buckets Required
+              </h3>
+              <div className="space-y-2">
+                {[
+                  { name: 'asset-thumbnails', desc: 'Thumbnail images', required: true },
+                  { name: 'asset-previews', desc: 'Watermarked previews', required: true },
+                ].map((b) => (
+                  <div key={b.name} className="flex items-start gap-2">
+                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                    <div>
+                      <p className="text-xs font-mono-data text-foreground">{b.name}</p>
+                      <p className="text-xs text-muted-foreground">{b.desc}</p>
+                    </div>
+                  </div>
+                ))}
+                <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
+                  Create these buckets in Supabase Dashboard → Storage before uploading files.
+                </p>
+              </div>
+            </div>
+
+            {/* Batch history */}
+            <div className="bg-card rounded-xl border border-border p-5">
+              <button
+                onClick={() => setShowBatchHistory(!showBatchHistory)}
+                className="flex items-center justify-between w-full"
+              >
+                <h3 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                  <ClipboardList size={14} />
+                  Import History
+                </h3>
+                {showBatchHistory ? <ChevronUp size={14} className="text-muted-foreground" /> : <ChevronDown size={14} className="text-muted-foreground" />}
+              </button>
+
+              {showBatchHistory && (
+                <div className="mt-3 space-y-2">
+                  {batchesLoading ? (
+                    <div className="space-y-2">
+                      {[1, 2].map((i) => (
+                        <div key={i} className="h-12 bg-muted rounded-lg animate-pulse" />
+                      ))}
+                    </div>
+                  ) : batches.length === 0 ? (
+                    <p className="text-xs text-muted-foreground">No import batches yet</p>
+                  ) : (
+                    batches.map((batch) => (
+                      <div key={batch.id} className="border border-border rounded-lg p-3">
+                        <div className="flex items-center justify-between mb-1">
+                          <p className="text-xs font-semibold text-foreground truncate">{batch.source_name || 'Unnamed batch'}</p>
+                          <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${batchStatusColors[batch.status] || 'bg-gray-100 text-gray-600'}`}>
+                            {batch.status}
+                          </span>
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {batch.processed_rows}/{batch.total_rows} rows · {batch.rejected_rows} rejected
+                        </p>
+                        <p className="text-xs text-muted-foreground font-mono-data">
+                          {new Date(batch.created_at).toLocaleDateString()}
+                        </p>
+                      </div>
+                    ))
+                  )}
+                  <button onClick={loadBatches} className="text-xs text-secondary hover:underline flex items-center gap-1">
+                    <RefreshCw size={10} />
+                    Refresh
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

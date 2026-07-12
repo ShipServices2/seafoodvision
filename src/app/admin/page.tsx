@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
+import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Icon from '@/components/ui/AppIcon';
@@ -16,6 +17,11 @@ interface AdminStats {
   underReview: number;
   totalSpecies: number;
   totalCategories: number;
+  realAssets: number;
+  demoAssets: number;
+  realSpecies: number;
+  demoSpecies: number;
+  previewOnly: number;
   loading: boolean;
 }
 
@@ -23,7 +29,9 @@ export default function AdminPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<AdminStats>({
-    totalAssets: 0, underReview: 0, totalSpecies: 0, totalCategories: 0, loading: true,
+    totalAssets: 0, underReview: 0, totalSpecies: 0, totalCategories: 0,
+    realAssets: 0, demoAssets: 0, realSpecies: 0, demoSpecies: 0, previewOnly: 0,
+    loading: true,
   });
 
   useEffect(() => {
@@ -44,12 +52,18 @@ export default function AdminPage() {
       supabase.from('assets').select('*', { count: 'exact', head: true }).eq('review_status', 'under_review'),
       supabase.from('species').select('*', { count: 'exact', head: true }),
       supabase.from('categories').select('*', { count: 'exact', head: true }),
-    ]).then(([a, ur, sp, cat]) => {
+      fetchExtendedCatalogStats(),
+    ]).then(([a, ur, sp, cat, extended]) => {
       setStats({
         totalAssets: a.count ?? 0,
         underReview: ur.count ?? 0,
         totalSpecies: sp.count ?? 0,
         totalCategories: cat.count ?? 0,
+        realAssets: extended.realAssets,
+        demoAssets: extended.demoAssets,
+        realSpecies: extended.realSpecies,
+        demoSpecies: extended.demoSpecies,
+        previewOnly: extended.previewOnly,
         loading: false,
       });
     });
@@ -129,18 +143,34 @@ export default function AdminPage() {
 
         {/* Stats row */}
         {!stats.loading && (
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
-            {[
-              { label: 'Total Assets', value: stats.totalAssets },
-              { label: 'Pending Review', value: stats.underReview },
-              { label: 'Species', value: stats.totalSpecies },
-              { label: 'Categories', value: stats.totalCategories },
-            ].map((s) => (
-              <div key={s.label} className="bg-card rounded-xl border border-border p-4">
-                <p className="text-2xl font-bold text-foreground font-mono-data">{s.value}</p>
-                <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
-              </div>
-            ))}
+          <div className="space-y-4 mb-8">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: 'Total Assets', value: stats.totalAssets },
+                { label: 'Pending Review', value: stats.underReview },
+                { label: 'Species', value: stats.totalSpecies },
+                { label: 'Categories', value: stats.totalCategories },
+              ].map((s) => (
+                <div key={s.label} className="bg-card rounded-xl border border-border p-4">
+                  <p className="text-2xl font-bold text-foreground font-mono-data">{s.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+                </div>
+              ))}
+            </div>
+            {/* Real vs Demo separation */}
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: 'Real Assets', value: stats.realAssets, color: 'text-green-600' },
+                { label: 'Demo Assets', value: stats.demoAssets, color: 'text-amber-600' },
+                { label: 'Real Species', value: stats.realSpecies, color: 'text-green-600' },
+                { label: 'Preview Only', value: stats.previewOnly, color: 'text-blue-600' },
+              ].map((s) => (
+                <div key={s.label} className="bg-card rounded-xl border border-border p-4">
+                  <p className={`text-2xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
+                  <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
