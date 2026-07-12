@@ -3,22 +3,66 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CheckCircle2 } from 'lucide-react';
-import { toast } from 'sonner';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import { createClient } from '@/lib/supabase/client';
+
+const SUBJECTS = [
+  { value: 'licensing', label: 'Licensing enquiry' },
+  { value: 'enterprise', label: 'Enterprise / API' },
+  { value: 'copyright', label: 'Copyright claim' },
+  { value: 'general', label: 'General question' },
+];
 
 export default function ContactPage() {
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
-  const [subject, setSubject] = useState('');
-  const [message, setMessage] = useState('');
+  const [form, setForm] = useState({
+    name: '',
+    email: '',
+    company: '',
+    country: '',
+    role: '',
+    subject: '',
+    message: '',
+  });
   const [sent, setSent] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
+    setForm((prev) => ({ ...prev, [e.target.name]: e.target.value }));
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // Form submission placeholder — backend integration pending
-    setSent(true);
-    toast.success('Message sent. We will get back to you shortly.');
+    if (!form.name.trim() || !form.email.trim() || !form.subject || !form.message.trim()) return;
+
+    setSubmitting(true);
+    setError(null);
+
+    try {
+      const supabase = createClient();
+      const { error: dbError } = await supabase.from('contact_requests').insert({
+        name: form.name.trim(),
+        email: form.email.trim(),
+        company: form.company.trim() || null,
+        country: form.country.trim() || null,
+        role: form.role.trim() || null,
+        subject: form.subject,
+        message: form.message.trim(),
+        status: 'new',
+      });
+
+      if (dbError) {
+        setError('Failed to send message. Please try again.');
+        console.error('Contact form error:', dbError.message);
+      } else {
+        setSent(true);
+      }
+    } catch {
+      setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -67,57 +111,123 @@ export default function ContactPage() {
               </div>
             ) : (
               <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+                {error && (
+                  <div className="bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+                    {error}
+                  </div>
+                )}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+                      Name <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="text"
+                      name="name"
+                      value={form.name}
+                      onChange={handleChange}
+                      placeholder="Your name"
+                      className="input-base w-full"
+                      required
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+                      Email <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="email"
+                      name="email"
+                      value={form.email}
+                      onChange={handleChange}
+                      placeholder="your@email.com"
+                      className="input-base w-full"
+                      required
+                    />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Company</label>
+                    <input
+                      type="text"
+                      name="company"
+                      value={form.company}
+                      onChange={handleChange}
+                      placeholder="Your company"
+                      className="input-base w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Country</label>
+                    <input
+                      type="text"
+                      name="country"
+                      value={form.country}
+                      onChange={handleChange}
+                      placeholder="Your country"
+                      className="input-base w-full"
+                    />
+                  </div>
+                </div>
                 <div>
-                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Name</label>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Role</label>
                   <input
                     type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    placeholder="Your name"
+                    name="role"
+                    value={form.role}
+                    onChange={handleChange}
+                    placeholder="e.g. Buyer, Photographer, Retailer"
                     className="input-base w-full"
-                    required
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Email</label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="your@email.com"
-                    className="input-base w-full"
-                    required
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Subject</label>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+                    Subject <span className="text-red-500">*</span>
+                  </label>
                   <select
-                    value={subject}
-                    onChange={(e) => setSubject(e.target.value)}
+                    name="subject"
+                    value={form.subject}
+                    onChange={handleChange}
                     className="input-base w-full"
                     required
                   >
                     <option value="">Select a subject</option>
-                    <option value="licensing">Licensing enquiry</option>
-                    <option value="enterprise">Enterprise / API</option>
-                    <option value="copyright">Copyright claim</option>
-                    <option value="general">General question</option>
+                    {SUBJECTS.map((s) => (
+                      <option key={s.value} value={s.value}>{s.label}</option>
+                    ))}
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">Message</label>
+                  <label className="block text-xs font-semibold text-foreground mb-1.5 uppercase tracking-wide">
+                    Message <span className="text-red-500">*</span>
+                  </label>
                   <textarea
-                    value={message}
-                    onChange={(e) => setMessage(e.target.value)}
+                    name="message"
+                    value={form.message}
+                    onChange={handleChange}
                     placeholder="Your message…"
                     rows={5}
                     className="input-base w-full resize-none"
                     required
                   />
                 </div>
-                <button type="submit" className="btn-primary w-full justify-center mt-2">
-                  Send message
-                  <ArrowRight size={14} />
+                <button
+                  type="submit"
+                  disabled={submitting}
+                  className="btn-primary w-full justify-center mt-2 disabled:opacity-60 disabled:cursor-not-allowed"
+                >
+                  {submitting ? (
+                    <>
+                      <span className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      Sending…
+                    </>
+                  ) : (
+                    <>
+                      Send message
+                      <ArrowRight size={14} />
+                    </>
+                  )}
                 </button>
               </form>
             )}
