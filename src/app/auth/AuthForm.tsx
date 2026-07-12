@@ -9,13 +9,17 @@ import Link from 'next/link';
 
 type AuthMode = 'login' | 'register';
 
-export default function AuthForm() {
+interface AuthFormProps {
+  defaultMode?: AuthMode;
+}
+
+export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const next = searchParams.get('next') || '/';
   const { user, loading, signIn, signUp } = useAuth();
 
-  const [mode, setMode] = useState<AuthMode>('login');
+  const [mode, setMode] = useState<AuthMode>(defaultMode);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [displayName, setDisplayName] = useState('');
@@ -143,6 +147,17 @@ export default function AuthForm() {
             </button>
           </div>
 
+          {mode === 'login' && (
+            <div className="text-right -mt-2">
+              <Link
+                href="/auth/forgot-password"
+                className="text-xs text-secondary hover:underline font-medium"
+              >
+                Forgot password?
+              </Link>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={submitting}
@@ -169,7 +184,10 @@ export default function AuthForm() {
           <div className="mt-5 flex items-start gap-2.5 bg-muted/60 rounded-xl p-3.5">
             <CheckCircle2 size={14} className="text-secondary mt-0.5 shrink-0" />
             <p className="text-xs text-muted-foreground leading-relaxed">
-              By creating an account you agree to our terms of service. Your data is processed in accordance with our privacy policy.
+              By creating an account you agree to our{' '}
+              <Link href="/terms" className="text-secondary hover:underline">terms of service</Link>.
+              Your data is processed in accordance with our{' '}
+              <Link href="/privacy" className="text-secondary hover:underline">privacy policy</Link>.
             </p>
           </div>
         )}

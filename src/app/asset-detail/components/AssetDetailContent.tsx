@@ -24,9 +24,9 @@ function formatDimensions(w: number | null, h: number | null): string {
   return `${w.toLocaleString()} × ${h.toLocaleString()} px`;
 }
 
-export default function AssetDetailContent() {
+export default function AssetDetailContent({ slugOverride }: { slugOverride?: string } = {}) {
   const searchParams = useSearchParams();
-  const slug = searchParams.get('slug');
+  const slug = slugOverride || searchParams.get('slug');
 
   const [asset, setAsset] = useState<AssetRow | null>(null);
   const [loading, setLoading] = useState(true);

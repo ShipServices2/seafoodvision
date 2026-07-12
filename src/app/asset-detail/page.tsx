@@ -1,15 +1,28 @@
+'use client';
+
 import React, { Suspense } from 'react';
+import { useSearchParams } from 'next/navigation';
+import { redirect } from 'next/navigation';
+import AssetDetailContent from '../asset-detail/components/AssetDetailContent';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import AssetDetailContent from '@/app/asset-detail/components/AssetDetailContent';
+
+function AssetRedirect() {
+  const searchParams = useSearchParams();
+  const slug = searchParams?.get('slug');
+  if (slug) {
+    redirect(`/asset/${slug}`);
+  }
+  return null;
+}
 
 export default function AssetDetailPage() {
   return (
     <div className="min-h-screen bg-background">
       <Header />
-      <main className="pt-16">
+      <main>
         <Suspense fallback={
-          <div className="max-w-screen-2xl mx-auto px-4 lg:px-8 py-8">
+          <div className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 py-8">
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-8">
               <div className="aspect-[4/3] bg-muted rounded-2xl animate-pulse" />
               <div className="flex flex-col gap-4">
