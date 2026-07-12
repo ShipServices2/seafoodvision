@@ -346,10 +346,10 @@ export default function SpeciesDetailPage() {
                     </div>
                     {p.description && <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{p.description}</p>}
                     <div className="flex flex-wrap gap-1.5">
-                      {p.product_forms?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.product_forms.name}</span>}
-                      {p.processing_methods?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.processing_methods.name}</span>}
-                      {p.preservation_methods?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.preservation_methods.name}</span>}
-                      {p.freezing_methods?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.freezing_methods.name}</span>}
+                      {p.product_forms?.label && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.product_forms.label}</span>}
+                      {p.processing_methods?.label && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.processing_methods.label}</span>}
+                      {p.preservation_methods?.label && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.preservation_methods.label}</span>}
+                      {p.freezing_methods?.label && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.freezing_methods.label}</span>}
                     </div>
                   </Link>
                 ))}

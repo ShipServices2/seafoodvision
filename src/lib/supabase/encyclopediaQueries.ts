@@ -59,10 +59,10 @@ export interface EncProduct {
   created_at: string;
   updated_at: string;
   // joined
-  product_forms?: { name: string } | null;
-  processing_methods?: { name: string } | null;
-  preservation_methods?: { name: string } | null;
-  freezing_methods?: { name: string } | null;
+  product_forms?: { label: string } | null;
+  processing_methods?: { label: string } | null;
+  preservation_methods?: { label: string } | null;
+  freezing_methods?: { label: string } | null;
   species?: { common_name: string; scientific_name: string; slug: string }[];
 }
 
@@ -231,10 +231,10 @@ export async function fetchSpeciesProducts(speciesId: string): Promise<EncProduc
     .select(`
       commercial_products(
         id, slug, public_name, description, status, is_demo, is_public, created_at, updated_at,
-        product_forms(name),
-        processing_methods(name),
-        preservation_methods(name),
-        freezing_methods(name)
+        product_forms(label),
+        processing_methods(label),
+        preservation_methods(label),
+        freezing_methods(label)
       )
     `)
     .eq('species_id', speciesId)
@@ -314,10 +314,10 @@ export async function fetchEncProductList(opts: {
     .from('commercial_products')
     .select(`
       id, slug, public_name, description, status, is_demo, is_public, created_at, updated_at,
-      product_forms(name),
-      processing_methods(name),
-      preservation_methods(name),
-      freezing_methods(name)
+      product_forms(label),
+      processing_methods(label),
+      preservation_methods(label),
+      freezing_methods(label)
     `, { count: 'exact' })
     .eq('is_public', true)
     .order('public_name', { ascending: true })
@@ -342,10 +342,10 @@ export async function fetchEncProductBySlug(slug: string): Promise<EncProduct | 
     .from('commercial_products')
     .select(`
       id, slug, public_name, description, status, is_demo, is_public, created_at, updated_at,
-      product_forms(name),
-      processing_methods(name),
-      preservation_methods(name),
-      freezing_methods(name)
+      product_forms(label),
+      processing_methods(label),
+      preservation_methods(label),
+      freezing_methods(label)
     `)
     .eq('slug', slug)
     .maybeSingle();

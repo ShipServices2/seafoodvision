@@ -132,10 +132,10 @@ export default function ProductDetailPage() {
           <div className="bg-card rounded-xl border border-border p-5 space-y-3 h-fit">
             <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">Product Data</h3>
             {[
-              { label: 'Presentation', value: product.product_forms?.name || '—' },
-              { label: 'Processing', value: product.processing_methods?.name || '—' },
-              { label: 'Preservation', value: product.preservation_methods?.name || '—' },
-              { label: 'Freezing', value: product.freezing_methods?.name || '—' },
+              { label: 'Presentation', value: product.product_forms?.label || '—' },
+              { label: 'Processing', value: product.processing_methods?.label || '—' },
+              { label: 'Preservation', value: product.preservation_methods?.label || '—' },
+              { label: 'Freezing', value: product.freezing_methods?.label || '—' },
               { label: 'Status', value: product.status },
             ].map((row) => (
               <div key={row.label} className="flex flex-col gap-0.5">

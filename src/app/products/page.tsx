@@ -18,10 +18,10 @@ const STATUS_BADGE: Record<string, string> = {
 
 function ProductCard({ product }: { product: EncProduct }) {
   const tags = [
-    product.product_forms?.name,
-    product.processing_methods?.name,
-    product.preservation_methods?.name,
-    product.freezing_methods?.name,
+    product.product_forms?.label,
+    product.processing_methods?.label,
+    product.preservation_methods?.label,
+    product.freezing_methods?.label,
   ].filter(Boolean);
 
   return (
