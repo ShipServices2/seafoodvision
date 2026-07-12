@@ -1,0 +1,269 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #F4F7FA;
+  --foreground: #0B1E2D;
+  --primary: #0B2540;
+  --primary-foreground: #FFFFFF;
+  --secondary: #0EA5D4;
+  --secondary-foreground: #FFFFFF;
+  --accent: #C9A84C;
+  --accent-foreground: #0B1E2D;
+  --muted: #E8EDF3;
+  --muted-foreground: #5A7184;
+  --card: #FFFFFF;
+  --card-foreground: #0B1E2D;
+  --border: #D6E0EA;
+  --input: #E8EDF3;
+  --ring: #0EA5D4;
+  --radius: 10px;
+  --font-sans: var(--font-plus-jakarta-sans), sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), monospace;
+
+  --ocean-900: #0B2540;
+  --ocean-800: #0D2E4D;
+  --ocean-700: #0F3D65;
+  --ocean-600: #1A5280;
+  --ocean-500: #1B6CA8;
+  --teal-500: #0EA5D4;
+  --teal-400: #38BDF8;
+  --teal-300: #7DD3FC;
+  --gold-500: #C9A84C;
+  --gold-400: #D4B96A;
+  --coral-500: #E05C4B;
+  --green-verified: #16A34A;
+  --amber-warning: #D97706;
+}
+
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--border);
+  }
+
+  body {
+    background-color: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  h1, h2, h3, h4, h5, h6, p {
+    margin: 0;
+  }
+}
+
+@layer utilities {
+  .font-mono-data {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .text-balance {
+    text-wrap: balance;
+  }
+
+  .watermark-overlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .watermark-text {
+    font-family: var(--font-sans);
+    font-size: 0.875rem;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    color: rgba(255, 255, 255, 0.55);
+    text-transform: uppercase;
+    transform: rotate(-35deg);
+    white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0,0,0,0.4);
+    user-select: none;
+  }
+
+  .watermark-repeat {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 10;
+  }
+
+  .gradient-ocean {
+    background: linear-gradient(135deg, #0B2540 0%, #0D3A5C 50%, #0B4D70 100%);
+  }
+
+  .gradient-hero {
+    background: linear-gradient(160deg, #071827 0%, #0B2540 35%, #0D3D5E 70%, #0A4A6E 100%);
+  }
+
+  .card-hover {
+    transition: transform 200ms ease, box-shadow 200ms ease;
+  }
+
+  .card-hover:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 12px 32px rgba(11, 37, 64, 0.12);
+  }
+
+  .badge-verified {
+    background-color: rgba(22, 163, 74, 0.1);
+    color: #16A34A;
+    border: 1px solid rgba(22, 163, 74, 0.25);
+  }
+
+  .badge-real-photo {
+    background-color: rgba(14, 165, 212, 0.1);
+    color: #0B6E8A;
+    border: 1px solid rgba(14, 165, 212, 0.3);
+  }
+
+  .badge-coming-soon {
+    background-color: rgba(201, 168, 76, 0.12);
+    color: #9A7A2E;
+    border: 1px solid rgba(201, 168, 76, 0.3);
+  }
+
+  .badge-editorial {
+    background-color: rgba(217, 119, 6, 0.1);
+    color: #B45309;
+    border: 1px solid rgba(217, 119, 6, 0.25);
+  }
+
+  .badge-commercial {
+    background-color: rgba(11, 37, 64, 0.08);
+    color: #0B2540;
+    border: 1px solid rgba(11, 37, 64, 0.2);
+  }
+
+  .filter-chip-active {
+    background-color: rgba(14, 165, 212, 0.12);
+    color: #0B6E8A;
+    border: 1px solid rgba(14, 165, 212, 0.4);
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar {
+    width: 4px;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background-color: var(--border);
+    border-radius: 2px;
+  }
+
+  .line-clamp-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .animate-fade-in {
+    animation: fadeIn 0.3s ease forwards;
+  }
+
+  .animate-slide-up {
+    animation: slideUp 0.4s ease forwards;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(16px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .hero-search-shadow {
+    box-shadow: 0 4px 32px rgba(11, 37, 64, 0.25), 0 1px 4px rgba(0,0,0,0.1);
+  }
+
+  .section-divider {
+    height: 1px;
+    background: linear-gradient(90deg, transparent 0%, var(--border) 20%, var(--border) 80%, transparent 100%);
+  }
+
+  .category-card-bg {
+    background: linear-gradient(180deg, rgba(11,37,64,0) 40%, rgba(11,37,64,0.85) 100%);
+  }
+
+  .preview-protected {
+    user-select: none;
+    -webkit-user-drag: none;
+    pointer-events: none;
+  }
+
+  .asset-card-actions {
+    opacity: 0;
+    transition: opacity 150ms ease;
+  }
+
+  .group:hover .asset-card-actions {
+    opacity: 1;
+  }
+}
+
+@layer components {
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-primary text-primary-foreground font-semibold text-sm transition-all duration-150 hover:bg-ocean-800 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg bg-secondary text-secondary-foreground font-semibold text-sm transition-all duration-150 hover:opacity-90 active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-outline {
+    @apply inline-flex items-center justify-center gap-2 px-5 py-2.5 rounded-lg border border-border bg-card text-foreground font-semibold text-sm transition-all duration-150 hover:bg-muted active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-muted-foreground font-medium text-sm transition-all duration-150 hover:bg-muted hover:text-foreground active:scale-95;
+  }
+
+  .input-base {
+    @apply w-full px-4 py-2.5 rounded-lg border border-input bg-card text-foreground text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:border-transparent transition-all duration-150;
+  }
+
+  .metadata-row {
+    @apply flex items-start gap-3 py-2.5 border-b border-border last:border-0;
+  }
+
+  .metadata-label {
+    @apply text-xs font-medium text-muted-foreground uppercase tracking-wider w-36 shrink-0 pt-0.5;
+  }
+
+  .metadata-value {
+    @apply text-sm text-foreground font-medium;
+  }
+
+  .section-title {
+    @apply text-2xl font-bold text-foreground tracking-tight;
+  }
+
+  .section-subtitle {
+    @apply text-base text-muted-foreground leading-relaxed;
+  }
+}
