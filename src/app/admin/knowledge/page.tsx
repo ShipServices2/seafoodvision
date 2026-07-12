@@ -38,7 +38,9 @@ const navCards = [
   { href: '/admin/knowledge/certifications', label: 'Certifications', icon: Award, color: 'bg-green-50 border-green-200 text-green-700', desc: 'Manage certification records' },
   { href: '/admin/knowledge/markets', label: 'Markets', icon: Globe, color: 'bg-cyan-50 border-cyan-200 text-cyan-700', desc: 'Manage market definitions' },
   { href: '/admin/knowledge/products', label: 'Products', icon: ShoppingBag, color: 'bg-orange-50 border-orange-200 text-orange-700', desc: 'Manage commercial products' },
-  { href: '/admin/knowledge/packaging', label: 'Packaging', icon: Package, color: 'bg-pink-50 border-pink-200 text-pink-700', desc: 'Manage packaging configurations' },
+  { href: '/admin/knowledge/packaging', label: 'Packaging', icon: Package, color: 'bg-slate-50 border-slate-200 text-slate-700', desc: 'Manage packaging configurations' },
+  { href: '/admin/knowledge/link-media', label: 'Link Media', icon: Layers, color: 'bg-purple-50 border-purple-200 text-purple-700', desc: 'Link media assets to knowledge entities' },
+  { href: '/admin/knowledge/search', label: 'Search', icon: Shield, color: 'bg-ocean-900/10 border-ocean-900/20 text-ocean-900', desc: 'Admin search with analytics — includes drafts and private content' },
 ];
 
 export default function KnowledgeDashboardPage() {
