@@ -4,6 +4,7 @@ import { createClient } from '@/lib/supabase/client';
 
 export interface AssetRow {
   id: string;
+  public_asset_id: string | null;
   slug: string;
   title: string;
   description: string | null;
