@@ -133,7 +133,7 @@ export default function FavoritesPage() {
                       {asset?.species?.scientific_name || asset?.category || ''}
                     </p>
                     <Link
-                      href={`/asset-detail?slug=${asset?.slug}`}
+                      href={`/asset/${asset?.slug}`}
                       className="inline-flex items-center gap-1 text-xs text-secondary hover:underline mt-2"
                     >
                       View asset
