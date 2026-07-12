@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight } from 'lucide-react';
+import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
@@ -22,6 +22,12 @@ interface AdminStats {
   realSpecies: number;
   demoSpecies: number;
   previewOnly: number;
+  // Phase 4.4
+  certifiedAssets: number;
+  commercialReady: number;
+  avgCertificationPct: number;
+  avgMetadataPct: number;
+  avgRightsPct: number;
   loading: boolean;
 }
 
@@ -31,6 +37,8 @@ export default function AdminPage() {
   const [stats, setStats] = useState<AdminStats>({
     totalAssets: 0, underReview: 0, totalSpecies: 0, totalCategories: 0,
     realAssets: 0, demoAssets: 0, realSpecies: 0, demoSpecies: 0, previewOnly: 0,
+    certifiedAssets: 0, commercialReady: 0, avgCertificationPct: 0,
+    avgMetadataPct: 0, avgRightsPct: 0,
     loading: true,
   });
 
@@ -53,7 +61,19 @@ export default function AdminPage() {
       supabase.from('species').select('*', { count: 'exact', head: true }),
       supabase.from('categories').select('*', { count: 'exact', head: true }),
       fetchExtendedCatalogStats(),
-    ]).then(([a, ur, sp, cat, extended]) => {
+      supabase.from('assets').select('*', { count: 'exact', head: true }).eq('review_status', 'approved'),
+      supabase.from('asset_workflow').select('*', { count: 'exact', head: true }).eq('workflow_status', 'commercial_license_ready'),
+      supabase.from('asset_readiness').select('completion_pct, metadata_completed, rights_verified'),
+    ]).then(([a, ur, sp, cat, extended, certified, commercial, readiness]) => {
+      const readData = readiness.data ?? [];
+      const avgCert = readData.length > 0
+        ? readData.reduce((acc, r) => acc + (r.completion_pct ?? 0), 0) / readData.length
+        : 0;
+      const metaCount = readData.filter((r) => r.metadata_completed).length;
+      const rightsCount = readData.filter((r) => r.rights_verified).length;
+      const avgMeta = readData.length > 0 ? (metaCount / readData.length) * 100 : 0;
+      const avgRights = readData.length > 0 ? (rightsCount / readData.length) * 100 : 0;
+
       setStats({
         totalAssets: a.count ?? 0,
         underReview: ur.count ?? 0,
@@ -64,6 +84,11 @@ export default function AdminPage() {
         realSpecies: extended.realSpecies,
         demoSpecies: extended.demoSpecies,
         previewOnly: extended.previewOnly,
+        certifiedAssets: certified.count ?? 0,
+        commercialReady: commercial.count ?? 0,
+        avgCertificationPct: Math.round(avgCert),
+        avgMetadataPct: Math.round(avgMeta),
+        avgRightsPct: Math.round(avgRights),
         loading: false,
       });
     });
@@ -110,10 +135,19 @@ export default function AdminPage() {
     {
       href: '/admin/reviews',
       icon: ClipboardList,
-      label: 'Reviews',
-      description: 'Asset review queue and status management',
+      label: 'Asset Review Center',
+      description: 'Full certification workflow, readiness checklist, history',
       stat: stats.underReview,
       statLabel: 'pending',
+      badge: stats.underReview > 0 ? `${stats.underReview} to review` : null,
+    },
+    {
+      href: '/admin/reviewer-dashboard',
+      icon: BarChart2,
+      label: 'Review Dashboards',
+      description: 'Reviewer stats, QC, commercial candidates, reports',
+      stat: stats.certifiedAssets,
+      statLabel: 'certified',
     },
     {
       href: '/admin/imports',
@@ -122,6 +156,15 @@ export default function AdminPage() {
       description: 'Validate and preview Codex CSV exports',
       stat: null,
       statLabel: null,
+    },
+    {
+      href: '/licensing-center',
+      icon: Award,
+      label: 'Licensing Center',
+      description: 'License preparation — Coming Soon',
+      stat: null,
+      statLabel: null,
+      badge: 'Coming Soon',
     },
   ];
 
@@ -144,6 +187,7 @@ export default function AdminPage() {
         {/* Stats row */}
         {!stats.loading && (
           <div className="space-y-4 mb-8">
+            {/* Core stats */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 { label: 'Total Assets', value: stats.totalAssets },
@@ -157,7 +201,7 @@ export default function AdminPage() {
                 </div>
               ))}
             </div>
-            {/* Real vs Demo separation */}
+            {/* Real vs Demo */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
               {[
                 { label: 'Real Assets', value: stats.realAssets, color: 'text-green-600' },
@@ -170,6 +214,33 @@ export default function AdminPage() {
                   <p className="text-xs text-muted-foreground mt-1">{s.label}</p>
                 </div>
               ))}
+            </div>
+            {/* Phase 4.4 Commercial Cockpit */}
+            <div className="bg-card border border-border rounded-xl p-5">
+              <div className="flex items-center gap-2 mb-4">
+                <TrendingUp size={16} className="text-secondary" />
+                <h2 className="text-sm font-semibold text-foreground">Commercial Readiness Cockpit</h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+                {[
+                  { label: 'Certified Assets', value: stats.certifiedAssets, color: 'text-green-600' },
+                  { label: 'Commercial Ready', value: stats.commercialReady, color: 'text-teal-600' },
+                  { label: 'Avg Certification %', value: `${stats.avgCertificationPct}%`, color: 'text-secondary' },
+                  { label: 'Avg Metadata %', value: `${stats.avgMetadataPct}%`, color: 'text-blue-600' },
+                  { label: 'Avg Rights %', value: `${stats.avgRightsPct}%`, color: 'text-orange-600' },
+                  { label: 'Est. Monthly Revenue', value: '—', color: 'text-muted-foreground', note: 'Simulation only' },
+                ].map((s) => (
+                  <div key={s.label} className="text-center p-3 bg-muted/30 rounded-lg">
+                    <p className={`text-xl font-bold font-mono-data ${s.color}`}>{s.value}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{s.label}</p>
+                    {s.note && <p className="text-xs text-muted-foreground/60 italic mt-0.5">{s.note}</p>}
+                  </div>
+                ))}
+              </div>
+              <div className="mt-3 flex items-center gap-2 text-xs text-muted-foreground">
+                <AlertCircle size={12} />
+                <span>Revenue estimate is simulation only — not real revenue. No payments are active.</span>
+              </div>
             </div>
           </div>
         )}
@@ -197,7 +268,7 @@ export default function AdminPage() {
                     )}
                   </div>
                   <p className="text-xs text-muted-foreground mt-0.5 leading-relaxed">{section.description}</p>
-                  {section.stat !== null && (
+                  {section.stat !== null && section.stat !== undefined && (
                     <p className="text-xs font-mono-data text-secondary mt-2 font-semibold">
                       {section.stat} {section.statLabel}
                     </p>

@@ -340,3 +340,122 @@ export interface ExtendedCatalogStats extends CatalogStats {
   realSpecies: number;
   demoSpecies: number;
 }
+
+// ============================================================
+// SEAFOODVISION — Phase 4.4 Types
+// Workflow, Certification, Commercial Readiness, Licensing
+// ============================================================
+
+export type WorkflowStatus =
+  | 'imported' |'metadata_review' |'species_validation' |'technical_review' |'rights_review' |'commercial_review' |'certified' |'published' |'commercial_license_ready';
+
+export type CommentType = 'comment' | 'suggestion' | 'correction';
+
+export type BadgeType =
+  | 'imported' |'under_review' |'metadata_complete' |'species_verified' |'technical_verified' |'rights_verified' |'certified' |'commercial_ready' |'editorial_ready' |'premium_asset' |'featured';
+
+export interface AssetWorkflow {
+  id: string;
+  asset_id: string;
+  workflow_status: WorkflowStatus;
+  previous_status: WorkflowStatus | null;
+  changed_by: string | null;
+  changed_at: string;
+  comment: string | null;
+  // Joined
+  profiles?: Pick<Profile, 'id' | 'display_name' | 'email' | 'role'> | null;
+}
+
+export interface AssetReadiness {
+  id: string;
+  asset_id: string;
+  species_validated: boolean;
+  technical_quality: boolean;
+  rights_verified: boolean;
+  metadata_completed: boolean;
+  packaging_completed: boolean;
+  keywords_completed: boolean;
+  preview_available: boolean;
+  thumbnail_available: boolean;
+  original_available: boolean;
+  license_ready: boolean;
+  publication_ready: boolean;
+  commercial_score: number;
+  technical_score: number;
+  completion_pct: number;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export interface AssetBadge {
+  id: string;
+  asset_id: string;
+  badge: BadgeType;
+  granted_by: string | null;
+  granted_at: string;
+}
+
+export interface AssetReviewComment {
+  id: string;
+  asset_id: string;
+  reviewer_id: string;
+  comment_type: CommentType;
+  content: string;
+  created_at: string;
+  updated_at: string;
+  // Joined
+  profiles?: Pick<Profile, 'id' | 'display_name' | 'email' | 'role'> | null;
+}
+
+export interface LicenseDefinition {
+  id: string;
+  license_type: LicenseType;
+  display_name: string;
+  description: string | null;
+  rights: string | null;
+  restrictions: string | null;
+  indicative_price_eur: number | null;
+  is_active: boolean;
+  coming_soon: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// Workflow step metadata
+export const WORKFLOW_STEPS: { status: WorkflowStatus; label: string; description: string; requiredRole: string }[] = [
+  { status: 'imported', label: 'Imported', description: 'Asset has been imported into the system', requiredRole: 'reviewer' },
+  { status: 'metadata_review', label: 'Metadata Review', description: 'Reviewing title, description, and metadata fields', requiredRole: 'reviewer' },
+  { status: 'species_validation', label: 'Species Validation', description: 'Validating species identification and scientific name', requiredRole: 'reviewer' },
+  { status: 'technical_review', label: 'Technical Review', description: 'Checking resolution, format, and technical quality', requiredRole: 'reviewer' },
+  { status: 'rights_review', label: 'Rights Review', description: 'Verifying copyright, usage rights, and restrictions', requiredRole: 'reviewer' },
+  { status: 'commercial_review', label: 'Commercial Review', description: 'Assessing commercial viability and market readiness', requiredRole: 'reviewer' },
+  { status: 'certified', label: 'Certified', description: 'Asset has been certified by an administrator', requiredRole: 'administrator' },
+  { status: 'published', label: 'Published', description: 'Asset is published and publicly visible', requiredRole: 'super_admin' },
+  { status: 'commercial_license_ready', label: 'Commercial License Ready', description: 'Asset is ready for commercial licensing', requiredRole: 'super_admin' },
+];
+
+export const WORKFLOW_STATUS_COLORS: Record<WorkflowStatus, string> = {
+  imported: 'bg-slate-100 text-slate-700 border-slate-200',
+  metadata_review: 'bg-blue-100 text-blue-700 border-blue-200',
+  species_validation: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  technical_review: 'bg-violet-100 text-violet-700 border-violet-200',
+  rights_review: 'bg-orange-100 text-orange-700 border-orange-200',
+  commercial_review: 'bg-amber-100 text-amber-700 border-amber-200',
+  certified: 'bg-green-100 text-green-700 border-green-200',
+  published: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+  commercial_license_ready: 'bg-teal-100 text-teal-700 border-teal-200',
+};
+
+export const BADGE_COLORS: Record<BadgeType, string> = {
+  imported: 'bg-slate-100 text-slate-600',
+  under_review: 'bg-blue-100 text-blue-700',
+  metadata_complete: 'bg-indigo-100 text-indigo-700',
+  species_verified: 'bg-cyan-100 text-cyan-700',
+  technical_verified: 'bg-violet-100 text-violet-700',
+  rights_verified: 'bg-orange-100 text-orange-700',
+  certified: 'bg-green-100 text-green-700',
+  commercial_ready: 'bg-teal-100 text-teal-700',
+  editorial_ready: 'bg-sky-100 text-sky-700',
+  premium_asset: 'bg-amber-100 text-amber-700',
+  featured: 'bg-rose-100 text-rose-700',
+};
