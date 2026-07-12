@@ -59,10 +59,10 @@ export interface EncProduct {
   created_at: string;
   updated_at: string;
   // joined
-  product_forms?: { name: string } | null;
-  processing_methods?: { name: string } | null;
-  preservation_methods?: { name: string } | null;
-  freezing_methods?: { name: string } | null;
+  product_forms?: { label: string } | null;
+  processing_methods?: { label: string } | null;
+  preservation_methods?: { label: string } | null;
+  freezing_methods?: { label: string } | null;
   species?: { common_name: string; scientific_name: string; slug: string }[];
 }
 
@@ -127,7 +127,7 @@ export interface EncDocument {
   is_demo: boolean;
   created_at: string;
   // joined
-  document_types?: { name: string } | null;
+  document_types?: { label: string } | null;
 }
 
 export interface EncSource {
@@ -231,10 +231,10 @@ export async function fetchSpeciesProducts(speciesId: string): Promise<EncProduc
     .select(`
       commercial_products(
         id, slug, public_name, description, status, is_demo, is_public, created_at, updated_at,
-        product_forms(name),
-        processing_methods(name),
-        preservation_methods(name),
-        freezing_methods(name)
+        product_forms(label),
+        processing_methods(label),
+        preservation_methods(label),
+        freezing_methods(label)
       )
     `)
     .eq('species_id', speciesId)
@@ -269,7 +269,7 @@ export async function fetchSpeciesDocuments(speciesId: string): Promise<EncDocum
   const supabase = createClient();
   const { data, error } = await supabase
     .from('document_species')
-    .select(`documents(id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(name))`)
+    .select(`documents(id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(label))`)
     .eq('species_id', speciesId);
   if (error) { console.error('fetchSpeciesDocuments error:', error.message); return []; }
   return (
@@ -314,10 +314,10 @@ export async function fetchEncProductList(opts: {
     .from('commercial_products')
     .select(`
       id, slug, public_name, description, status, is_demo, is_public, created_at, updated_at,
-      product_forms(name),
-      processing_methods(name),
-      preservation_methods(name),
-      freezing_methods(name)
+      product_forms(label),
+      processing_methods(label),
+      preservation_methods(label),
+      freezing_methods(label)
     `, { count: 'exact' })
     .eq('is_public', true)
     .order('public_name', { ascending: true })
@@ -342,10 +342,10 @@ export async function fetchEncProductBySlug(slug: string): Promise<EncProduct | 
     .from('commercial_products')
     .select(`
       id, slug, public_name, description, status, is_demo, is_public, created_at, updated_at,
-      product_forms(name),
-      processing_methods(name),
-      preservation_methods(name),
-      freezing_methods(name)
+      product_forms(label),
+      processing_methods(label),
+      preservation_methods(label),
+      freezing_methods(label)
     `)
     .eq('slug', slug)
     .maybeSingle();
@@ -464,7 +464,7 @@ export async function fetchEncDocumentList(opts: {
 
   let query = supabase
     .from('documents')
-    .select(`id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(name)`, { count: 'exact' })
+    .select(`id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(label)`, { count: 'exact' })
     .eq('is_public', true)
     .eq('confidentiality_level', 'public')
     .order('created_at', { ascending: false })
