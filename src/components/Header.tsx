@@ -3,8 +3,9 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import AppLogo from '@/components/ui/AppLogo';
-import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library } from 'lucide-react';
+import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library, Database } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
+import { useAuth } from '@/contexts/AuthContext';
 
 
 const languages = [
@@ -17,6 +18,7 @@ const languages = [
 const navLinks = [
   { href: '/library', label: 'Library', icon: Library },
   { href: '/species', label: 'Species', icon: BookOpen },
+  { href: '/knowledge', label: 'Knowledge', icon: Database },
   { href: '/how-it-works', label: 'How it works', icon: HelpCircle },
   { href: '/licensing', label: 'Licensing', icon: Tag },
   { href: '/pricing', label: 'Pricing', icon: DollarSign },
@@ -33,6 +35,8 @@ export default function Header({ transparent = false }: HeaderProps) {
   const [activeLang, setActiveLang] = useState('en');
   const [scrolled, setScrolled] = useState(false);
   const langRef = useRef<HTMLDivElement>(null);
+  const { user, profile, signOut } = useAuth();
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40);
@@ -51,6 +55,17 @@ export default function Header({ transparent = false }: HeaderProps) {
   }, []);
 
   const isTransparent = transparent && !scrolled && !mobileOpen;
+
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await signOut();
+    } catch {
+      // ignore
+    } finally {
+      setSigningOut(false);
+    }
+  };
 
   return (
     <>
@@ -144,25 +159,52 @@ export default function Header({ transparent = false }: HeaderProps) {
               </div>
 
               {/* Auth */}
-              <Link
-                href="/auth"
-                className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
-                  isTransparent
-                    ? 'text-white/80 hover:bg-white/10 hover:text-white' :'text-muted-foreground hover:bg-muted hover:text-foreground'
-                }`}
-              >
-                <User size={15} />
-                Sign in
-              </Link>
-              <Link
-                href="/auth"
-                className={`hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 active:scale-95 ${
-                  isTransparent
-                    ? 'bg-white text-primary hover:bg-white/90' :'bg-primary text-primary-foreground hover:bg-ocean-800'
-                }`}
-              >
-                Join
-              </Link>
+              {user ? (
+                <div className="hidden sm:flex items-center gap-2">
+                  <Link
+                    href="/account"
+                    className={`inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                      isTransparent
+                        ? 'text-white/80 hover:bg-white/10 hover:text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    <User size={15} />
+                    {profile?.display_name?.split(' ')[0] || 'Account'}
+                  </Link>
+                  <button
+                    onClick={handleSignOut}
+                    disabled={signingOut}
+                    className={`hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 active:scale-95 ${
+                      isTransparent
+                        ? 'bg-white text-primary hover:bg-white/90' : 'bg-primary text-primary-foreground hover:bg-ocean-800'
+                    }`}
+                  >
+                    Sign out
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <Link
+                    href="/auth"
+                    className={`hidden sm:inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-150 ${
+                      isTransparent
+                        ? 'text-white/80 hover:bg-white/10 hover:text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                    }`}
+                  >
+                    <User size={15} />
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/auth"
+                    className={`hidden sm:inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold transition-all duration-150 active:scale-95 ${
+                      isTransparent
+                        ? 'bg-white text-primary hover:bg-white/90' : 'bg-primary text-primary-foreground hover:bg-ocean-800'
+                    }`}
+                  >
+                    Join
+                  </Link>
+                </>
+              )}
 
               {/* Mobile hamburger */}
               <button

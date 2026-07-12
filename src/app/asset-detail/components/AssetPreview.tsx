@@ -8,9 +8,9 @@ interface AssetPreviewProps {
     title: string;
     emoji: string;
     bgColor: string;
-    dimensions: string;
-    format: string;
-    isRealPhoto: boolean;
+    dimensions?: string;
+    format?: string;
+    isRealPhoto?: boolean;
   };
 }
 
@@ -87,11 +87,11 @@ export default function AssetPreview({ asset }: AssetPreviewProps) {
       <div className="flex items-center justify-between px-4 py-2.5 border-t border-border bg-muted/30">
         <div className="flex items-center gap-4">
           <span className="text-xs font-mono-data text-muted-foreground">
-            {asset.dimensions}
+            {asset.dimensions || '—'}
           </span>
           <span className="text-xs text-muted-foreground">·</span>
           <span className="text-xs font-mono-data text-muted-foreground">
-            {asset.format}
+            {asset.format || '—'}
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">

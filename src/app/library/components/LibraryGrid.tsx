@@ -4,12 +4,40 @@ import React from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Heart, Plus, Image as ImageIcon, CheckCircle2, Camera } from 'lucide-react';
 import { useState } from 'react';
-import type { DemoAsset } from './libraryData';
 import type { ViewMode } from './LibraryContent';
 import Badge from '@/components/ui/Badge';
 
+// Compatible asset shape (works for both DB assets and demo assets)
+interface AssetCardData {
+  id: string;
+  slug: string;
+  title: string;
+  species: string;
+  scientificName: string;
+  family: string;
+  category: string;
+  productForm: string;
+  productState: string;
+  freezingMethod: string;
+  packaging: string;
+  country: string;
+  faoArea: string;
+  orientation: string;
+  licenseType: string;
+  isVerified: boolean;
+  isRealPhoto: boolean;
+  mediaType: string;
+  dimensions: string;
+  format: string;
+  status: string;
+  keywords: string[];
+  isDemo: boolean;
+  emoji: string;
+  bgColor: string;
+}
+
 interface LibraryGridProps {
-  assets: DemoAsset[];
+  assets: AssetCardData[];
   viewMode: ViewMode;
   totalResults: number;
   currentPage: number;
@@ -20,7 +48,7 @@ interface LibraryGridProps {
   onItemsPerPageChange: (n: number) => void;
 }
 
-function AssetGridCard({ asset }: { asset: DemoAsset }) {
+function AssetGridCard({ asset }: { asset: AssetCardData }) {
   const [favorited, setFavorited] = useState(false);
 
   return (
@@ -112,7 +140,7 @@ function AssetGridCard({ asset }: { asset: DemoAsset }) {
   );
 }
 
-function AssetListRow({ asset }: { asset: DemoAsset }) {
+function AssetListRow({ asset }: { asset: AssetCardData }) {
   const [favorited, setFavorited] = useState(false);
 
   return (

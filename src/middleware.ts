@@ -40,22 +40,25 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Protect admin routes — only administrator/super_admin roles
-  if (request.nextUrl.pathname.startsWith('/admin')) {
+  const pathname = request.nextUrl.pathname;
+
+  // Protect account routes — redirect to auth if not logged in
+  if (pathname.startsWith('/account')) {
     if (!user) {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
-      url.searchParams.set('next', request.nextUrl.pathname);
+      url.searchParams.set('next', pathname);
       return NextResponse.redirect(url);
     }
   }
 
-  // Protect account routes
-  if (request.nextUrl.pathname.startsWith('/account')) {
+  // Protect admin routes — redirect to auth if not logged in
+  // Role check is done client-side in each admin page (server-side role check would require DB query)
+  if (pathname.startsWith('/admin')) {
     if (!user) {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
-      url.searchParams.set('next', request.nextUrl.pathname);
+      url.searchParams.set('next', pathname);
       return NextResponse.redirect(url);
     }
   }
