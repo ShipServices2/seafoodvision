@@ -74,7 +74,7 @@ export async function fetchAssets(
   let query = supabase
     .from('assets')
     .select(
-      `*, species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term))`,
+      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term))`,
       { count: 'exact' }
     );
 

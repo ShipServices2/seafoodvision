@@ -126,7 +126,7 @@ export async function fetchSpeciesAssets(
   const supabase = createClient();
   const { data, error } = await supabase
     .from('assets')
-    .select('*, species(id, slug, common_name, scientific_name, family, category)')
+    .select('*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category)')
     .eq('species_id', speciesId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -181,7 +181,7 @@ export async function fetchUserFavorites(userId: string): Promise<Favorite[]> {
     .select(
       `id, user_id, asset_id, created_at,
        assets(id, slug, title, category, is_verified, is_real_photo, is_demo, media_type,
-         species(common_name, scientific_name))`
+         species!fk_assets_species(common_name, scientific_name))`
     )
     .eq('user_id', userId)
     .order('created_at', { ascending: false });
@@ -281,7 +281,7 @@ export async function fetchCollectionItems(
     .select(
       `id, collection_id, asset_id, added_at,
        assets(id, slug, title, category, is_verified, is_real_photo, is_demo,
-         species(common_name, scientific_name))`
+         species!fk_assets_species(common_name, scientific_name))`
     )
     .eq('collection_id', collectionId)
     .order('added_at', { ascending: false });
@@ -489,7 +489,7 @@ export async function fetchAdminAssets(
 
   let q = supabase
     .from('assets')
-    .select('*, species(id, slug, common_name, scientific_name)', { count: 'exact' });
+    .select('*, species!fk_assets_species(id, slug, common_name, scientific_name)', { count: 'exact' });
 
   if (status) q = q.eq('review_status', status);
   if (query) q = q.ilike('title', `%${query}%`);
