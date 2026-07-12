@@ -127,7 +127,7 @@ export interface EncDocument {
   is_demo: boolean;
   created_at: string;
   // joined
-  document_types?: { name: string } | null;
+  document_types?: { label: string } | null;
 }
 
 export interface EncSource {
@@ -269,7 +269,7 @@ export async function fetchSpeciesDocuments(speciesId: string): Promise<EncDocum
   const supabase = createClient();
   const { data, error } = await supabase
     .from('document_species')
-    .select(`documents(id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(name))`)
+    .select(`documents(id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(label))`)
     .eq('species_id', speciesId);
   if (error) { console.error('fetchSpeciesDocuments error:', error.message); return []; }
   return (
@@ -464,7 +464,7 @@ export async function fetchEncDocumentList(opts: {
 
   let query = supabase
     .from('documents')
-    .select(`id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(name)`, { count: 'exact' })
+    .select(`id, public_title, status, issuing_body, issue_date, expiration_date, is_public, is_demo, created_at, document_types(label)`, { count: 'exact' })
     .eq('is_public', true)
     .eq('confidentiality_level', 'public')
     .order('created_at', { ascending: false })

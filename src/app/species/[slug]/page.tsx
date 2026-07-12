@@ -467,7 +467,7 @@ export default function SpeciesDetailPage() {
                       {doc.issue_date && <p className="text-xs text-muted-foreground mt-0.5">Issued: {doc.issue_date}</p>}
                     </div>
                     <div className="flex flex-col items-end gap-1.5 shrink-0">
-                      {doc.document_types?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{doc.document_types.name}</span>}
+                      {doc.document_types?.label && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{doc.document_types.label}</span>}
                       <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[doc.status] || STATUS_BADGE.suggested}`}>{doc.status}</span>
                     </div>
                   </div>
