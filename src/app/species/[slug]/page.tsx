@@ -3,65 +3,126 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Image as ImageIcon, Fish } from 'lucide-react';
-import { fetchSpeciesBySlug, fetchSpeciesAssets } from '@/lib/supabase/queries';
-import type { Species, Asset } from '@/lib/supabase/types';
+import { CheckCircle, Globe, Award, FileText, Layers, ChevronRight, Fish, ShoppingBag } from 'lucide-react';
+import {
+  fetchEncSpeciesBySlug,
+  fetchSpeciesNames,
+  fetchSpeciesProducts,
+  fetchSpeciesCertifications,
+  fetchSpeciesMarkets,
+  fetchSpeciesDocuments,
+  fetchRelatedSpecies,
+  type EncSpecies,
+  type EncSpeciesName,
+  type EncProduct,
+  type EncCertification,
+  type EncMarket,
+  type EncDocument,
+} from '@/lib/supabase/encyclopediaQueries';
+import { fetchSpeciesAssets } from '@/lib/supabase/queries';
+import type { Asset } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import Icon from '@/components/ui/AppIcon';
 
-const categoryEmoji: Record<string, string> = {
-  Fish: '🐟', Crustaceans: '🦐', Cephalopods: '🐙', Molluscs: '🦪',
-  'Fillets & Portions': '🍣', 'Frozen Products': '🧊', Packaging: '📦', Aquaculture: '🌊',
+
+const SPECIES_COLORS: Record<string, string> = {
+  Fish: 'from-blue-200 to-blue-50',
+  Crustaceans: 'from-orange-200 to-orange-50',
+  Cephalopods: 'from-purple-200 to-purple-50',
+  Molluscs: 'from-teal-200 to-teal-50',
+  Aquaculture: 'from-green-200 to-green-50',
+};
+const SPECIES_EMOJI: Record<string, string> = {
+  Fish: '🐟', Crustaceans: '🦐', Cephalopods: '🐙', Molluscs: '🦪', Aquaculture: '🌊',
 };
 
-const speciesEmoji: Record<string, { emoji: string; bgColor: string }> = {
-  'sardina-pilchardus': { emoji: '🐠', bgColor: 'bg-gradient-to-br from-blue-100 to-blue-50' },
-  'scomber-scombrus': { emoji: '🐟', bgColor: 'bg-gradient-to-br from-teal-100 to-teal-50' },
-  'thunnus-albacares': { emoji: '🐡', bgColor: 'bg-gradient-to-br from-yellow-100 to-amber-50' },
-  'octopus-vulgaris': { emoji: '🐙', bgColor: 'bg-gradient-to-br from-purple-100 to-purple-50' },
-  'loligo-vulgaris': { emoji: '🦑', bgColor: 'bg-gradient-to-br from-indigo-100 to-indigo-50' },
-  'sepia-officinalis': { emoji: '🦑', bgColor: 'bg-gradient-to-br from-slate-100 to-slate-50' },
-  'penaeus-monodon': { emoji: '🦐', bgColor: 'bg-gradient-to-br from-orange-100 to-orange-50' },
+const STATUS_BADGE: Record<string, string> = {
+  verified: 'bg-green-100 text-green-700 border-green-200',
+  under_review: 'bg-amber-100 text-amber-700 border-amber-200',
+  suggested: 'bg-blue-100 text-blue-700 border-blue-200',
+  disputed: 'bg-red-100 text-red-700 border-red-200',
+  obsolete: 'bg-slate-100 text-slate-600 border-slate-200',
 };
-const defaultMeta = { emoji: '🐠', bgColor: 'bg-gradient-to-br from-blue-100 to-blue-50' };
+
+const CERT_STATUS_BADGE: Record<string, string> = {
+  verified: 'bg-green-100 text-green-700 border-green-200',
+  document_received: 'bg-blue-100 text-blue-700 border-blue-200',
+  under_verification: 'bg-amber-100 text-amber-700 border-amber-200',
+  claimed: 'bg-slate-100 text-slate-600 border-slate-200',
+  expired: 'bg-red-100 text-red-700 border-red-200',
+  disputed: 'bg-red-100 text-red-700 border-red-200',
+};
+
+const LANG_LABELS: Record<string, string> = {
+  en: 'English', fr: 'French', es: 'Spanish', pt: 'Portuguese',
+  de: 'German', it: 'Italian', nl: 'Dutch', ar: 'Arabic', zh: 'Chinese', ja: 'Japanese',
+};
+
+const NAME_TYPE_LABELS: Record<string, string> = {
+  commercial: 'Commercial', common: 'Common', local: 'Local',
+  scientific_synonym: 'Scientific Synonym', marketplace: 'Marketplace', historical: 'Historical',
+};
+
+type Tab = 'overview' | 'names' | 'products' | 'media' | 'certifications' | 'markets' | 'documents';
 
 export default function SpeciesDetailPage() {
   const params = useParams();
   const slug = params?.slug as string;
 
-  const [species, setSpecies] = useState<Species | null>(null);
+  const [species, setSpecies] = useState<EncSpecies | null>(null);
+  const [names, setNames] = useState<EncSpeciesName[]>([]);
+  const [products, setProducts] = useState<EncProduct[]>([]);
+  const [certifications, setCertifications] = useState<EncCertification[]>([]);
+  const [markets, setMarkets] = useState<EncMarket[]>([]);
+  const [documents, setDocuments] = useState<EncDocument[]>([]);
   const [assets, setAssets] = useState<Asset[]>([]);
+  const [related, setRelated] = useState<EncSpecies[]>([]);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
+  const [activeTab, setActiveTab] = useState<Tab>('overview');
 
   useEffect(() => {
     if (!slug) return;
-    Promise.all([
-      fetchSpeciesBySlug(slug),
-      fetchSpeciesAssets('', 12),
-    ]).then(([sp]) => {
-      if (!sp) {
-        setNotFound(true);
-        setLoading(false);
-        return;
-      }
+    fetchEncSpeciesBySlug(slug).then(async (sp) => {
+      if (!sp) { setNotFound(true); setLoading(false); return; }
       setSpecies(sp);
-      fetchSpeciesAssets(sp.id, 12).then((a) => {
-        setAssets(a);
-        setLoading(false);
-      });
+      const [n, p, c, m, d, a, r] = await Promise.all([
+        fetchSpeciesNames(sp.id),
+        fetchSpeciesProducts(sp.id),
+        fetchSpeciesCertifications(sp.id),
+        fetchSpeciesMarkets(sp.id),
+        fetchSpeciesDocuments(sp.id),
+        fetchSpeciesAssets(sp.id, 12),
+        fetchRelatedSpecies(sp.id, 4),
+      ]);
+      setNames(n); setProducts(p); setCertifications(c);
+      setMarkets(m); setDocuments(d); setAssets(a); setRelated(r);
+      setLoading(false);
     });
   }, [slug]);
 
-  const meta = species ? (speciesEmoji[species.slug] || defaultMeta) : defaultMeta;
+  const color = SPECIES_COLORS[species?.category || ''] || 'from-slate-200 to-slate-50';
+  const emoji = SPECIES_EMOJI[species?.category || ''] || '🐠';
+
+  const TABS: { key: Tab; label: string; count?: number }[] = [
+    { key: 'overview', label: 'Overview' },
+    { key: 'names', label: 'Names', count: names.length },
+    { key: 'products', label: 'Products', count: products.length },
+    { key: 'media', label: 'Media', count: assets.length },
+    { key: 'certifications', label: 'Certifications', count: certifications.length },
+    { key: 'markets', label: 'Markets', count: markets.length },
+    { key: 'documents', label: 'Documents', count: documents.length },
+  ];
 
   if (loading) {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
+        <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 pt-24 pb-16">
           <div className="animate-pulse space-y-6">
-            <div className="h-48 bg-muted rounded-2xl" />
+            <div className="h-4 bg-muted rounded w-48" />
+            <div className="h-52 bg-muted rounded-2xl" />
             <div className="h-6 bg-muted rounded w-1/3" />
             <div className="h-4 bg-muted rounded w-1/4" />
           </div>
@@ -75,132 +136,370 @@ export default function SpeciesDetailPage() {
     return (
       <div className="min-h-screen bg-background">
         <Header />
-        <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16 text-center">
+        <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 pt-24 pb-16 text-center">
           <p className="text-5xl mb-4">🐟</p>
           <h1 className="text-2xl font-bold text-foreground mb-2">Species not found</h1>
-          <p className="text-muted-foreground mb-6">This species page does not exist or has been removed.</p>
-          <Link href="/species" className="btn-primary">View all species</Link>
+          <p className="text-muted-foreground mb-6">This species page does not exist or is not publicly available.</p>
+          <Link href="/species" className="px-5 py-2.5 bg-primary text-white rounded-xl text-sm font-semibold hover:bg-ocean-800 transition-colors">View all species</Link>
         </main>
         <Footer />
       </div>
     );
   }
 
+  // Group names by language
+  const namesByLang: Record<string, EncSpeciesName[]> = {};
+  names.forEach((n) => {
+    if (!namesByLang[n.language_code]) namesByLang[n.language_code] = [];
+    namesByLang[n.language_code].push(n);
+  });
+
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen bg-background flex flex-col">
       <Header />
-      <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
-        <Link href="/species" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors mb-6">
-          <ArrowLeft size={14} />
-          All species
-        </Link>
+      <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
+
+        {/* Breadcrumb */}
+        <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6">
+          <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
+          <ChevronRight size={12} />
+          <Link href="/species" className="hover:text-foreground transition-colors">Species</Link>
+          <ChevronRight size={12} />
+          <span className="text-foreground font-medium truncate max-w-[200px]">{species.common_name}</span>
+        </nav>
 
         {/* Hero */}
-        <div className={`relative rounded-2xl overflow-hidden mb-8 ${meta.bgColor} h-48 flex items-center justify-center`}>
-          <span className="text-8xl">{meta.emoji}</span>
-          {species.is_demo && (
-            <div className="absolute top-4 left-4">
-              <span className="text-xs bg-purple-100 text-purple-700 border border-purple-200 px-2 py-1 rounded-full font-medium">
-                Demonstration species
+        <div className={`relative rounded-2xl overflow-hidden mb-8 bg-gradient-to-br ${color} h-52 flex items-center justify-center`}>
+          <span className="text-9xl">{emoji}</span>
+          <div className="absolute top-4 left-4 flex gap-2">
+            {species.is_validated && (
+              <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full font-semibold">
+                <CheckCircle size={11} /> Verified
               </span>
-            </div>
-          )}
+            )}
+            {species.is_demo && (
+              <span className="flex items-center gap-1 text-xs bg-purple-100 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-full font-semibold">
+                <Layers size={11} /> Demonstration species data
+              </span>
+            )}
+          </div>
         </div>
 
-        {/* Identity */}
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_320px] gap-8 mb-10">
+        {/* Identity + metadata */}
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_300px] gap-8 mb-8">
           <div>
             <h1 className="text-3xl font-bold text-foreground mb-1">{species.common_name}</h1>
-            <p className="text-lg font-mono-data text-muted-foreground italic mb-4">
-              {species.scientific_name}
-            </p>
-
-            <div className="flex flex-wrap gap-2 mb-6">
-              {species.family && (
-                <span className="text-sm bg-muted text-muted-foreground px-3 py-1 rounded-full font-medium">
-                  {species.family}
-                </span>
-              )}
-              {species.category && (
-                <span className="text-sm bg-secondary/10 text-secondary px-3 py-1 rounded-full font-medium">
-                  {species.category}
-                </span>
-              )}
-              {species.is_validated && (
-                <span className="text-sm badge-verified px-3 py-1 rounded-full font-medium">
-                  Validated
+            <p className="text-lg font-mono-data text-muted-foreground italic mb-4">{species.scientific_name}</p>
+            <div className="flex flex-wrap gap-2 mb-5">
+              {species.family && <span className="text-sm bg-muted text-muted-foreground px-3 py-1 rounded-full">{species.family}</span>}
+              {species.category && <span className="text-sm bg-secondary/10 text-secondary px-3 py-1 rounded-full">{species.category}</span>}
+              {species.genus && <span className="text-sm bg-muted text-muted-foreground px-3 py-1 rounded-full font-mono-data italic">{species.genus}</span>}
+              {species.validation_status && (
+                <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${STATUS_BADGE[species.validation_status] || STATUS_BADGE.suggested}`}>
+                  {species.validation_status.replace('_', ' ')}
                 </span>
               )}
             </div>
-
             {species.description && (
-              <p className="text-muted-foreground leading-relaxed">{species.description}</p>
+              <p className="text-muted-foreground leading-relaxed text-sm max-w-2xl">{species.description}</p>
             )}
           </div>
 
-          {/* Metadata card */}
-          <div className="bg-card rounded-xl border border-border p-5 space-y-4 h-fit">
-            <h3 className="text-sm font-semibold text-foreground">Species Data</h3>
+          <div className="bg-card rounded-xl border border-border p-5 space-y-3 h-fit">
+            <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">Species Data</h3>
             {[
               { label: 'Scientific Name', value: species.scientific_name, mono: true, italic: true },
-              { label: 'Family', value: species.family || '—', mono: false },
-              { label: 'Category', value: species.category || '—', mono: false },
+              { label: 'Genus', value: species.genus || '—', mono: true },
+              { label: 'Family', value: species.family || '—' },
+              { label: 'Category', value: species.category || '—' },
+              { label: 'FAO Alpha-3', value: species.fao_alpha3_code || '—', mono: true },
               { label: 'FAO Areas', value: species.fao_areas?.join(', ') || '—', mono: true },
+              { label: 'Taxonomic Status', value: species.taxonomic_status || '—' },
             ].map((row) => (
               <div key={row.label} className="flex flex-col gap-0.5">
                 <span className="text-xs text-muted-foreground uppercase tracking-wide font-medium">{row.label}</span>
-                <span className={`text-sm text-foreground ${row.mono ? 'font-mono-data' : ''} ${row.italic ? 'italic' : ''}`}>
-                  {row.value}
-                </span>
+                <span className={`text-sm text-foreground ${row.mono ? 'font-mono-data' : ''} ${row.italic ? 'italic' : ''}`}>{row.value}</span>
               </div>
             ))}
           </div>
         </div>
 
-        {/* Associated media */}
-        <div>
-          <div className="flex items-center justify-between mb-6">
-            <h2 className="text-xl font-bold text-foreground">
-              Associated Media
-              {assets.length > 0 && (
-                <span className="ml-2 text-sm font-normal text-muted-foreground">
-                  ({assets.length} asset{assets.length !== 1 ? 's' : ''})
-                </span>
-              )}
-            </h2>
-            <Link href={`/library?species=${encodeURIComponent(species.common_name)}`} className="text-sm text-secondary font-medium hover:underline">
-              View all in library →
-            </Link>
+        {/* Tabs */}
+        <div className="border-b border-border mb-8 overflow-x-auto">
+          <div className="flex gap-0 min-w-max">
+            {TABS.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`px-4 py-3 text-sm font-medium border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === tab.key
+                    ? 'border-secondary text-secondary' :'border-transparent text-muted-foreground hover:text-foreground'
+                }`}
+              >
+                {tab.label}
+                {tab.count !== undefined && tab.count > 0 && (
+                  <span className={`ml-1.5 text-xs px-1.5 py-0.5 rounded-full ${activeTab === tab.key ? 'bg-secondary/10 text-secondary' : 'bg-muted text-muted-foreground'}`}>
+                    {tab.count}
+                  </span>
+                )}
+              </button>
+            ))}
           </div>
+        </div>
 
-          {assets.length === 0 ? (
-            <div className="text-center py-12 bg-card rounded-xl border border-border">
-              <ImageIcon size={32} className="text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">No approved media yet for this species.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-              {assets.map((asset) => {
-                const emoji = categoryEmoji[asset.category || ''] || '🐠';
+        {/* Tab content */}
+        {activeTab === 'overview' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {[
+                { label: 'Multilingual Names', value: names.length, icon: Globe, href: undefined, onClick: () => setActiveTab('names') },
+                { label: 'Products', value: products.length, icon: ShoppingBag, href: undefined, onClick: () => setActiveTab('products') },
+                { label: 'Media Assets', value: assets.length, icon: Fish, href: undefined, onClick: () => setActiveTab('media') },
+                { label: 'Certifications', value: certifications.length, icon: Award, href: undefined, onClick: () => setActiveTab('certifications') },
+              ].map((stat) => {
+                const Icon = stat.icon;
                 return (
-                  <Link
-                    key={asset.id}
-                    href={`/asset-detail?slug=${asset.slug}`}
-                    className="group bg-card rounded-xl border border-border overflow-hidden card-hover shadow-card"
+                  <button
+                    key={stat.label}
+                    onClick={stat.onClick}
+                    className="bg-card rounded-xl border border-border p-4 text-left hover:border-secondary/40 transition-colors"
                   >
-                    <div className="aspect-[4/3] bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center">
-                      <span className="text-3xl">{emoji}</span>
+                    <Icon size={18} className="text-muted-foreground mb-2" />
+                    <div className="text-2xl font-bold text-foreground font-mono-data">{stat.value}</div>
+                    <div className="text-xs text-muted-foreground mt-0.5">{stat.label}</div>
+                  </button>
+                );
+              })}
+            </div>
+            {species.description && (
+              <div className="bg-card rounded-xl border border-border p-5">
+                <h3 className="text-sm font-semibold text-foreground mb-2">Description</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{species.description}</p>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'names' && (
+          <div>
+            {Object.keys(namesByLang).length === 0 ? (
+              <div className="text-center py-12 bg-card rounded-xl border border-border">
+                <Globe size={28} className="text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No multilingual names documented yet.</p>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {Object.entries(namesByLang).map(([lang, langNames]) => (
+                  <div key={lang} className="bg-card rounded-xl border border-border overflow-hidden">
+                    <div className="px-5 py-3 bg-muted/50 border-b border-border">
+                      <span className="text-sm font-semibold text-foreground">{LANG_LABELS[lang] || lang.toUpperCase()}</span>
+                      <span className="text-xs text-muted-foreground ml-2 font-mono-data">{lang}</span>
                     </div>
-                    <div className="p-2">
-                      <p className="text-xs font-semibold text-foreground line-clamp-1">{asset.title}</p>
-                      <p className="text-xs text-muted-foreground mt-0.5">{asset.product_form || asset.category}</p>
+                    <div className="divide-y divide-border">
+                      {langNames.map((n) => (
+                        <div key={n.id} className="px-5 py-3 flex items-center justify-between gap-4">
+                          <div>
+                            <span className="text-sm font-medium text-foreground">{n.name}</span>
+                            {n.region && <span className="text-xs text-muted-foreground ml-2">({n.region})</span>}
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+                              {NAME_TYPE_LABELS[n.name_type] || n.name_type}
+                            </span>
+                            {n.is_preferred && (
+                              <span className="text-xs bg-secondary/10 text-secondary px-2 py-0.5 rounded-full">Preferred</span>
+                            )}
+                            <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[n.status] || STATUS_BADGE.suggested}`}>
+                              {n.status}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'products' && (
+          <div>
+            {products.length === 0 ? (
+              <div className="text-center py-12 bg-card rounded-xl border border-border">
+                <ShoppingBag size={28} className="text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No verified commercial products linked to this species yet.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {products.map((p) => (
+                  <Link
+                    key={p.id}
+                    href={`/products/${p.slug}`}
+                    className="bg-card rounded-xl border border-border p-4 hover:border-secondary/40 hover:shadow-sm transition-all"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h4 className="text-sm font-semibold text-foreground">{p.public_name}</h4>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border shrink-0 ${STATUS_BADGE[p.status] || STATUS_BADGE.suggested}`}>
+                        {p.status}
+                      </span>
+                    </div>
+                    {p.description && <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{p.description}</p>}
+                    <div className="flex flex-wrap gap-1.5">
+                      {p.product_forms?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.product_forms.name}</span>}
+                      {p.processing_methods?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.processing_methods.name}</span>}
+                      {p.preservation_methods?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.preservation_methods.name}</span>}
+                      {p.freezing_methods?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{p.freezing_methods.name}</span>}
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'media' && (
+          <div>
+            {assets.length === 0 ? (
+              <div className="text-center py-12 bg-card rounded-xl border border-border">
+                <Fish size={28} className="text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No approved media assets for this species yet.</p>
+              </div>
+            ) : (
+              <>
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
+                  {assets.map((asset) => (
+                    <Link
+                      key={asset.id}
+                      href={`/asset-detail?slug=${asset.slug}`}
+                      className="group bg-card rounded-xl border border-border overflow-hidden hover:shadow-sm transition-all"
+                    >
+                      <div className="aspect-[4/3] bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center">
+                        <span className="text-3xl">{emoji}</span>
+                      </div>
+                      <div className="p-2">
+                        <p className="text-xs font-semibold text-foreground line-clamp-1">{asset.title}</p>
+                        <p className="text-xs text-muted-foreground mt-0.5">{asset.product_form || asset.category}</p>
+                      </div>
+                    </Link>
+                  ))}
+                </div>
+                <div className="mt-4 text-center">
+                  <Link href={`/library?species=${encodeURIComponent(species.common_name)}`} className="text-sm text-secondary font-medium hover:underline">
+                    View all in library →
+                  </Link>
+                </div>
+              </>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'certifications' && (
+          <div>
+            {certifications.length === 0 ? (
+              <div className="text-center py-12 bg-card rounded-xl border border-border">
+                <Award size={28} className="text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No verified certifications linked to this species.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {certifications.map((cert) => (
+                  <div key={cert.id} className="bg-card rounded-xl border border-border p-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">{cert.name}</h4>
+                      {cert.issuing_body && <p className="text-xs text-muted-foreground mt-0.5">{cert.issuing_body}</p>}
+                      {cert.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{cert.description}</p>}
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{cert.certification_type}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${CERT_STATUS_BADGE[cert.status] || CERT_STATUS_BADGE.claimed}`}>
+                        {cert.status}
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'markets' && (
+          <div>
+            {markets.length === 0 ? (
+              <div className="text-center py-12 bg-card rounded-xl border border-border">
+                <Globe size={28} className="text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No verified market links for this species.</p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                {markets.map((m) => (
+                  <Link key={m.id} href={`/markets/${m.slug}`} className="bg-card rounded-xl border border-border p-4 hover:border-secondary/40 transition-all">
+                    <div className="flex items-start justify-between gap-2 mb-1">
+                      <h4 className="text-sm font-semibold text-foreground">{m.name}</h4>
+                      <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full shrink-0">{m.market_type}</span>
+                    </div>
+                    {m.region && <p className="text-xs text-muted-foreground">{m.region}</p>}
+                    {m.description && <p className="text-xs text-muted-foreground mt-1 line-clamp-2">{m.description}</p>}
+                  </Link>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-muted-foreground mt-4 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5">
+              ⚠️ Market information is for professional reference and may require independent verification.
+            </p>
+          </div>
+        )}
+
+        {activeTab === 'documents' && (
+          <div>
+            {documents.length === 0 ? (
+              <div className="text-center py-12 bg-card rounded-xl border border-border">
+                <FileText size={28} className="text-muted-foreground mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground">No public documents linked to this species.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {documents.map((doc) => (
+                  <div key={doc.id} className="bg-card rounded-xl border border-border p-4 flex items-start justify-between gap-4">
+                    <div>
+                      <h4 className="text-sm font-semibold text-foreground">{doc.public_title}</h4>
+                      {doc.issuing_body && <p className="text-xs text-muted-foreground mt-0.5">{doc.issuing_body}</p>}
+                      {doc.issue_date && <p className="text-xs text-muted-foreground mt-0.5">Issued: {doc.issue_date}</p>}
+                    </div>
+                    <div className="flex flex-col items-end gap-1.5 shrink-0">
+                      {doc.document_types?.name && <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{doc.document_types.name}</span>}
+                      <span className={`text-xs px-2 py-0.5 rounded-full border ${STATUS_BADGE[doc.status] || STATUS_BADGE.suggested}`}>{doc.status}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Related species */}
+        {related.length > 0 && (
+          <div className="mt-12">
+            <h2 className="text-lg font-bold text-foreground mb-4">Related Species</h2>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+              {related.map((r) => {
+                const rColor = SPECIES_COLORS[r.category || ''] || 'from-slate-100 to-slate-50';
+                const rEmoji = SPECIES_EMOJI[r.category || ''] || '🐠';
+                return (
+                  <Link key={r.id} href={`/species/${r.slug}`} className="bg-card rounded-xl border border-border overflow-hidden hover:shadow-sm transition-all">
+                    <div className={`h-16 bg-gradient-to-br ${rColor} flex items-center justify-center`}>
+                      <span className="text-3xl">{rEmoji}</span>
+                    </div>
+                    <div className="p-3">
+                      <p className="text-xs font-semibold text-foreground truncate">{r.common_name}</p>
+                      <p className="text-xs font-mono-data text-muted-foreground italic truncate">{r.scientific_name}</p>
                     </div>
                   </Link>
                 );
               })}
             </div>
-          )}
-        </div>
+          </div>
+        )}
       </main>
       <Footer />
     </div>
