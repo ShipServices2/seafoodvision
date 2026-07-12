@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle } from 'lucide-react';
+import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
@@ -165,6 +165,15 @@ export default function AdminPage() {
       stat: null,
       statLabel: null,
       badge: 'Coming Soon',
+    },
+    {
+      href: '/admin/knowledge',
+      icon: Database,
+      label: 'Knowledge Graph',
+      description: 'Phase 5.1 — Entities, relations, claims, sources, conflicts',
+      stat: null,
+      statLabel: null,
+      badge: 'Phase 5.1',
     },
   ];
 
