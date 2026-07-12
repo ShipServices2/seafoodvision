@@ -1,132 +1,51 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Info, Tag, Globe2, FileImage, Hash, MapPin, Layers, Thermometer, Ruler,  } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
+import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Info, Tag, Globe2, FileImage, Hash, MapPin, Layers, Thermometer, Ruler } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '@/components/ui/Badge';
 import AssetPreview from './AssetPreview';
 import SimilarAssets from './SimilarAssets';
 import CollectionModal from './CollectionModal';
-import Icon from '@/components/ui/AppIcon';
 
+import { fetchAssetBySlug, type AssetRow } from '@/lib/supabase/assetService';
 
-// Backend integration point: replace with API call to /api/assets/:slug
-const assetData = {
-  id: 'asset-demo-001',
-  slug: 'atlantic-mackerel-whole-fresh-sv001',
-  title: 'Atlantic Mackerel — Whole, Fresh, Ungutted',
-  description:
-    'High-resolution photograph of Atlantic Mackerel (Scomber scombrus) in whole, ungutted presentation. Captured at a commercial fishing port in Brittany, France. The specimen displays characteristic iridescent blue-green dorsal coloration with distinctive dark wavy markings. Product is in fresh, unfrozen state at time of capture.',
-  species: 'Atlantic Mackerel',
-  scientificName: 'Scomber scombrus',
-  family: 'Scombridae',
-  category: 'Fish',
-  productForm: 'Whole, ungutted',
-  productState: 'Fresh',
-  freezingMethod: 'N/A',
-  packaging: 'None — loose presentation',
-  orientation: 'Landscape',
-  dimensions: '5184 × 3456 px',
-  resolution: '300 dpi',
-  format: 'JPEG',
-  fileSize: '14.2 MB',
-  colorSpace: 'sRGB',
-  country: 'France',
-  faoArea: 'FAO 27 — Northeast Atlantic',
-  captureDate: 'Q4 2023',
-  licenseType: 'commercial',
-  commercialUse: true,
-  editorialUse: true,
-  isVerified: true,
-  isRealPhoto: true,
-  status: 'commercial',
-  rightsInfo: 'All rights reserved — SeafoodVision. License required for any use.',
-  restrictions: 'No redistribution. No sub-licensing. Single-use license per purchase.',
-  keywords: [
-    'mackerel',
-    'atlantic mackerel',
-    'scomber scombrus',
-    'scombridae',
-    'whole fish',
-    'ungutted',
-    'fresh fish',
-    'pelagic fish',
-    'FAO 27',
-    'northeast atlantic',
-    'france',
-    'commercial fish',
-    'blue fish',
-    'oily fish',
-  ],
-  isDemo: true,
-  emoji: '🐟',
-  bgColor: 'from-blue-200 via-blue-100 to-slate-100',
-};
+function formatFileSize(bytes: number | null): string {
+  if (!bytes) return '—';
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
 
-const metadataGroups = [
-  {
-    id: 'meta-group-species',
-    title: 'Species & Biology',
-    icon: Info,
-    rows: [
-      { label: 'Common Name', value: assetData.species, mono: false },
-      { label: 'Scientific Name', value: assetData.scientificName, mono: true, italic: true },
-      { label: 'Family', value: assetData.family, mono: false },
-      { label: 'Category', value: assetData.category, mono: false },
-    ],
-  },
-  {
-    id: 'meta-group-product',
-    title: 'Product Details',
-    icon: Layers,
-    rows: [
-      { label: 'Product Form', value: assetData.productForm, mono: false },
-      { label: 'Product State', value: assetData.productState, mono: false },
-      { label: 'Freezing Method', value: assetData.freezingMethod, mono: false },
-      { label: 'Packaging', value: assetData.packaging, mono: false },
-    ],
-  },
-  {
-    id: 'meta-group-geo',
-    title: 'Geographic Data',
-    icon: MapPin,
-    rows: [
-      { label: 'Country of Origin', value: assetData.country, mono: false },
-      { label: 'FAO Area', value: assetData.faoArea, mono: true },
-      { label: 'Capture Period', value: assetData.captureDate, mono: true },
-    ],
-  },
-  {
-    id: 'meta-group-technical',
-    title: 'Technical Specs',
-    icon: FileImage,
-    rows: [
-      { label: 'Dimensions', value: assetData.dimensions, mono: true },
-      { label: 'Resolution', value: assetData.resolution, mono: true },
-      { label: 'Format', value: assetData.format, mono: true },
-      { label: 'File Size', value: assetData.fileSize, mono: true },
-      { label: 'Color Space', value: assetData.colorSpace, mono: true },
-      { label: 'Orientation', value: assetData.orientation, mono: false },
-    ],
-  },
-  {
-    id: 'meta-group-license',
-    title: 'Licensing & Rights',
-    icon: Tag,
-    rows: [
-      { label: 'License Type', value: assetData.licenseType.charAt(0).toUpperCase() + assetData.licenseType.slice(1), mono: false },
-      { label: 'Commercial Use', value: assetData.commercialUse ? 'Permitted (license required)' : 'Not permitted', mono: false },
-      { label: 'Editorial Use', value: assetData.editorialUse ? 'Permitted (license required)' : 'Not permitted', mono: false },
-      { label: 'Rights', value: assetData.rightsInfo, mono: false },
-      { label: 'Restrictions', value: assetData.restrictions, mono: false },
-    ],
-  },
-];
+function formatDimensions(w: number | null, h: number | null): string {
+  if (!w || !h) return '—';
+  return `${w.toLocaleString()} × ${h.toLocaleString()} px`;
+}
 
 export default function AssetDetailContent() {
+  const searchParams = useSearchParams();
+  const slug = searchParams.get('slug');
+
+  const [asset, setAsset] = useState<AssetRow | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [notFound, setNotFound] = useState(false);
   const [favorited, setFavorited] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+
+  useEffect(() => {
+    if (!slug) {
+      setNotFound(true);
+      setLoading(false);
+      return;
+    }
+    fetchAssetBySlug(slug).then((data) => {
+      if (!data) setNotFound(true);
+      else setAsset(data);
+      setLoading(false);
+    });
+  }, [slug]);
 
   const handleFavorite = () => {
     setFavorited(!favorited);
@@ -134,8 +53,121 @@ export default function AssetDetailContent() {
   };
 
   const handleShare = () => {
+    if (typeof window !== 'undefined') {
+      navigator.clipboard?.writeText(window.location.href).catch(() => {});
+    }
     toast.success('Link copied to clipboard');
   };
+
+  if (loading) {
+    return (
+      <div className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 py-8">
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] gap-8">
+          <div className="aspect-[4/3] bg-muted rounded-2xl animate-pulse" />
+          <div className="flex flex-col gap-4">
+            <div className="bg-card rounded-xl border border-border p-5 space-y-3 animate-pulse">
+              <div className="h-5 bg-muted rounded w-3/4" />
+              <div className="h-4 bg-muted rounded w-1/2" />
+              <div className="h-4 bg-muted rounded w-2/3" />
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (notFound || !asset) {
+    return (
+      <div className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 py-24 text-center">
+        <p className="text-5xl mb-4">🐟</p>
+        <h1 className="text-2xl font-bold text-foreground mb-2">Asset not found</h1>
+        <p className="text-muted-foreground mb-6">
+          This asset may have been removed or the link is incorrect.
+        </p>
+        <Link href="/library" className="btn-primary">
+          Browse the library
+        </Link>
+      </div>
+    );
+  }
+
+  const keywords = asset.asset_keywords?.map((ak) => ak.keywords?.term).filter(Boolean) || [];
+  const speciesName = asset.species?.common_name || asset.category || '';
+  const scientificName = asset.species?.scientific_name || '';
+  const categoryEmoji: Record<string, string> = {
+    Fish: '🐟', Crustaceans: '🦐', Cephalopods: '🐙', Molluscs: '🦪',
+    'Fillets & Portions': '🍣', 'Frozen Products': '🧊', Packaging: '📦', Aquaculture: '🌊',
+  };
+  const emoji = categoryEmoji[asset.category || ''] || '🐠';
+  const bgColor = 'from-blue-200 via-blue-100 to-slate-100';
+
+  const assetForPreview = {
+    id: asset.id,
+    slug: asset.slug,
+    title: asset.title,
+    isDemo: asset.is_demo,
+    emoji,
+    bgColor,
+  };
+
+  const metadataGroups = [
+    {
+      id: 'meta-group-species',
+      title: 'Species & Biology',
+      icon: Info,
+      rows: [
+        { label: 'Common Name', value: speciesName || '—', mono: false },
+        { label: 'Scientific Name', value: scientificName || '—', mono: true, italic: true },
+        { label: 'Family', value: asset.species?.family || '—', mono: false },
+        { label: 'Category', value: asset.category || '—', mono: false },
+      ],
+    },
+    {
+      id: 'meta-group-product',
+      title: 'Product Details',
+      icon: Layers,
+      rows: [
+        { label: 'Product Form', value: asset.product_form || '—', mono: false },
+        { label: 'Product State', value: asset.product_state || '—', mono: false },
+        { label: 'Freezing Method', value: asset.freezing_method || 'N/A', mono: false },
+        { label: 'Packaging', value: asset.packaging || 'None', mono: false },
+      ],
+    },
+    {
+      id: 'meta-group-geo',
+      title: 'Geographic Data',
+      icon: MapPin,
+      rows: [
+        { label: 'Country of Origin', value: asset.country || '—', mono: false },
+        { label: 'FAO Area', value: asset.fao_area || '—', mono: true },
+        { label: 'Capture Period', value: asset.capture_period || '—', mono: true },
+      ],
+    },
+    {
+      id: 'meta-group-technical',
+      title: 'Technical Specs',
+      icon: FileImage,
+      rows: [
+        { label: 'Dimensions', value: formatDimensions(asset.width_px, asset.height_px), mono: true },
+        { label: 'Format', value: asset.file_format || '—', mono: true },
+        { label: 'File Size', value: formatFileSize(asset.file_size_bytes), mono: true },
+        { label: 'Color Space', value: asset.color_space || '—', mono: true },
+        { label: 'Orientation', value: asset.orientation || '—', mono: false },
+      ],
+    },
+    {
+      id: 'meta-group-license',
+      title: 'Licensing & Rights',
+      icon: Tag,
+      rows: [
+        { label: 'License Type', value: asset.license_type ? asset.license_type.charAt(0).toUpperCase() + asset.license_type.slice(1) : '—', mono: false },
+        { label: 'Commercial Use', value: asset.commercial_use ? 'Permitted (license required)' : 'Not permitted', mono: false },
+        { label: 'Editorial Use', value: asset.editorial_use ? 'Permitted (license required)' : 'Not permitted', mono: false },
+        { label: 'Rights', value: asset.rights_info || '—', mono: false },
+        { label: 'Restrictions', value: asset.restrictions || '—', mono: false },
+      ],
+    },
+  ];
 
   return (
     <div className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 py-8">
@@ -145,13 +177,17 @@ export default function AssetDetailContent() {
         <ChevronRight size={12} />
         <Link href="/library" className="hover:text-foreground transition-colors">Library</Link>
         <ChevronRight size={12} />
-        <Link href="/library?category=Fish" className="hover:text-foreground transition-colors">Fish</Link>
-        <ChevronRight size={12} />
-        <span className="text-foreground font-medium line-clamp-1 max-w-xs">{assetData.title}</span>
+        {asset.category && (
+          <>
+            <Link href={`/library?category=${encodeURIComponent(asset.category)}`} className="hover:text-foreground transition-colors">{asset.category}</Link>
+            <ChevronRight size={12} />
+          </>
+        )}
+        <span className="text-foreground font-medium line-clamp-1 max-w-xs">{asset.title}</span>
       </nav>
 
       {/* Demo banner */}
-      {assetData.isDemo && (
+      {asset.is_demo && (
         <div className="flex items-center gap-3 bg-purple-50 border border-purple-200 rounded-xl px-4 py-3 mb-6">
           <AlertCircle size={15} className="text-purple-600 shrink-0" />
           <p className="text-sm text-purple-700">
@@ -164,37 +200,39 @@ export default function AssetDetailContent() {
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] xl:grid-cols-[1fr_460px] 2xl:grid-cols-[1fr_500px] gap-8 items-start">
         {/* Left: Preview */}
         <div className="flex flex-col gap-5">
-          <AssetPreview asset={assetData} />
+          <AssetPreview asset={assetForPreview} />
 
           {/* Description */}
-          <div className="bg-card rounded-xl border border-border p-5">
-            <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <Info size={14} className="text-muted-foreground" />
-              Asset Description
-            </h2>
-            <p className="text-sm text-muted-foreground leading-relaxed">
-              {assetData.description}
-            </p>
-          </div>
+          {asset.description && (
+            <div className="bg-card rounded-xl border border-border p-5">
+              <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Info size={14} className="text-muted-foreground" />
+                Asset Description
+              </h2>
+              <p className="text-sm text-muted-foreground leading-relaxed">{asset.description}</p>
+            </div>
+          )}
 
           {/* Keywords */}
-          <div className="bg-card rounded-xl border border-border p-5">
-            <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
-              <Hash size={14} className="text-muted-foreground" />
-              Keywords
-            </h2>
-            <div className="flex flex-wrap gap-1.5">
-              {assetData.keywords.map((kw) => (
-                <Link
-                  key={`kw-${kw}`}
-                  href={`/library?q=${encodeURIComponent(kw)}`}
-                  className="text-xs bg-muted text-muted-foreground px-2.5 py-1 rounded-full hover:bg-secondary/10 hover:text-secondary transition-colors duration-150"
-                >
-                  {kw}
-                </Link>
-              ))}
+          {keywords.length > 0 && (
+            <div className="bg-card rounded-xl border border-border p-5">
+              <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <Hash size={14} className="text-muted-foreground" />
+                Keywords
+              </h2>
+              <div className="flex flex-wrap gap-1.5">
+                {keywords.map((kw) => (
+                  <Link
+                    key={`kw-${kw}`}
+                    href={`/library?q=${encodeURIComponent(kw)}`}
+                    className="text-xs bg-muted text-muted-foreground px-2.5 py-1 rounded-full hover:bg-secondary/10 hover:text-secondary transition-colors duration-150"
+                  >
+                    {kw}
+                  </Link>
+                ))}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         {/* Right: Metadata panel */}
@@ -202,46 +240,43 @@ export default function AssetDetailContent() {
           {/* Title + status */}
           <div className="bg-card rounded-xl border border-border p-5">
             <div className="flex flex-wrap items-center gap-2 mb-3">
-              {assetData.isRealPhoto && (
+              {asset.is_real_photo && (
                 <span className="inline-flex items-center gap-1 badge-real-photo text-xs px-2 py-0.5 rounded-full font-medium">
                   <Camera size={10} />
                   Real Photo
                 </span>
               )}
-              {assetData.isVerified && (
+              {asset.is_verified && (
                 <span className="inline-flex items-center gap-1 badge-verified text-xs px-2 py-0.5 rounded-full font-medium">
                   <CheckCircle2 size={10} />
                   Verified
                 </span>
               )}
-              <Badge
-                variant={assetData.licenseType as 'commercial' | 'editorial'}
-                size="sm"
-              />
+              {asset.license_type && (
+                <Badge variant={asset.license_type as 'commercial' | 'editorial'} size="sm" />
+              )}
               <span className="text-xs font-mono-data text-muted-foreground ml-auto">
-                #{assetData.id}
+                #{asset.public_asset_id || asset.id.slice(0, 8)}
               </span>
             </div>
 
-            <h1 className="text-lg font-bold text-foreground leading-snug mb-1">
-              {assetData.title}
-            </h1>
-            <p className="text-sm font-mono-data text-muted-foreground italic">
-              {assetData.scientificName}
-            </p>
+            <h1 className="text-lg font-bold text-foreground leading-snug mb-1">{asset.title}</h1>
+            {scientificName && (
+              <p className="text-sm font-mono-data text-muted-foreground italic">{scientificName}</p>
+            )}
 
             {/* Quick info row */}
             <div className="grid grid-cols-2 gap-2 mt-4">
               {[
-                { icon: Layers, label: 'Form', value: assetData.productForm },
-                { icon: Thermometer, label: 'State', value: assetData.productState },
-                { icon: Globe2, label: 'FAO Area', value: 'FAO 27' },
-                { icon: Ruler, label: 'Dimensions', value: '5184 × 3456' },
+                { icon: Layers, label: 'Form', value: asset.product_form || '—' },
+                { icon: Thermometer, label: 'State', value: asset.product_state || '—' },
+                { icon: Globe2, label: 'FAO Area', value: asset.fao_area || '—' },
+                { icon: Ruler, label: 'Dimensions', value: asset.width_px && asset.height_px ? `${asset.width_px} × ${asset.height_px}` : '—' },
               ].map((item) => {
-                const Icon = item.icon;
+                const ItemIcon = item.icon;
                 return (
                   <div key={`quick-${item.label}`} className="flex items-start gap-2 bg-muted/50 rounded-lg p-2.5">
-                    <Icon size={13} className="text-muted-foreground mt-0.5 shrink-0" />
+                    <ItemIcon size={13} className="text-muted-foreground mt-0.5 shrink-0" />
                     <div>
                       <p className="text-xs text-muted-foreground">{item.label}</p>
                       <p className="text-xs font-semibold text-foreground font-mono-data line-clamp-1">{item.value}</p>
@@ -312,17 +347,17 @@ export default function AssetDetailContent() {
           ))}
 
           {/* Verification note */}
-          <div className="flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl p-4">
-            <ShieldCheck size={16} className="text-green-verified mt-0.5 shrink-0" />
-            <div>
-              <p className="text-xs font-semibold text-green-800 mb-1">
-                Verified Real Seafood Image
-              </p>
-              <p className="text-xs text-green-700 leading-relaxed">
-                This asset has been manually reviewed by a seafood professional and confirmed as a real photograph with accurate species identification and metadata.
-              </p>
+          {asset.is_verified && (
+            <div className="flex items-start gap-3 bg-green-50 border border-green-200 rounded-xl p-4">
+              <ShieldCheck size={16} className="text-green-verified mt-0.5 shrink-0" />
+              <div>
+                <p className="text-xs font-semibold text-green-800 mb-1">Verified Real Seafood Image</p>
+                <p className="text-xs text-green-700 leading-relaxed">
+                  This asset has been manually reviewed by a seafood professional and confirmed as a real photograph with accurate species identification and metadata.
+                </p>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Legal note */}
           <div className="flex items-start gap-3 bg-amber-50 border border-amber-200 rounded-xl p-4">
@@ -335,25 +370,31 @@ export default function AssetDetailContent() {
       </div>
 
       {/* Similar assets */}
-      <SimilarAssets currentId={assetData.id} category={assetData.category} />
+      <SimilarAssets currentId={asset.id} category={asset.category} />
 
       {/* Collection modal */}
       <CollectionModal
         open={collectionOpen}
         onClose={() => setCollectionOpen(false)}
-        assetTitle={assetData.title}
+        assetTitle={asset.title}
+        assetId={asset.id}
       />
     </div>
   );
 }
 
 interface MetadataGroupProps {
-  group: typeof metadataGroups[0];
+  group: {
+    id: string;
+    title: string;
+    icon: React.ComponentType<{ size?: number; className?: string }>;
+    rows: { label: string; value: string; mono: boolean; italic?: boolean }[];
+  };
 }
 
 function MetadataGroup({ group }: MetadataGroupProps) {
   const [open, setOpen] = useState(true);
-  const Icon = group.icon;
+  const GroupIcon = group.icon;
 
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden">
@@ -362,7 +403,7 @@ function MetadataGroup({ group }: MetadataGroupProps) {
         className="w-full flex items-center gap-2.5 px-4 py-3 text-sm font-semibold text-foreground hover:bg-muted transition-colors duration-150"
         aria-expanded={open}
       >
-        <Icon size={14} className="text-muted-foreground" />
+        <GroupIcon size={14} className="text-muted-foreground" />
         {group.title}
         <ChevronRight
           size={13}
@@ -374,7 +415,7 @@ function MetadataGroup({ group }: MetadataGroupProps) {
           {group.rows.map((row) => (
             <div key={`meta-row-${row.label}`} className="metadata-row">
               <span className="metadata-label">{row.label}</span>
-              <span className={`metadata-value ${row.mono ? 'font-mono-data text-xs' : ''} ${(row as { italic?: boolean }).italic ? 'italic' : ''}`}>
+              <span className={`metadata-value ${row.mono ? 'font-mono-data text-xs' : ''} ${row.italic ? 'italic' : ''}`}>
                 {row.value}
               </span>
             </div>

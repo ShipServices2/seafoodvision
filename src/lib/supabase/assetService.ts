@@ -1,0 +1,205 @@
+'use client';
+
+import { createClient } from '@/lib/supabase/client';
+
+export interface AssetRow {
+  id: string;
+  slug: string;
+  title: string;
+  description: string | null;
+  media_type: string;
+  category: string | null;
+  species_id: string | null;
+  product_form: string | null;
+  product_state: string | null;
+  freezing_method: string | null;
+  packaging: string | null;
+  country: string | null;
+  fao_area: string | null;
+  orientation: string | null;
+  width_px: number | null;
+  height_px: number | null;
+  file_format: string | null;
+  file_size_bytes: number | null;
+  color_space: string | null;
+  capture_period: string | null;
+  license_type: string | null;
+  commercial_use: boolean;
+  editorial_use: boolean;
+  rights_info: string | null;
+  restrictions: string | null;
+  is_real_photo: boolean;
+  is_verified: boolean;
+  review_status: string;
+  publication_status: string;
+  is_demo: boolean;
+  created_at: string;
+  updated_at: string;
+  // joined
+  species?: {
+    id: string;
+    slug: string;
+    common_name: string;
+    scientific_name: string;
+    family: string | null;
+    category: string | null;
+  } | null;
+  asset_keywords?: { keywords: { term: string } }[];
+}
+
+export interface AssetFilters {
+  query?: string;
+  mediaType?: string[];
+  category?: string[];
+  species?: string[];
+  productForm?: string[];
+  productState?: string[];
+  orientation?: string[];
+  licenseType?: string[];
+  faoArea?: string[];
+  verified?: boolean | null;
+  realPhoto?: boolean | null;
+}
+
+export type SortOption = 'newest' | 'oldest' | 'title-az' | 'title-za' | 'most-relevant';
+
+export async function fetchAssets(
+  filters: AssetFilters,
+  sort: SortOption,
+  page: number,
+  pageSize: number
+): Promise<{ assets: AssetRow[]; total: number }> {
+  const supabase = createClient();
+
+  let query = supabase
+    .from('assets')
+    .select(
+      `*, species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term))`,
+      { count: 'exact' }
+    );
+
+  // Text search
+  if (filters.query) {
+    query = query.or(
+      `title.ilike.%${filters.query}%,product_form.ilike.%${filters.query}%,country.ilike.%${filters.query}%`
+    );
+  }
+
+  // Category filter
+  if (filters.category?.length) {
+    query = query.in('category', filters.category);
+  }
+
+  // Product form filter
+  if (filters.productForm?.length) {
+    query = query.in('product_form', filters.productForm);
+  }
+
+  // Product state filter
+  if (filters.productState?.length) {
+    query = query.in('product_state', filters.productState);
+  }
+
+  // Orientation filter
+  if (filters.orientation?.length) {
+    query = query.in('orientation', filters.orientation);
+  }
+
+  // License type filter
+  if (filters.licenseType?.length) {
+    query = query.in('license_type', filters.licenseType);
+  }
+
+  // FAO area filter
+  if (filters.faoArea?.length) {
+    query = query.in('fao_area', filters.faoArea);
+  }
+
+  // Verified filter
+  if (filters.verified === true) {
+    query = query.eq('is_verified', true);
+  }
+
+  // Real photo filter
+  if (filters.realPhoto === true) {
+    query = query.eq('is_real_photo', true);
+  }
+
+  // Sorting
+  switch (sort) {
+    case 'title-az':
+      query = query.order('title', { ascending: true });
+      break;
+    case 'title-za':
+      query = query.order('title', { ascending: false });
+      break;
+    case 'oldest':
+      query = query.order('created_at', { ascending: true });
+      break;
+    case 'newest':
+    default:
+      query = query.order('created_at', { ascending: false });
+      break;
+  }
+
+  // Pagination
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+  query = query.range(from, to);
+
+  const { data, error, count } = await query;
+
+  if (error) {
+    console.error('fetchAssets error:', error.message);
+    return { assets: [], total: 0 };
+  }
+
+  return { assets: (data as AssetRow[]) || [], total: count ?? 0 };
+}
+
+export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {
+  const supabase = createClient();
+
+  const { data, error } = await supabase
+    .from('assets')
+    .select(
+      `*, species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term))`
+    )
+    .eq('slug', slug)
+    .maybeSingle();
+
+  if (error) {
+    console.error('fetchAssetBySlug error:', error.message);
+    return null;
+  }
+
+  return data as AssetRow | null;
+}
+
+export async function fetchSimilarAssets(
+  currentId: string,
+  category: string | null,
+  limit = 6
+): Promise<AssetRow[]> {
+  const supabase = createClient();
+
+  let query = supabase
+    .from('assets')
+    .select(`id, slug, title, is_verified, is_real_photo, species(common_name, scientific_name)`)
+    .neq('id', currentId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (category) {
+    query = query.eq('category', category);
+  }
+
+  const { data, error } = await query;
+
+  if (error) {
+    console.error('fetchSimilarAssets error:', error.message);
+    return [];
+  }
+
+  return (data as AssetRow[]) || [];
+}
