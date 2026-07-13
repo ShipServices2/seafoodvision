@@ -19,7 +19,7 @@ export type SubscriptionStatus = 'active' | 'cancelled' | 'expired' | 'trial' | 
 
 export type ReviewTaskStatus = 'pending' | 'in_progress' | 'completed' | 'rejected';
 
-export type ImportBatchStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'partial';
+export type ImportBatchStatus = 'pending' | 'processing' | 'completed' | 'failed' | 'partial' | 'partially_imported';
 
 export type KnowledgeClaimStatus = 'proposed' | 'verified' | 'disputed' | 'deprecated';
 
