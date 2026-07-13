@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { canAccessAdminRoute, type AppRole } from '@/lib/supabase/roleAuth';
 
 function getProjectRef(): string {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
@@ -42,7 +43,7 @@ export async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname;
 
-  // Protect account routes — redirect to auth if not logged in
+  // ── Protect /account routes ──────────────────────────────────────────────
   if (pathname.startsWith('/account')) {
     if (!user) {
       const url = request.nextUrl.clone();
@@ -52,13 +53,31 @@ export async function middleware(request: NextRequest) {
     }
   }
 
-  // Protect admin routes — redirect to auth if not logged in
-  // Role check is done client-side in each admin page (server-side role check would require DB query)
+  // ── Protect /admin routes — server-side role check ───────────────────────
   if (pathname.startsWith('/admin')) {
+    // Not authenticated → redirect to auth
     if (!user) {
       const url = request.nextUrl.clone();
       url.pathname = '/auth';
       url.searchParams.set('next', pathname);
+      return NextResponse.redirect(url);
+    }
+
+    // Authenticated — fetch role from DB (never trust frontend state)
+    const { data: profileData } = await supabase
+      .from('profiles')
+      .select('role')
+      .eq('id', user.id)
+      .eq('is_active', true)
+      .single();
+
+    const role = (profileData?.role ?? null) as AppRole | null;
+
+    // Use canAccessAdminRoute to enforce role-based access
+    if (!canAccessAdminRoute(role, pathname)) {
+      // Members, customers, visitors → redirect to /account
+      const url = request.nextUrl.clone();
+      url.pathname = '/account';
       return NextResponse.redirect(url);
     }
   }

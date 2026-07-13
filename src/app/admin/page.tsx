@@ -47,13 +47,15 @@ export default function AdminPage() {
       router.replace('/auth?next=/admin');
       return;
     }
-    if (!loading && profile && !['reviewer', 'administrator', 'super_admin'].includes(profile.role)) {
+    // Only super_admin and administrator can access /admin
+    // Reviewers are redirected to /account (middleware also enforces this server-side)
+    if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role)) {
       router.replace('/account');
     }
   }, [user, profile, loading, router]);
 
   useEffect(() => {
-    if (!profile || !['reviewer', 'administrator', 'super_admin'].includes(profile.role)) return;
+    if (!profile || !['administrator', 'super_admin'].includes(profile.role)) return;
     const supabase = createClient();
     Promise.all([
       supabase.from('assets').select('*', { count: 'exact', head: true }),
@@ -102,7 +104,7 @@ export default function AdminPage() {
     );
   }
 
-  if (!['reviewer', 'administrator', 'super_admin'].includes(profile.role)) {
+  if (!['administrator', 'super_admin'].includes(profile.role)) {
     return null;
   }
 
