@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import {
   ArrowLeft, Upload, AlertCircle, CheckCircle2, XCircle, FileText, Eye,
   Play, Loader2, ChevronDown, ChevronUp, Package, Fish, Tag, Hash,
-  Image, FileImage, ClipboardList, RefreshCw,
+  Image, FileImage, ClipboardList, RefreshCw, ShieldAlert, Database,
 } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
@@ -14,21 +14,24 @@ import type { ImportBatch } from '@/lib/supabase/types';
 import { ALLOWED_CSV_COLUMNS } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import Icon from '@/components/ui/AppIcon';
-
 
 // ============================================================
-// SECURITY PATTERNS
+// SECURITY PATTERNS (client-side pre-scan — mirrors server)
 // ============================================================
 const REJECT_PATTERNS = [
-  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path' },
-  { pattern: /\/Users\//, label: 'macOS user path' },
+  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path (C:\\)' },
+  { pattern: /\/Users\//, label: 'macOS user path (/Users/)' },
   { pattern: /dropbox/i, label: 'Dropbox path' },
-  { pattern: /\b\d{2,3}\.\d{4,6},\s*\d{2,3}\.\d{4,6}\b/, label: 'GPS coordinates' },
+  { pattern: /\b\d{1,3}\.\d{4,}\s*,\s*[-]?\d{1,3}\.\d{4,}\b/, label: 'GPS decimal coordinates' },
+  { pattern: /\b(?:lat(?:itude)?|lon(?:gitude)?|gps)[_\s:=]+[-\d.]+/i, label: 'GPS/latitude/longitude field' },
+  { pattern: /\bgps\b/i, label: 'GPS keyword' },
   { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, label: 'Email address' },
-  { pattern: /\+?\d[\d\s\-().]{7,}\d/, label: 'Phone number' },
-  { pattern: /secret|api[_-]?key|password|token/i, label: 'Secret/credential' },
-  { pattern: /C:\\/, label: 'Windows C: path' },
+  { pattern: /(?<!\d)(?:\+?\d[\d\s\-().]{6,}\d)(?!\d)/, label: 'Phone number' },
+  { pattern: /\b(?:secret|api[_-]?key|password|token|private[_-]?key)\b/i, label: 'Secret/credential' },
+  { pattern: /\/originals?\//i, label: 'Original file path' },
+  { pattern: /original[_-]?hd/i, label: 'Original HD reference' },
+  { pattern: /\.sqlite[3]?\b/i, label: 'SQLite file reference' },
+  { pattern: /\.db\b/i, label: 'Database file reference' },
 ];
 
 // ============================================================
@@ -41,18 +44,23 @@ interface DryRunReport {
   rejectionDetails: { row: number; reason: string }[];
   duplicatesDetected: number;
   duplicates: string[];
+  sensitiveDataFound: string[];
   newSpecies: string[];
   newCategories: string[];
   newKeywords: string[];
+  estimatedSizeMB: string;
   preview: Record<string, string>[];
 }
 
 interface ImportReport extends DryRunReport {
   importedCount: number;
   speciesCreated: number;
+  categoriesCreated: number;
   keywordsCreated: number;
   importErrors: string[];
-  finalStatus: string;
+  finalStatus: 'completed' | 'partially_imported' | 'failed';
+  thumbnailsUploaded?: number;
+  previewsUploaded?: number;
 }
 
 type Step = 'upload' | 'dry_run' | 'confirm' | 'importing' | 'done';
@@ -88,13 +96,14 @@ function parseCsv(text: string): Record<string, string>[] {
 // ============================================================
 // CLIENT-SIDE PRE-VALIDATION
 // ============================================================
-function clientValidate(rows: Record<string, string>[]): { errors: string[]; warnings: string[] } {
+function clientValidate(rows: Record<string, string>[]): { errors: string[]; warnings: string[]; sensitiveCount: number } {
   const errors: string[] = [];
   const warnings: string[] = [];
+  let sensitiveCount = 0;
 
   if (rows.length === 0) {
     errors.push('CSV file is empty or has no data rows');
-    return { errors, warnings };
+    return { errors, warnings, sensitiveCount };
   }
 
   const headers = Object.keys(rows[0]);
@@ -110,17 +119,18 @@ function clientValidate(rows: Record<string, string>[]): { errors: string[]; war
     const rowStr = Object.values(row).join(' ');
     for (const { pattern, label } of REJECT_PATTERNS) {
       if (pattern.test(rowStr)) {
-        errors.push(`Row ${idx + 1}: Contains rejected data (${label})`);
+        errors.push(`Row ${idx + 1}: Contains rejected data — ${label}`);
+        sensitiveCount++;
         break;
       }
     }
   });
 
-  return { errors, warnings };
+  return { errors, warnings, sensitiveCount };
 }
 
 // ============================================================
-// STATUS BADGE
+// STATUS BADGE COLORS
 // ============================================================
 const batchStatusColors: Record<string, string> = {
   pending: 'bg-gray-100 text-gray-600',
@@ -128,6 +138,7 @@ const batchStatusColors: Record<string, string> = {
   completed: 'bg-green-100 text-green-700',
   failed: 'bg-red-100 text-red-700',
   partial: 'bg-amber-100 text-amber-700',
+  partially_imported: 'bg-amber-100 text-amber-700',
 };
 
 // ============================================================
@@ -137,43 +148,29 @@ export default function AdminImportsPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
 
-  // Step state
   const [step, setStep] = useState<Step>('upload');
-
-  // CSV file state
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
   const [clientErrors, setClientErrors] = useState<string[]>([]);
   const [clientWarnings, setClientWarnings] = useState<string[]>([]);
-
-  // Media files state
+  const [clientSensitiveCount, setClientSensitiveCount] = useState(0);
   const [thumbnailFiles, setThumbnailFiles] = useState<File[]>([]);
   const [previewFiles, setPreviewFiles] = useState<File[]>([]);
-
-  // Batch config
   const [batchName, setBatchName] = useState('Codex Pilot 100');
-  const [batchNotes, setBatchNotes] = useState('First controlled pilot import — Phase 4.3');
-
-  // Dry run report
+  const [batchNotes, setBatchNotes] = useState('First real Seafood Vision MVP catalog import.');
   const [dryRunReport, setDryRunReport] = useState<DryRunReport | null>(null);
   const [dryRunLoading, setDryRunLoading] = useState(false);
-
-  // Import state
   const [importReport, setImportReport] = useState<ImportReport | null>(null);
   const [importLoading, setImportLoading] = useState(false);
   const [importProgress, setImportProgress] = useState(0);
   const [importProgressLabel, setImportProgressLabel] = useState('');
-
-  // Batch history
   const [batches, setBatches] = useState<ImportBatch[]>([]);
   const [batchesLoading, setBatchesLoading] = useState(true);
-
-  // UI
   const [showPreview, setShowPreview] = useState(false);
   const [showRejections, setShowRejections] = useState(false);
+  const [showSensitive, setShowSensitive] = useState(false);
   const [showBatchHistory, setShowBatchHistory] = useState(false);
 
-  // Auth guard
   useEffect(() => {
     if (!loading && !user) router.replace('/auth?next=/admin/imports');
     if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role)) {
@@ -181,7 +178,6 @@ export default function AdminImportsPage() {
     }
   }, [user, profile, loading, router]);
 
-  // Load batch history
   const loadBatches = useCallback(async () => {
     if (!profile || !['administrator', 'super_admin'].includes(profile.role)) return;
     setBatchesLoading(true);
@@ -213,21 +209,18 @@ export default function AdminImportsPage() {
     const text = await f.text();
     const rows = parseCsv(text);
     setCsvRows(rows);
-    const { errors, warnings } = clientValidate(rows);
+    const { errors, warnings, sensitiveCount } = clientValidate(rows);
     setClientErrors(errors);
     setClientWarnings(warnings);
+    setClientSensitiveCount(sensitiveCount);
   };
 
-  // ---- THUMBNAIL FILES HANDLER ----
   const handleThumbnailFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    setThumbnailFiles(files);
+    setThumbnailFiles(Array.from(e.target.files || []));
   };
 
-  // ---- PREVIEW FILES HANDLER ----
   const handlePreviewFiles = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files || []);
-    setPreviewFiles(files);
+    setPreviewFiles(Array.from(e.target.files || []));
   };
 
   // ---- DRY RUN ----
@@ -250,7 +243,7 @@ export default function AdminImportsPage() {
         setDryRunReport(data.report);
         setStep('confirm');
       }
-    } catch (err) {
+    } catch {
       setClientErrors(['Network error during dry run']);
       setStep('upload');
     } finally {
@@ -264,22 +257,16 @@ export default function AdminImportsPage() {
     setImportLoading(true);
     setStep('importing');
     setImportProgress(10);
-    setImportProgressLabel('Creating import batch…');
+    setImportProgressLabel('Step 1 — Creating import batch…');
 
     try {
-      // Step 1: Insert assets via API
-      setImportProgress(30);
-      setImportProgressLabel('Inserting assets, species, keywords…');
+      setImportProgress(20);
+      setImportProgressLabel('Steps 2–4 — Inserting categories, species, assets…');
 
       const res = await fetch('/api/admin/import', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: 'import',
-          rows: csvRows,
-          batchName,
-          batchNotes,
-        }),
+        body: JSON.stringify({ mode: 'import', rows: csvRows, batchName, batchNotes }),
       });
       const data = await res.json();
 
@@ -290,15 +277,19 @@ export default function AdminImportsPage() {
         return;
       }
 
-      setImportProgress(60);
-      setImportProgressLabel('Uploading thumbnails…');
+      setImportProgress(50);
+      setImportProgressLabel('Steps 5–7 — Linking species, keywords, relations…');
 
-      // Step 2: Upload thumbnail files
+      // Brief pause to show progress
+      await new Promise((r) => setTimeout(r, 300));
+
+      setImportProgress(60);
+      setImportProgressLabel('Step 8 — Uploading thumbnails to asset-thumbnails…');
+
       let thumbUploaded = 0;
       let previewUploaded = 0;
 
       if (thumbnailFiles.length > 0 && data.batchId) {
-        // Fetch the newly created assets to map filenames to asset IDs
         const supabase = createClient();
         const { data: newAssets } = await supabase
           .from('assets')
@@ -315,7 +306,9 @@ export default function AdminImportsPage() {
 
         for (const file of thumbnailFiles) {
           const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
-          const assetId = assetMap.get(baseName) || assetMap.get(baseName.replace(/_thumb$/, ''));
+          const assetId = assetMap.get(baseName)
+            || assetMap.get(baseName.replace(/_thumb(nail)?$/, ''))
+            || assetMap.get(baseName.replace(/_t$/, ''));
           if (!assetId) continue;
 
           const fd = new FormData();
@@ -329,7 +322,7 @@ export default function AdminImportsPage() {
       }
 
       setImportProgress(80);
-      setImportProgressLabel('Uploading watermarked previews…');
+      setImportProgressLabel('Step 9 — Uploading watermarked previews to asset-previews…');
 
       if (previewFiles.length > 0 && data.batchId) {
         const supabase = createClient();
@@ -348,7 +341,10 @@ export default function AdminImportsPage() {
 
         for (const file of previewFiles) {
           const baseName = file.name.replace(/\.[^.]+$/, '').toLowerCase();
-          const assetId = assetMap.get(baseName) || assetMap.get(baseName.replace(/_preview$/, '').replace(/_watermark$/, ''));
+          const assetId = assetMap.get(baseName)
+            || assetMap.get(baseName.replace(/_preview$/, ''))
+            || assetMap.get(baseName.replace(/_watermark$/, ''))
+            || assetMap.get(baseName.replace(/_wm$/, ''));
           if (!assetId) continue;
 
           const fd = new FormData();
@@ -362,17 +358,17 @@ export default function AdminImportsPage() {
       }
 
       setImportProgress(100);
-      setImportProgressLabel('Import complete');
+      setImportProgressLabel('Step 10 — Finalizing batch report…');
 
       setImportReport({
         ...data.report,
         thumbnailsUploaded: thumbUploaded,
         previewsUploaded: previewUploaded,
-      } as ImportReport & { thumbnailsUploaded: number; previewsUploaded: number });
+      } as ImportReport);
 
       setStep('done');
       loadBatches();
-    } catch (err) {
+    } catch {
       setClientErrors(['Network error during import']);
       setStep('confirm');
     } finally {
@@ -386,6 +382,7 @@ export default function AdminImportsPage() {
     setCsvRows([]);
     setClientErrors([]);
     setClientWarnings([]);
+    setClientSensitiveCount(0);
     setThumbnailFiles([]);
     setPreviewFiles([]);
     setDryRunReport(null);
@@ -420,7 +417,7 @@ export default function AdminImportsPage() {
             </div>
             <div>
               <h1 className="text-xl font-bold text-foreground">Secure Import Pipeline</h1>
-              <p className="text-sm text-muted-foreground">Phase 4.3 — Codex Pilot Batch Import</p>
+              <p className="text-sm text-muted-foreground">Codex Pilot Batch Import — 10-step transactional workflow</p>
             </div>
           </div>
           {step !== 'upload' && (
@@ -441,12 +438,13 @@ export default function AdminImportsPage() {
               importing: '4. Importing',
               done: '5. Complete',
             };
+            const stepOrder = ['upload', 'dry_run', 'confirm', 'importing', 'done'];
             const isActive = step === s;
-            const isPast = ['upload', 'dry_run', 'confirm', 'importing', 'done'].indexOf(step) > i;
+            const isPast = stepOrder.indexOf(step) > i;
             return (
               <React.Fragment key={s}>
                 <div className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full whitespace-nowrap transition-colors ${
-                  isActive ? 'bg-secondary text-white' : isPast ?'bg-green-100 text-green-700': 'bg-muted text-muted-foreground'
+                  isActive ? 'bg-secondary text-white' : isPast ? 'bg-green-100 text-green-700' : 'bg-muted text-muted-foreground'
                 }`}>
                   {isPast && !isActive && <CheckCircle2 size={12} />}
                   {labels[s]}
@@ -464,13 +462,13 @@ export default function AdminImportsPage() {
             {/* Security notice */}
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
               <div className="flex items-start gap-3">
-                <AlertCircle size={16} className="text-amber-600 shrink-0 mt-0.5" />
+                <ShieldAlert size={16} className="text-amber-600 shrink-0 mt-0.5" />
                 <div>
-                  <p className="text-sm font-semibold text-amber-800 mb-1">Security validation active</p>
+                  <p className="text-sm font-semibold text-amber-800 mb-1">Security validation active — 14 rejection patterns</p>
                   <p className="text-xs text-amber-700 leading-relaxed">
-                    Rejected: Windows paths, Dropbox paths, GPS coordinates, emails, phones, secrets, original file paths.
-                    All assets imported with <code className="bg-amber-100 px-1 rounded">is_demo=false</code>, <code className="bg-amber-100 px-1 rounded">review_status=under_review</code>, <code className="bg-amber-100 px-1 rounded">publication_status=preview_only</code>.
-                    No auto-approval. No originals uploaded.
+                    Rejected: Windows paths, Dropbox, GPS/lat/lon, emails, phones, secrets/tokens, original file paths, SQLite/.db files.
+                    All assets imported with <code className="bg-amber-100 px-1 rounded">is_demo=false</code>, <code className="bg-amber-100 px-1 rounded">review_status=under_review</code>, <code className="bg-amber-100 px-1 rounded">publication_status=preview_only</code>, <code className="bg-amber-100 px-1 rounded">commercial_use=false</code>.
+                    No auto-approval. No originals uploaded. Never writes to <code className="bg-amber-100 px-1 rounded">asset-originals</code>.
                   </p>
                 </div>
               </div>
@@ -504,7 +502,7 @@ export default function AdminImportsPage() {
                 {/* Thumbnail Upload */}
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
-                    Thumbnails (optional) — bucket: asset-thumbnails
+                    Thumbnails (optional) — uploads to: <code className="font-mono-data text-secondary">asset-thumbnails</code>
                   </label>
                   <div
                     className="border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-secondary/40 transition-colors cursor-pointer"
@@ -512,13 +510,13 @@ export default function AdminImportsPage() {
                   >
                     <Image size={22} className="text-muted-foreground mx-auto mb-1" />
                     <p className="text-xs text-muted-foreground">
-                      {thumbnailFiles.length > 0 ? `${thumbnailFiles.length} files selected` : 'Select thumbnail images (jpg, png, webp)'}
+                      {thumbnailFiles.length > 0 ? `${thumbnailFiles.length} files selected` : 'Select thumbnail images (JPEG, PNG, WEBP, HEIC — max 20 MB each)'}
                     </p>
-                    <input id="thumb-input" type="file" accept="image/*" multiple onChange={handleThumbnailFiles} className="hidden" />
+                    <input id="thumb-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={handleThumbnailFiles} className="hidden" />
                   </div>
                   {thumbnailFiles.length > 0 && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      Files: {thumbnailFiles.slice(0, 3).map(f => f.name).join(', ')}{thumbnailFiles.length > 3 ? ` +${thumbnailFiles.length - 3} more` : ''}
+                      {thumbnailFiles.slice(0, 3).map(f => f.name).join(', ')}{thumbnailFiles.length > 3 ? ` +${thumbnailFiles.length - 3} more` : ''}
                     </p>
                   )}
                 </div>
@@ -526,7 +524,7 @@ export default function AdminImportsPage() {
                 {/* Preview Upload */}
                 <div>
                   <label className="block text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
-                    Watermarked Previews (optional) — bucket: asset-previews
+                    Watermarked Previews (optional) — uploads to: <code className="font-mono-data text-secondary">asset-previews</code>
                   </label>
                   <div
                     className="border-2 border-dashed border-border rounded-xl p-4 text-center hover:border-secondary/40 transition-colors cursor-pointer"
@@ -534,13 +532,13 @@ export default function AdminImportsPage() {
                   >
                     <FileImage size={22} className="text-muted-foreground mx-auto mb-1" />
                     <p className="text-xs text-muted-foreground">
-                      {previewFiles.length > 0 ? `${previewFiles.length} files selected` : 'Select watermarked preview images'}
+                      {previewFiles.length > 0 ? `${previewFiles.length} files selected` : 'Select watermarked preview images (JPEG, PNG, WEBP, HEIC — max 20 MB each)'}
                     </p>
-                    <input id="preview-input" type="file" accept="image/*" multiple onChange={handlePreviewFiles} className="hidden" />
+                    <input id="preview-input" type="file" accept="image/jpeg,image/png,image/webp,image/heic,image/heif" multiple onChange={handlePreviewFiles} className="hidden" />
                   </div>
                   {previewFiles.length > 0 && (
                     <p className="text-xs text-muted-foreground mt-1">
-                      Files: {previewFiles.slice(0, 3).map(f => f.name).join(', ')}{previewFiles.length > 3 ? ` +${previewFiles.length - 3} more` : ''}
+                      {previewFiles.slice(0, 3).map(f => f.name).join(', ')}{previewFiles.length > 3 ? ` +${previewFiles.length - 3} more` : ''}
                     </p>
                   )}
                 </div>
@@ -569,6 +567,17 @@ export default function AdminImportsPage() {
                   </div>
                 </div>
 
+                {/* Sensitive data warning */}
+                {clientSensitiveCount > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <p className="text-sm font-semibold text-red-700 flex items-center gap-2">
+                      <ShieldAlert size={14} />
+                      {clientSensitiveCount} row(s) contain sensitive data and will be rejected
+                    </p>
+                    <p className="text-xs text-red-600 mt-1">Remove GPS coordinates, emails, phone numbers, Windows/Dropbox paths, and secrets before importing.</p>
+                  </div>
+                )}
+
                 {/* Client-side errors */}
                 {clientErrors.length > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4">
@@ -576,7 +585,7 @@ export default function AdminImportsPage() {
                       <XCircle size={14} />
                       Validation errors ({clientErrors.length})
                     </p>
-                    <ul className="space-y-1">
+                    <ul className="space-y-1 max-h-40 overflow-y-auto">
                       {clientErrors.map((e, i) => (
                         <li key={i} className="text-xs text-red-600">• {e}</li>
                       ))}
@@ -614,7 +623,7 @@ export default function AdminImportsPage() {
                     ) : (
                       <span className="flex items-center gap-2">
                         <Eye size={14} />
-                        Run Dry Run Analysis ({csvRows.length} rows)
+                        Run Dry Run Analysis ({csvRows.length} rows) — No data will be inserted
                       </span>
                     )}
                   </button>
@@ -625,7 +634,7 @@ export default function AdminImportsPage() {
             {/* STEP: CONFIRM (dry run results) */}
             {(step === 'confirm' || step === 'done') && dryRunReport && (
               <div className="bg-card rounded-xl border border-border p-6 space-y-5">
-                <h2 className="text-sm font-semibold text-foreground">Step 2 — Dry Run Report</h2>
+                <h2 className="text-sm font-semibold text-foreground">Step 2 — Dry Run Report (pre-insert validation)</h2>
 
                 {/* Summary grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
@@ -641,6 +650,27 @@ export default function AdminImportsPage() {
                     </div>
                   ))}
                 </div>
+
+                {/* Sensitive data alert */}
+                {dryRunReport.sensitiveDataFound && dryRunReport.sensitiveDataFound.length > 0 && (
+                  <div className="bg-red-50 border border-red-200 rounded-xl p-4">
+                    <button
+                      onClick={() => setShowSensitive(!showSensitive)}
+                      className="flex items-center gap-2 text-sm font-semibold text-red-700 w-full"
+                    >
+                      <ShieldAlert size={14} />
+                      Sensitive data detected ({dryRunReport.sensitiveDataFound.length} rows) — these rows were rejected
+                      {showSensitive ? <ChevronUp size={12} className="ml-auto" /> : <ChevronDown size={12} className="ml-auto" />}
+                    </button>
+                    {showSensitive && (
+                      <ul className="mt-2 space-y-1 max-h-32 overflow-y-auto">
+                        {dryRunReport.sensitiveDataFound.map((s, i) => (
+                          <li key={i} className="text-xs text-red-600">• {s}</li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                )}
 
                 {/* New entities */}
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -669,6 +699,16 @@ export default function AdminImportsPage() {
                     </div>
                   </div>
                 </div>
+
+                {/* Estimated size */}
+                {dryRunReport.estimatedSizeMB && (
+                  <div className="flex items-center gap-2 bg-blue-50 border border-blue-200 rounded-xl p-3">
+                    <Database size={14} className="text-blue-600 shrink-0" />
+                    <p className="text-xs text-blue-700">
+                      Estimated storage: ~<strong>{dryRunReport.estimatedSizeMB} MB</strong> for thumbnails + previews (500 KB/asset estimate)
+                    </p>
+                  </div>
+                )}
 
                 {/* Rejection details */}
                 {dryRunReport.rejectionDetails.length > 0 && (
@@ -727,12 +767,35 @@ export default function AdminImportsPage() {
                   </div>
                 )}
 
-                {/* Statuses notice */}
+                {/* Enforced statuses notice */}
                 <div className="bg-blue-50 border border-blue-200 rounded-xl p-4">
-                  <p className="text-xs font-semibold text-blue-800 mb-1">Import statuses (enforced)</p>
-                  <div className="flex flex-wrap gap-2 mt-1">
-                    {['is_demo = false', 'review_status = under_review', 'publication_status = preview_only', 'rights_info = review_required', 'commercial_use = false'].map((s) => (
+                  <p className="text-xs font-semibold text-blue-800 mb-2">Enforced statuses on all imported assets</p>
+                  <div className="flex flex-wrap gap-2">
+                    {[
+                      'is_demo = false',
+                      'review_status = under_review',
+                      'publication_status = preview_only',
+                      'rights_info = review_required',
+                      'commercial_use = false',
+                      'is_verified = false',
+                    ].map((s) => (
                       <span key={s} className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-mono-data">{s}</span>
+                    ))}
+                  </div>
+                  <p className="text-xs text-blue-600 mt-2">No asset will be auto-approved or auto-published. Administrator review required.</p>
+                </div>
+
+                {/* 10-step workflow notice */}
+                <div className="bg-muted/30 rounded-xl p-4">
+                  <p className="text-xs font-semibold text-foreground mb-2">10-step transactional import order</p>
+                  <div className="grid grid-cols-2 gap-1">
+                    {[
+                      '1. Batch creation', '2. Categories', '3. Species (dedup by sci. name)',
+                      '4. Assets', '5. Asset-species relations', '6. Keywords',
+                      '7. Asset-keyword relations', '8. Thumbnails → asset-thumbnails',
+                      '9. Previews → asset-previews', '10. Batch report',
+                    ].map((s, i) => (
+                      <p key={i} className="text-xs text-muted-foreground">• {s}</p>
                     ))}
                   </div>
                 </div>
@@ -741,10 +804,10 @@ export default function AdminImportsPage() {
                 {step === 'confirm' && dryRunReport.validRows > 0 && isAdmin && (
                   <div className="border-t border-border pt-4">
                     <p className="text-sm text-muted-foreground mb-3">
-                      Ready to import <strong className="text-foreground">{dryRunReport.validRows} assets</strong> into Supabase.
+                      Ready to import <strong className="text-foreground">{dryRunReport.validRows} assets</strong>.
                       {thumbnailFiles.length > 0 && ` ${thumbnailFiles.length} thumbnails`}
                       {previewFiles.length > 0 && ` + ${previewFiles.length} previews`}
-                      {' '}will be uploaded.
+                      {' '}will be uploaded after metadata insertion.
                     </p>
                     <button
                       onClick={handleImport}
@@ -778,32 +841,36 @@ export default function AdminImportsPage() {
                   />
                 </div>
                 <p className="text-xs text-muted-foreground">{importProgress}%</p>
+                <p className="text-xs text-muted-foreground mt-3">Do not close this tab during import.</p>
               </div>
             )}
 
             {/* STEP: DONE */}
             {step === 'done' && importReport && (
               <div className="bg-card rounded-xl border border-border p-6 space-y-5">
+                {/* Status banner */}
                 <div className={`flex items-start gap-3 p-4 rounded-xl border ${
                   importReport.finalStatus === 'completed' ? 'bg-green-50 border-green-200' :
-                  importReport.finalStatus === 'partial'? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'
+                  importReport.finalStatus === 'partially_imported'? 'bg-amber-50 border-amber-200' : 'bg-red-50 border-red-200'
                 }`}>
                   {importReport.finalStatus === 'completed' ? (
                     <CheckCircle2 size={20} className="text-green-600 shrink-0 mt-0.5" />
-                  ) : importReport.finalStatus === 'partial' ? (
+                  ) : importReport.finalStatus === 'partially_imported' ? (
                     <AlertCircle size={20} className="text-amber-600 shrink-0 mt-0.5" />
                   ) : (
                     <XCircle size={20} className="text-red-600 shrink-0 mt-0.5" />
                   )}
                   <div>
-                    <p className={`font-semibold ${
+                    <p className={`font-semibold capitalize ${
                       importReport.finalStatus === 'completed' ? 'text-green-800' :
-                      importReport.finalStatus === 'partial' ? 'text-amber-800' : 'text-red-800'
+                      importReport.finalStatus === 'partially_imported' ? 'text-amber-800' : 'text-red-800'
                     }`}>
-                      Import {importReport.finalStatus}
+                      Batch status: {importReport.finalStatus.replace('_', ' ')}
                     </p>
                     <p className="text-sm text-muted-foreground mt-0.5">
                       {importReport.importedCount} assets imported · {importReport.rejectedRows} rejected
+                      {importReport.thumbnailsUploaded !== undefined && ` · ${importReport.thumbnailsUploaded} thumbnails`}
+                      {importReport.previewsUploaded !== undefined && ` · ${importReport.previewsUploaded} previews`}
                     </p>
                   </div>
                 </div>
@@ -816,11 +883,11 @@ export default function AdminImportsPage() {
                     { label: 'Keywords created', value: importReport.keywordsCreated, icon: Hash },
                     { label: 'Rejected rows', value: importReport.rejectedRows, icon: XCircle },
                   ].map((s) => {
-                    const Icon = s.icon;
+                    const IconComp = s.icon;
                     return (
                       <div key={s.label} className="bg-muted/50 rounded-xl p-3">
                         <div className="flex items-center gap-1.5 mb-1">
-                          <Icon size={12} className="text-muted-foreground" />
+                          <IconComp size={12} className="text-muted-foreground" />
                           <p className="text-xs text-muted-foreground">{s.label}</p>
                         </div>
                         <p className="text-xl font-bold font-mono-data text-foreground">{s.value}</p>
@@ -829,30 +896,59 @@ export default function AdminImportsPage() {
                   })}
                 </div>
 
-                {/* Confirmations */}
-                <div className="space-y-2">
+                {/* Storage uploads */}
+                {(importReport.thumbnailsUploaded !== undefined || importReport.previewsUploaded !== undefined) && (
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="bg-muted/30 rounded-xl p-3 flex items-center gap-2">
+                      <Image size={14} className="text-secondary shrink-0" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Thumbnails uploaded</p>
+                        <p className="text-sm font-bold text-foreground">{importReport.thumbnailsUploaded ?? 0}</p>
+                        <p className="text-xs text-muted-foreground font-mono-data">→ asset-thumbnails</p>
+                      </div>
+                    </div>
+                    <div className="bg-muted/30 rounded-xl p-3 flex items-center gap-2">
+                      <FileImage size={14} className="text-secondary shrink-0" />
+                      <div>
+                        <p className="text-xs text-muted-foreground">Previews uploaded</p>
+                        <p className="text-sm font-bold text-foreground">{importReport.previewsUploaded ?? 0}</p>
+                        <p className="text-xs text-muted-foreground font-mono-data">→ asset-previews</p>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Security confirmations */}
+                <div className="space-y-1.5">
                   {[
-                    '✓ No original files imported',
-                    '✓ No Dropbox access used',
-                    '✓ No Windows paths imported',
-                    '✓ No GPS coordinates imported',
-                    '✓ All assets set to is_demo=false',
-                    '✓ All assets set to review_status=under_review',
-                    '✓ No asset auto-approved or auto-published',
+                    'No original files imported or uploaded',
+                    'No Dropbox access used',
+                    'No Windows/macOS paths imported',
+                    'No GPS coordinates imported',
+                    'No SQLite or database files imported',
+                    'All assets set to is_demo=false',
+                    'All assets set to review_status=under_review',
+                    'All assets set to publication_status=preview_only',
+                    'All assets set to commercial_use=false',
+                    'No asset auto-approved or auto-published',
+                    'asset-originals bucket was never written to',
                   ].map((c) => (
                     <p key={c} className="text-xs text-green-700 flex items-center gap-1.5">
                       <CheckCircle2 size={11} className="shrink-0" />
-                      {c.replace('✓ ', '')}
+                      {c}
                     </p>
                   ))}
                 </div>
 
+                {/* Import errors */}
                 {importReport.importErrors.length > 0 && (
                   <div className="bg-red-50 border border-red-200 rounded-xl p-4">
                     <p className="text-sm font-semibold text-red-700 mb-2">Import errors ({importReport.importErrors.length})</p>
-                    {importReport.importErrors.map((e, i) => (
-                      <p key={i} className="text-xs text-red-600">• {e}</p>
-                    ))}
+                    <div className="max-h-40 overflow-y-auto space-y-1">
+                      {importReport.importErrors.map((e, i) => (
+                        <p key={i} className="text-xs text-red-600">• {e}</p>
+                      ))}
+                    </div>
                   </div>
                 )}
 
@@ -885,19 +981,20 @@ export default function AdminImportsPage() {
               </div>
             </div>
 
-            {/* Storage buckets notice */}
+            {/* Storage buckets */}
             <div className="bg-card rounded-xl border border-border p-5">
               <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
                 <Package size={14} />
-                Storage Buckets Required
+                Storage Buckets
               </h3>
               <div className="space-y-2">
                 {[
-                  { name: 'asset-thumbnails', desc: 'Thumbnail images', required: true },
-                  { name: 'asset-previews', desc: 'Watermarked previews', required: true },
+                  { name: 'asset-thumbnails', desc: 'Thumbnail images', write: true },
+                  { name: 'asset-previews', desc: 'Watermarked previews', write: true },
+                  { name: 'asset-originals', desc: 'HD originals — NEVER written', write: false },
                 ].map((b) => (
                   <div key={b.name} className="flex items-start gap-2">
-                    <div className="w-1.5 h-1.5 rounded-full bg-amber-400 mt-1.5 shrink-0" />
+                    <div className={`w-1.5 h-1.5 rounded-full mt-1.5 shrink-0 ${b.write ? 'bg-green-400' : 'bg-red-400'}`} />
                     <div>
                       <p className="text-xs font-mono-data text-foreground">{b.name}</p>
                       <p className="text-xs text-muted-foreground">{b.desc}</p>
@@ -905,8 +1002,29 @@ export default function AdminImportsPage() {
                   </div>
                 ))}
                 <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2 mt-2">
-                  Create these buckets in Supabase Dashboard → Storage before uploading files.
+                  Create <code className="font-mono-data">asset-thumbnails</code> and <code className="font-mono-data">asset-previews</code> buckets in Supabase Dashboard → Storage before uploading.
                 </p>
+              </div>
+            </div>
+
+            {/* Rejection patterns */}
+            <div className="bg-card rounded-xl border border-border p-5">
+              <h3 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">
+                <ShieldAlert size={14} />
+                Rejection Patterns
+              </h3>
+              <div className="space-y-1">
+                {[
+                  'C:\\ Windows paths', '/Users/ macOS paths', 'Dropbox references',
+                  'GPS decimal coordinates', 'lat/lon/gps fields', 'Email addresses',
+                  'Phone numbers', 'Secrets/tokens/API keys', 'Original file paths',
+                  'SQLite/.db files',
+                ].map((p) => (
+                  <p key={p} className="text-xs text-muted-foreground flex items-center gap-1.5">
+                    <XCircle size={10} className="text-red-400 shrink-0" />
+                    {p}
+                  </p>
+                ))}
               </div>
             </div>
 

@@ -2,8 +2,7 @@ import React from 'react';
 import type { Metadata, Viewport } from 'next';
 import { Plus_Jakarta_Sans, IBM_Plex_Mono } from 'next/font/google';
 import '../styles/tailwind.css';
-import { Toaster } from 'sonner';
-import { AuthProvider } from '@/contexts/AuthContext';
+import { Providers } from './providers';
 
 const plusJakartaSans = Plus_Jakarta_Sans({
   subsets: ['latin'],
@@ -48,21 +47,12 @@ export default function RootLayout({
       className={`${plusJakartaSans.variable} ${ibmPlexMono.variable}`}
     >
       <body className={plusJakartaSans.className}>
-        <AuthProvider>
+        <Providers>
           {children}
-        </AuthProvider>
-        <Toaster
-          position="bottom-right"
-          toastOptions={{
-            style: {
-              fontFamily: 'var(--font-plus-jakarta-sans)',
-              fontSize: '14px',
-            },
-          }}
-        />
-
-        <script type="module" async src="https://static.rocket.new/rocket-web.js?_cfg=https%3A%2F%2Fseafoodvis1067back.builtwithrocket.new&_be=https%3A%2F%2Fappanalytics.rocket.new&_v=0.1.19" />
-        <script type="module" defer src="https://static.rocket.new/rocket-shot.js?v=0.0.2" /></body>
+        </Providers>
+      
+      <script type="module" async src="https://static.rocket.new/rocket-web.js?_cfg=https%3A%2F%2Fseafoodvis1067back.builtwithrocket.new&_be=https%3A%2F%2Fappanalytics.rocket.new&_v=0.1.19" />
+      <script type="module" defer src="https://static.rocket.new/rocket-shot.js?v=0.0.2" /></body>
     </html>
   );
 }

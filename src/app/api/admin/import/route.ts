@@ -5,16 +5,31 @@ import { createClient } from '@/lib/supabase/server';
 // SECURITY PATTERNS — reject any row containing these
 // ============================================================
 const REJECT_PATTERNS = [
-  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path' },
-  { pattern: /\/Users\//, label: 'macOS user path' },
+  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path (C:\\)' },
+  { pattern: /\/Users\//, label: 'macOS user path (/Users/)' },
   { pattern: /dropbox/i, label: 'Dropbox path' },
-  { pattern: /\b\d{2,3}\.\d{4,6},\s*\d{2,3}\.\d{4,6}\b/, label: 'GPS coordinates' },
+  // GPS: decimal coordinates, DMS notation, or explicit GPS/lat/lon fields
+  { pattern: /\b\d{1,3}\.\d{4,}\s*,\s*[-]?\d{1,3}\.\d{4,}\b/, label: 'GPS decimal coordinates' },
+  { pattern: /\b(?:lat(?:itude)?|lon(?:gitude)?|gps)[_\s:=]+[-\d.]+/i, label: 'GPS/latitude/longitude field' },
+  { pattern: /\bgps\b/i, label: 'GPS keyword' },
+  // Email
   { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, label: 'Email address' },
-  { pattern: /\+?\d[\d\s\-().]{7,}\d/, label: 'Phone number' },
-  { pattern: /secret|api[_-]?key|password|token/i, label: 'Secret/credential' },
-  { pattern: /C:\\/, label: 'Windows C: path' },
-  { pattern: /\/original[s]?\//i, label: 'Original file path' },
+  // Phone (7+ digit sequences with separators)
+  { pattern: /(?<!\d)(?:\+?\d[\d\s\-().]{6,}\d)(?!\d)/, label: 'Phone number' },
+  // Credentials
+  { pattern: /\b(?:secret|api[_-]?key|password|token|private[_-]?key)\b/i, label: 'Secret/credential' },
+  // Original file paths
+  { pattern: /\/originals?\//i, label: 'Original file path' },
+  { pattern: /original[_-]?hd/i, label: 'Original HD reference' },
+  // SQLite / database files
+  { pattern: /\.sqlite[3]?\b/i, label: 'SQLite file reference' },
+  { pattern: /\.db\b/i, label: 'Database file reference' },
 ];
+
+// MIME types allowed for media uploads
+const ALLOWED_MIME_TYPES = new Set([
+  'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/heic', 'image/heif',
+]);
 
 function slugify(text: string): string {
   return text
@@ -33,10 +48,17 @@ function scanForRejectedPatterns(value: string): string | null {
 }
 
 function validateRow(row: Record<string, string>, rowIndex: number): { valid: boolean; reason?: string } {
+  // Scan all values
   const allValues = Object.values(row).join(' ');
   const rejection = scanForRejectedPatterns(allValues);
   if (rejection) {
     return { valid: false, reason: `Row ${rowIndex + 1}: Rejected — ${rejection}` };
+  }
+  // Also scan keys (column names) for sensitive field names
+  const allKeys = Object.keys(row).join(' ');
+  const keyRejection = scanForRejectedPatterns(allKeys);
+  if (keyRejection) {
+    return { valid: false, reason: `Row ${rowIndex + 1}: Rejected — sensitive column detected (${keyRejection})` };
   }
   if (!row.title || row.title.trim() === '') {
     return { valid: false, reason: `Row ${rowIndex + 1}: Missing required field 'title'` };
@@ -44,8 +66,15 @@ function validateRow(row: Record<string, string>, rowIndex: number): { valid: bo
   return { valid: true };
 }
 
+// Make a slug unique by appending a suffix if it collides
+function makeUniqueSlug(base: string, existingSet: Set<string>): string {
+  if (!existingSet.has(base)) return base;
+  let i = 2;
+  while (existingSet.has(`${base}-${i}`)) i++;
+  return `${base}-${i}`;
+}
+
 // POST /api/admin/import
-// Body: { mode: 'dry_run' | 'import', rows: Record<string, string>[], batchName?: string, batchNotes?: string }
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -85,48 +114,66 @@ export async function POST(request: NextRequest) {
     const newSpeciesNames = new Set<string>();
     const newCategoryNames = new Set<string>();
     const newKeywords = new Set<string>();
-    const duplicateSlugs: string[] = [];
+    const duplicatePublicIds: string[] = [];
+    const sensitiveDataFound: string[] = [];
 
-    // Fetch existing slugs for duplicate detection
-    const { data: existingSlugs } = await supabase
+    // Fetch existing assets for deduplication — primary key: public_asset_id, secondary: slug
+    const { data: existingAssets } = await supabase
       .from('assets')
       .select('slug, public_asset_id');
-    const existingSlugSet = new Set((existingSlugs || []).map((a: { slug: string }) => a.slug));
-    const existingPublicIds = new Set((existingSlugs || []).map((a: { public_asset_id: string | null }) => a.public_asset_id).filter(Boolean));
+    const existingSlugSet = new Set((existingAssets || []).map((a: { slug: string }) => a.slug));
+    const existingPublicIds = new Set(
+      (existingAssets || [])
+        .map((a: { public_asset_id: string | null }) => a.public_asset_id)
+        .filter(Boolean) as string[]
+    );
 
-    // Fetch existing species for duplicate detection
+    // Fetch existing species for deduplication by scientific name
     const { data: existingSpecies } = await supabase
       .from('species')
-      .select('slug, scientific_name, common_name');
+      .select('id, slug, scientific_name, common_name');
     const existingSpeciesSlugs = new Set((existingSpecies || []).map((s: { slug: string }) => s.slug));
-    const existingScientificNames = new Set((existingSpecies || []).map((s: { scientific_name: string }) => s.scientific_name?.toLowerCase()));
+    const existingScientificNames = new Set(
+      (existingSpecies || []).map((s: { scientific_name: string }) => s.scientific_name?.toLowerCase())
+    );
+
+    // Track public_asset_ids seen in this batch (intra-batch dedup)
+    const batchPublicIds = new Set<string>();
 
     rows.forEach((row, idx) => {
       const validation = validateRow(row, idx);
       if (!validation.valid) {
         rejectedRows.push({ row: idx + 1, reason: validation.reason! });
+        // Track if it was a sensitive data rejection
+        if (validation.reason?.includes('Rejected —')) {
+          const match = validation.reason.match(/Rejected — (.+)$/);
+          if (match) sensitiveDataFound.push(`Row ${idx + 1}: ${match[1]}`);
+        }
         return;
       }
 
-      // Duplicate detection
-      const slug = slugify(row.public_asset_id || row.title);
-      if (existingSlugSet.has(slug) || existingPublicIds.has(row.public_asset_id)) {
-        duplicateSlugs.push(row.public_asset_id || row.title);
-        rejectedRows.push({ row: idx + 1, reason: `Row ${idx + 1}: Duplicate — slug or public_asset_id already exists` });
-        return;
+      // PRIMARY dedup: public_asset_id (required by spec)
+      if (row.public_asset_id) {
+        const pid = row.public_asset_id.trim();
+        if (existingPublicIds.has(pid) || batchPublicIds.has(pid)) {
+          duplicatePublicIds.push(pid);
+          rejectedRows.push({ row: idx + 1, reason: `Row ${idx + 1}: Duplicate — public_asset_id '${pid}' already exists` });
+          return;
+        }
+        batchPublicIds.add(pid);
       }
 
       validRows.push(row);
 
-      // Collect new species
+      // Collect new species (dedup by scientific name)
       if (row.species_common_name && row.scientific_name) {
-        const sciSlug = slugify(row.scientific_name);
-        if (!existingSpeciesSlugs.has(sciSlug) && !existingScientificNames.has(row.scientific_name.toLowerCase())) {
+        const sciKey = row.scientific_name.toLowerCase();
+        if (!existingScientificNames.has(sciKey)) {
           newSpeciesNames.add(row.species_common_name);
         }
       }
 
-      // Collect new categories
+      // Collect categories
       if (row.category) newCategoryNames.add(row.category);
 
       // Collect keywords
@@ -135,16 +182,22 @@ export async function POST(request: NextRequest) {
       }
     });
 
+    // Estimate total size (rough: ~500KB per asset for thumbnail + preview)
+    const estimatedSizeBytes = validRows.length * 500 * 1024;
+    const estimatedSizeMB = (estimatedSizeBytes / (1024 * 1024)).toFixed(1);
+
     const dryRunReport = {
       totalRows: rows.length,
       validRows: validRows.length,
       rejectedRows: rejectedRows.length,
       rejectionDetails: rejectedRows,
-      duplicatesDetected: duplicateSlugs.length,
-      duplicates: duplicateSlugs,
+      duplicatesDetected: duplicatePublicIds.length,
+      duplicates: duplicatePublicIds,
+      sensitiveDataFound,
       newSpecies: Array.from(newSpeciesNames),
       newCategories: Array.from(newCategoryNames),
       newKeywords: Array.from(newKeywords),
+      estimatedSizeMB,
       preview: validRows.slice(0, 5),
     };
 
@@ -162,7 +215,9 @@ export async function POST(request: NextRequest) {
       }, { status: 422 });
     }
 
-    // Create import batch record
+    // ============================================================
+    // STEP 1 — Create import batch (status: pending → processing)
+    // ============================================================
     const { data: batch, error: batchError } = await supabase
       .from('import_batches')
       .insert({
@@ -173,7 +228,7 @@ export async function POST(request: NextRequest) {
         rejected_rows: rejectedRows.length,
         status: 'processing',
         rejection_reasons: rejectedRows,
-        notes: batchNotes || 'First controlled pilot import — Phase 4.3',
+        notes: batchNotes || 'First real Seafood Vision MVP catalog import.',
       })
       .select()
       .single();
@@ -186,11 +241,47 @@ export async function POST(request: NextRequest) {
     let importedCount = 0;
     let speciesCreated = 0;
     let keywordsCreated = 0;
+    let categoriesCreated = 0;
 
-    // ---- UPSERT SPECIES ----
-    const speciesMap = new Map<string, string>(); // scientific_name -> species_id
+    // ============================================================
+    // STEP 2 — Upsert categories
+    // ============================================================
+    const categoryMap = new Map<string, string>(); // label -> id
+    const { data: existingCategories } = await supabase.from('categories').select('id, slug, label');
+    (existingCategories || []).forEach((c: { id: string; slug: string; label: string }) => {
+      categoryMap.set(c.label.toLowerCase(), c.id);
+      categoryMap.set(c.slug, c.id);
+    });
 
-    // Load existing species into map
+    for (const catLabel of Array.from(newCategoryNames)) {
+      const catKey = catLabel.toLowerCase();
+      if (categoryMap.has(catKey)) continue;
+      const catSlug = slugify(catLabel);
+      const { data: newCat, error: catError } = await supabase
+        .from('categories')
+        .insert({ slug: catSlug, label: catLabel, sort_order: 99, is_active: true })
+        .select('id, label')
+        .single();
+      if (catError) {
+        // May already exist
+        const { data: existing } = await supabase
+          .from('categories')
+          .select('id, label')
+          .eq('slug', catSlug)
+          .maybeSingle();
+        if (existing) categoryMap.set(catKey, existing.id);
+        else importErrors.push(`Category insert failed for "${catLabel}": ${catError.message}`);
+      } else if (newCat) {
+        categoryMap.set(catKey, newCat.id);
+        categoriesCreated++;
+      }
+    }
+
+    // ============================================================
+    // STEP 3 — Upsert species (dedup by scientific name)
+    // ============================================================
+    const speciesMap = new Map<string, string>(); // scientific_name.lower -> species_id
+
     (existingSpecies || []).forEach((s: { id: string; scientific_name: string }) => {
       speciesMap.set(s.scientific_name.toLowerCase(), s.id);
     });
@@ -201,10 +292,13 @@ export async function POST(request: NextRequest) {
       if (speciesMap.has(sciKey)) continue;
 
       const speciesSlug = slugify(row.scientific_name);
+      const uniqueSpeciesSlug = makeUniqueSlug(speciesSlug, existingSpeciesSlugs);
+      existingSpeciesSlugs.add(uniqueSpeciesSlug);
+
       const { data: newSpecies, error: speciesError } = await supabase
         .from('species')
         .insert({
-          slug: speciesSlug,
+          slug: uniqueSpeciesSlug,
           common_name: row.species_common_name,
           scientific_name: row.scientific_name,
           is_demo: false,
@@ -214,7 +308,7 @@ export async function POST(request: NextRequest) {
         .single();
 
       if (speciesError) {
-        // May already exist due to race — try to fetch
+        // Race condition — try to fetch
         const { data: existing } = await supabase
           .from('species')
           .select('id, scientific_name')
@@ -231,8 +325,98 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // ---- UPSERT KEYWORDS ----
-    const keywordMap = new Map<string, string>(); // term -> keyword_id
+    // ============================================================
+    // STEP 4 — Insert assets with enforced statuses
+    // ============================================================
+    // Track inserted asset IDs for relations
+    const insertedAssets: { id: string; public_asset_id: string | null; scientific_name: string | null; keywords: string }[] = [];
+
+    // Build a working slug set that includes newly inserted slugs
+    const workingSlugSet = new Set(existingSlugSet);
+
+    for (const row of validRows) {
+      const baseSlug = slugify(row.public_asset_id || row.title);
+      const slug = makeUniqueSlug(baseSlug, workingSlugSet);
+      workingSlugSet.add(slug);
+
+      const speciesId = row.scientific_name
+        ? speciesMap.get(row.scientific_name.toLowerCase()) || null
+        : null;
+
+      const mediaType = (['photo', 'video', 'document', 'illustration'].includes(row.media_type))
+        ? row.media_type
+        : 'photo';
+
+      const { data: asset, error: assetError } = await supabase
+        .from('assets')
+        .insert({
+          public_asset_id: row.public_asset_id || null,
+          slug,
+          title: row.title,
+          description: row.description || null,
+          media_type: mediaType,
+          category: row.category || null,
+          species_id: speciesId,
+          product_form: row.product_form || null,
+          product_state: row.fresh_or_frozen || null,
+          freezing_method: row.freezing_method || null,
+          packaging: row.packaging || null,
+          orientation: row.orientation || null,
+          width_px: row.width ? parseInt(row.width, 10) || null : null,
+          height_px: row.height ? parseInt(row.height, 10) || null : null,
+          // ---- ENFORCED STATUSES — never auto-approve ----
+          is_demo: false,
+          review_status: 'under_review',
+          publication_status: 'preview_only',
+          rights_info: 'review_required',
+          commercial_use: false,
+          editorial_use: false,
+          is_real_photo: true,
+          is_verified: false,
+        })
+        .select('id')
+        .single();
+
+      if (assetError || !asset) {
+        importErrors.push(`Asset insert failed for "${row.title}": ${assetError?.message}`);
+        continue;
+      }
+
+      importedCount++;
+      insertedAssets.push({
+        id: asset.id,
+        public_asset_id: row.public_asset_id || null,
+        scientific_name: row.scientific_name || null,
+        keywords: row.keywords || '',
+      });
+    }
+
+    // ============================================================
+    // STEP 5 — Asset-species relations (asset_species table)
+    // ============================================================
+    for (const inserted of insertedAssets) {
+      if (!inserted.scientific_name) continue;
+      const speciesId = speciesMap.get(inserted.scientific_name.toLowerCase());
+      if (!speciesId) continue;
+
+      const { error: asSpeciesError } = await supabase
+        .from('asset_species')
+        .insert({
+          asset_id: inserted.id,
+          species_id: speciesId,
+          is_primary: true,
+          confidence_level: 'possible',
+        });
+
+      if (asSpeciesError && !asSpeciesError.message.includes('duplicate')) {
+        importErrors.push(`asset_species relation failed for asset ${inserted.id}: ${asSpeciesError.message}`);
+      }
+    }
+
+    // ============================================================
+    // STEP 6 — Upsert keywords
+    // ============================================================
+    const keywordMap = new Map<string, string>(); // term.lower -> keyword_id
 
     const { data: existingKeywords } = await supabase.from('keywords').select('id, term');
     (existingKeywords || []).forEach((k: { id: string; term: string }) => {
@@ -256,79 +440,48 @@ export async function POST(request: NextRequest) {
           .select('id, term')
           .eq('term', term)
           .maybeSingle();
-        if (existing) keywordMap.set(termKey, existing.id);
+        if (existing) {
+          keywordMap.set(termKey, existing.id);
+        } else {
+          importErrors.push(`Keyword insert failed for "${term}": ${kwError.message}`);
+        }
       } else if (kw) {
         keywordMap.set(termKey, kw.id);
         keywordsCreated++;
       }
     }
 
-    // ---- INSERT ASSETS ----
-    for (const row of validRows) {
-      const slug = slugify(row.public_asset_id || row.title);
-      const speciesId = row.scientific_name
-        ? speciesMap.get(row.scientific_name.toLowerCase()) || null
-        : null;
-
-      const mediaType = (['photo', 'video', 'document', 'illustration'].includes(row.media_type))
-        ? row.media_type
-        : 'photo';
-
-      const { data: asset, error: assetError } = await supabase
-        .from('assets')
-        .insert({
-          public_asset_id: row.public_asset_id || null,
-          slug,
-          title: row.title,
-          media_type: mediaType,
-          category: row.category || null,
-          species_id: speciesId,
-          product_form: row.product_form || null,
-          product_state: row.fresh_or_frozen || null,
-          freezing_method: row.freezing_method || null,
-          packaging: row.packaging || null,
-          orientation: row.orientation || null,
-          width_px: row.width ? parseInt(row.width, 10) || null : null,
-          height_px: row.height ? parseInt(row.height, 10) || null : null,
-          // Forced statuses — never auto-approve
-          is_demo: false,
-          review_status: 'under_review',
-          publication_status: 'preview_only',
-          rights_info: 'review_required',
-          commercial_use: false,
-          editorial_use: false,
-          is_real_photo: true,
-          is_verified: false,
-        })
-        .select('id')
-        .single();
-
-      if (assetError || !asset) {
-        importErrors.push(`Asset insert failed for "${row.title}": ${assetError?.message}`);
-        continue;
-      }
-
-      importedCount++;
-
-      // Link keywords
-      if (row.keywords) {
-        const terms = row.keywords.split(/[,;|]/).map((k: string) => k.trim()).filter(Boolean);
-        for (const term of terms) {
-          const kwId = keywordMap.get(term.toLowerCase());
-          if (kwId) {
-            await supabase
-              .from('asset_keywords')
-              .insert({ asset_id: asset.id, keyword_id: kwId })
-              .then(() => {});
-          }
+    // ============================================================
+    // STEP 7 — Asset-keyword relations
+    // ============================================================
+    for (const inserted of insertedAssets) {
+      if (!inserted.keywords) continue;
+      const terms = inserted.keywords.split(/[,;|]/).map((k: string) => k.trim()).filter(Boolean);
+      for (const term of terms) {
+        const kwId = keywordMap.get(term.toLowerCase());
+        if (!kwId) continue;
+        const { error: akError } = await supabase
+          .from('asset_keywords')
+          .insert({ asset_id: inserted.id, keyword_id: kwId });
+        if (akError && !akError.message.includes('duplicate')) {
+          // Non-fatal — log but continue
+          importErrors.push(`asset_keywords relation failed for asset ${inserted.id}, keyword "${term}": ${akError.message}`);
         }
       }
     }
 
-    // ---- UPDATE BATCH STATUS ----
-    const finalStatus = importErrors.length === 0
-      ? 'completed'
-      : importedCount > 0 ? 'partial' : 'failed';
+    // Steps 8 & 9 (thumbnail/preview uploads) are handled by the separate /upload endpoint
+    // called from the frontend after this response.
+
+    // ============================================================
+    // STEP 10 — Update batch status and finalize
+    // ============================================================
+    // Spec: completed | partially_imported | failed
+    const finalStatus: 'completed' | 'partially_imported' | 'failed' =
+      importedCount === 0
+        ? 'failed'
+        : importErrors.length > 0
+          ? 'partially_imported' :'completed';
 
     await supabase
       .from('import_batches')
@@ -336,7 +489,10 @@ export async function POST(request: NextRequest) {
         status: finalStatus,
         processed_rows: importedCount,
         rejected_rows: rejectedRows.length + importErrors.length,
-        rejection_reasons: [...rejectedRows, ...importErrors.map((e, i) => ({ row: i, reason: e }))],
+        rejection_reasons: [
+          ...rejectedRows,
+          ...importErrors.map((e, i) => ({ row: -1 - i, reason: e })),
+        ],
         completed_at: new Date().toISOString(),
       })
       .eq('id', batch.id);
@@ -348,6 +504,7 @@ export async function POST(request: NextRequest) {
         ...dryRunReport,
         importedCount,
         speciesCreated,
+        categoriesCreated,
         keywordsCreated,
         importErrors,
         finalStatus,
