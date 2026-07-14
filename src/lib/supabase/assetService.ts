@@ -2,6 +2,19 @@
 
 import { createClient } from '@/lib/supabase/client';
 
+export interface AssetFile {
+  id: string;
+  asset_id: string;
+  file_level: 'original' | 'preview' | 'thumbnail';
+  storage_bucket: string;
+  storage_path: string;
+  mime_type: string | null;
+  width_px: number | null;
+  height_px: number | null;
+  file_size_bytes: number | null;
+  created_at: string;
+}
+
 export interface AssetRow {
   id: string;
   public_asset_id: string | null;
@@ -46,6 +59,7 @@ export interface AssetRow {
     category: string | null;
   } | null;
   asset_keywords?: { keywords: { term: string } }[];
+  asset_files?: AssetFile[];
 }
 
 export interface AssetFilters {
@@ -64,6 +78,64 @@ export interface AssetFilters {
 
 export type SortOption = 'newest' | 'oldest' | 'title-az' | 'title-za' | 'most-relevant';
 
+/**
+ * Generate a public URL for a file stored in Supabase Storage.
+ * Returns null if bucket or path is missing.
+ */
+export function getAssetStorageUrl(
+  bucket: string | null | undefined,
+  path: string | null | undefined
+): string | null {
+  if (!bucket || !path) return null;
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  if (!supabaseUrl) return null;
+  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
+}
+
+// Minimal type for asset_files entries (compatible with both AssetRow and Asset)
+interface AssetFileEntry {
+  file_level: string;
+  storage_bucket: string;
+  storage_path: string;
+}
+
+interface AssetWithFiles {
+  asset_files?: AssetFileEntry[] | null;
+}
+
+/**
+ * Get the best available image URL for an asset from its asset_files.
+ * Priority: thumbnail > preview > original
+ * Returns null if no files are available.
+ */
+export function getAssetThumbnailUrl(asset: AssetWithFiles): string | null {
+  const files = asset.asset_files;
+  if (!files || files.length === 0) return null;
+  const thumbnail = files.find((f) => f.file_level === 'thumbnail');
+  if (thumbnail) return getAssetStorageUrl(thumbnail.storage_bucket, thumbnail.storage_path);
+  const preview = files.find((f) => f.file_level === 'preview');
+  if (preview) return getAssetStorageUrl(preview.storage_bucket, preview.storage_path);
+  const original = files.find((f) => f.file_level === 'original');
+  if (original) return getAssetStorageUrl(original.storage_bucket, original.storage_path);
+  return null;
+}
+
+/**
+ * Get the preview URL for an asset (for the detail page viewer).
+ * Priority: preview > thumbnail > original
+ */
+export function getAssetPreviewUrl(asset: AssetWithFiles): string | null {
+  const files = asset.asset_files;
+  if (!files || files.length === 0) return null;
+  const preview = files.find((f) => f.file_level === 'preview');
+  if (preview) return getAssetStorageUrl(preview.storage_bucket, preview.storage_path);
+  const thumbnail = files.find((f) => f.file_level === 'thumbnail');
+  if (thumbnail) return getAssetStorageUrl(thumbnail.storage_bucket, thumbnail.storage_path);
+  const original = files.find((f) => f.file_level === 'original');
+  if (original) return getAssetStorageUrl(original.storage_bucket, original.storage_path);
+  return null;
+}
+
 export async function fetchAssets(
   filters: AssetFilters,
   sort: SortOption,
@@ -75,7 +147,7 @@ export async function fetchAssets(
   let query = supabase
     .from('assets')
     .select(
-      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term))`,
+      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`,
       { count: 'exact' }
     );
 
@@ -164,7 +236,7 @@ export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {
   const { data, error } = await supabase
     .from('assets')
     .select(
-      `*, species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term))`
+      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`
     )
     .eq('slug', slug)
     .maybeSingle();
@@ -186,7 +258,7 @@ export async function fetchSimilarAssets(
 
   let query = supabase
     .from('assets')
-    .select(`id, slug, title, is_verified, is_real_photo, species(common_name, scientific_name)`)
+    .select(`id, slug, title, category, is_verified, is_real_photo, species!fk_assets_species(common_name, scientific_name), asset_files(id, file_level, storage_bucket, storage_path)`)
     .neq('id', currentId)
     .order('created_at', { ascending: false })
     .limit(limit);
