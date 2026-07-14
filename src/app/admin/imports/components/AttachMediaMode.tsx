@@ -30,6 +30,7 @@ interface FileValidation {
   sizeMB: string;
   status: 'ok' | 'warn' | 'error';
   issues: string[];
+  expectedStoragePath: string; // stable path: pilot/{publicAssetId}/{fileLevel}.{ext}
 }
 
 interface DryRunResult {
@@ -112,6 +113,9 @@ function validateFile(file: File, publicAssetId: string, assetId: string, assetT
   const ext = file.name.split('.').pop()?.toLowerCase() || '';
   if (!['jpg', 'jpeg', 'png', 'webp', 'heic', 'heif'].includes(ext)) issues.push(`Extension not allowed: .${ext}`);
 
+  const bucket = fileLevel === 'thumbnail' ? 'asset-thumbnails' : 'asset-previews';
+  const expectedStoragePath = `pilot/${publicAssetId}/${fileLevel}.${ext}`;
+
   return {
     filename: file.name,
     publicAssetId,
@@ -124,6 +128,7 @@ function validateFile(file: File, publicAssetId: string, assetId: string, assetT
     sizeMB: (file.size / 1024 / 1024).toFixed(2),
     status: issues.length === 0 ? 'ok' : 'error',
     issues,
+    expectedStoragePath,
   };
 }
 
@@ -618,6 +623,7 @@ export default function AttachMediaMode() {
                       <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Asset ID</th>
                       <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Title</th>
                       <th className="text-left px-3 py-2 font-semibold text-muted-foreground">File</th>
+                      <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Storage Path</th>
                       <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Level</th>
                       <th className="text-left px-3 py-2 font-semibold text-muted-foreground">MIME</th>
                       <th className="text-left px-3 py-2 font-semibold text-muted-foreground">Size</th>
@@ -630,6 +636,7 @@ export default function AttachMediaMode() {
                         <td className="px-3 py-2 font-mono text-muted-foreground">{fv.publicAssetId}</td>
                         <td className="px-3 py-2 text-foreground max-w-[120px] truncate">{fv.assetTitle}</td>
                         <td className="px-3 py-2 font-mono text-muted-foreground max-w-[140px] truncate">{fv.filename}</td>
+                        <td className="px-3 py-2 font-mono text-muted-foreground max-w-[180px] truncate text-xs">{fv.expectedStoragePath}</td>
                         <td className="px-3 py-2">
                           <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${fv.fileLevel === 'thumbnail' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
                             {fv.fileLevel}

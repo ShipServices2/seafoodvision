@@ -15,7 +15,8 @@ const ALLOWED_MIME_TYPES = new Set([
 const MAX_FILE_SIZE_BYTES = 20 * 1024 * 1024;
 
 // POST /api/admin/import/upload
-// FormData: file (binary), assetId (string), fileLevel ('thumbnail' | 'preview'), publicAssetId (string)
+// FormData: file (binary), assetId (string), fileLevel ('thumbnail' | 'preview'),
+//           publicAssetId (string) — used for stable storage path
 export async function POST(request: NextRequest) {
   try {
     const supabase = await createClient();
@@ -40,6 +41,7 @@ export async function POST(request: NextRequest) {
     const file = formData.get('file') as File | null;
     const assetId = formData.get('assetId') as string | null;
     const fileLevel = formData.get('fileLevel') as 'thumbnail' | 'preview' | null;
+    const publicAssetId = formData.get('publicAssetId') as string | null;
 
     if (!file || !assetId || !fileLevel) {
       return NextResponse.json({ error: 'Missing required fields: file, assetId, fileLevel' }, { status: 400 });
@@ -56,7 +58,6 @@ export async function POST(request: NextRequest) {
     }
 
     // ---- MIME TYPE VALIDATION ----
-    // Check declared MIME type
     const declaredMime = file.type?.toLowerCase() || '';
     if (!ALLOWED_MIME_TYPES.has(declaredMime)) {
       return NextResponse.json({
@@ -86,7 +87,12 @@ export async function POST(request: NextRequest) {
 
     // ---- BUCKET SELECTION — never write to asset-originals ----
     const bucket = fileLevel === 'thumbnail' ? 'asset-thumbnails' : 'asset-previews';
-    const storagePath = `${assetId}/${fileLevel}.${ext}`;
+
+    // ---- STABLE STORAGE PATH ----
+    // Use pilot/{publicAssetId}/{fileLevel}.{ext} when publicAssetId is available,
+    // otherwise fall back to {assetId}/{fileLevel}.{ext}
+    const pathPrefix = publicAssetId ? `pilot/${publicAssetId}` : assetId;
+    const storagePath = `${pathPrefix}/${fileLevel}.${ext}`;
 
     const arrayBuffer = await file.arrayBuffer();
     const fileBuffer = new Uint8Array(arrayBuffer);
@@ -105,26 +111,40 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Record in asset_files
+    // Upsert in asset_files (on conflict: asset_id + file_level)
     const { error: fileRecordError } = await supabase
       .from('asset_files')
-      .insert({
+      .upsert({
         asset_id: assetId,
         file_level: fileLevel,
         storage_bucket: bucket,
         storage_path: storagePath,
         mime_type: declaredMime || 'image/jpeg',
         file_size_bytes: file.size,
-      });
+      }, { onConflict: 'asset_id,file_level' });
 
     if (fileRecordError) {
-      return NextResponse.json(
-        { error: `File record insert failed: ${fileRecordError.message}` },
-        { status: 500 }
-      );
+      // If upsert fails (e.g. unique index not yet applied), try insert
+      const { error: insertError } = await supabase
+        .from('asset_files')
+        .insert({
+          asset_id: assetId,
+          file_level: fileLevel,
+          storage_bucket: bucket,
+          storage_path: storagePath,
+          mime_type: declaredMime || 'image/jpeg',
+          file_size_bytes: file.size,
+        });
+
+      if (insertError) {
+        return NextResponse.json(
+          { error: `File record upsert failed: ${insertError.message}` },
+          { status: 500 }
+        );
+      }
     }
 
-    // If preview, also record in asset_previews
+    // If preview, also upsert in asset_previews
     if (fileLevel === 'preview') {
       await supabase
         .from('asset_previews')
@@ -142,6 +162,7 @@ export async function POST(request: NextRequest) {
       storagePath,
       fileLevel,
       assetId,
+      publicAssetId: publicAssetId || null,
       mimeType: declaredMime,
       fileSizeBytes: file.size,
     });

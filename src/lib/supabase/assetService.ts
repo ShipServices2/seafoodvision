@@ -78,20 +78,6 @@ export interface AssetFilters {
 
 export type SortOption = 'newest' | 'oldest' | 'title-az' | 'title-za' | 'most-relevant';
 
-/**
- * Generate a public URL for a file stored in Supabase Storage.
- * Returns null if bucket or path is missing.
- */
-export function getAssetStorageUrl(
-  bucket: string | null | undefined,
-  path: string | null | undefined
-): string | null {
-  if (!bucket || !path) return null;
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  if (!supabaseUrl) return null;
-  return `${supabaseUrl}/storage/v1/object/public/${bucket}/${path}`;
-}
-
 // Minimal type for asset_files entries (compatible with both AssetRow and Asset)
 interface AssetFileEntry {
   file_level: string;
@@ -104,35 +90,85 @@ interface AssetWithFiles {
 }
 
 /**
- * Get the best available image URL for an asset from its asset_files.
- * Priority: thumbnail > preview > original
- * Returns null if no files are available.
+ * Get a signed URL for a private Supabase Storage object via the server API.
+ * NEVER uses getPublicUrl on private buckets.
+ * Returns null if bucket or path is missing or object doesn't exist.
  */
-export function getAssetThumbnailUrl(asset: AssetWithFiles): string | null {
-  const files = asset.asset_files;
-  if (!files || files.length === 0) return null;
-  const thumbnail = files.find((f) => f.file_level === 'thumbnail');
-  if (thumbnail) return getAssetStorageUrl(thumbnail.storage_bucket, thumbnail.storage_path);
-  const preview = files.find((f) => f.file_level === 'preview');
-  if (preview) return getAssetStorageUrl(preview.storage_bucket, preview.storage_path);
-  const original = files.find((f) => f.file_level === 'original');
-  if (original) return getAssetStorageUrl(original.storage_bucket, original.storage_path);
+export async function getSignedStorageUrl(
+  bucket: string | null | undefined,
+  path: string | null | undefined,
+  expiresIn = 3600
+): Promise<string | null> {
+  if (!bucket || !path) return null;
+  // Never expose asset-originals
+  if (bucket === 'asset-originals') return null;
+  try {
+    const params = new URLSearchParams({ bucket, path, expiresIn: String(expiresIn) });
+    const res = await fetch(`/api/storage/signed-url?${params.toString()}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    return data.signedUrl || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @deprecated Use getSignedStorageUrl instead for private buckets.
+ * Kept for backward compatibility only — returns null to force signed URL usage.
+ */
+export function getAssetStorageUrl(
+  _bucket: string | null | undefined,
+  _path: string | null | undefined
+): string | null {
+  // Private buckets require signed URLs — return null to trigger fallback
+  // Use getSignedStorageUrl() for actual URL generation
   return null;
 }
 
 /**
- * Get the preview URL for an asset (for the detail page viewer).
- * Priority: preview > thumbnail > original
+ * Get the best available thumbnail file entry for an asset.
+ * Priority: thumbnail > preview
+ * Returns the AssetFileEntry or null.
  */
-export function getAssetPreviewUrl(asset: AssetWithFiles): string | null {
+export function getAssetThumbnailFile(asset: AssetWithFiles): AssetFileEntry | null {
   const files = asset.asset_files;
   if (!files || files.length === 0) return null;
-  const preview = files.find((f) => f.file_level === 'preview');
-  if (preview) return getAssetStorageUrl(preview.storage_bucket, preview.storage_path);
-  const thumbnail = files.find((f) => f.file_level === 'thumbnail');
-  if (thumbnail) return getAssetStorageUrl(thumbnail.storage_bucket, thumbnail.storage_path);
-  const original = files.find((f) => f.file_level === 'original');
-  if (original) return getAssetStorageUrl(original.storage_bucket, original.storage_path);
+  return (
+    files.find((f) => f.file_level === 'thumbnail') ||
+    files.find((f) => f.file_level === 'preview') ||
+    null
+  );
+}
+
+/**
+ * Get the best available preview file entry for an asset.
+ * Priority: preview > thumbnail
+ * Returns the AssetFileEntry or null.
+ */
+export function getAssetPreviewFile(asset: AssetWithFiles): AssetFileEntry | null {
+  const files = asset.asset_files;
+  if (!files || files.length === 0) return null;
+  return (
+    files.find((f) => f.file_level === 'preview') ||
+    files.find((f) => f.file_level === 'thumbnail') ||
+    null
+  );
+}
+
+/**
+ * @deprecated Synchronous URL helpers no longer work for private buckets.
+ * Use getSignedStorageUrl(file.storage_bucket, file.storage_path) instead.
+ */
+export function getAssetThumbnailUrl(_asset: AssetWithFiles): string | null {
+  return null;
+}
+
+/**
+ * @deprecated Synchronous URL helpers no longer work for private buckets.
+ * Use getSignedStorageUrl(file.storage_bucket, file.storage_path) instead.
+ */
+export function getAssetPreviewUrl(_asset: AssetWithFiles): string | null {
   return null;
 }
 
@@ -256,14 +292,13 @@ export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {
     console.error('fetchAssetBySlug error:', error.message);
     return null;
   }
-
   return data as AssetRow | null;
 }
 
 export async function fetchSimilarAssets(
   currentId: string,
   category: string | null,
-  limit = 6
+  limit = 4
 ): Promise<AssetRow[]> {
   const supabase = createClient();
 
@@ -279,11 +314,9 @@ export async function fetchSimilarAssets(
   }
 
   const { data, error } = await query;
-
   if (error) {
     console.error('fetchSimilarAssets error:', error.message);
     return [];
   }
-
   return (data as AssetRow[]) || [];
 }

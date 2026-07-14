@@ -5,7 +5,7 @@ import LibraryFilters from './LibraryFilters';
 import LibraryGrid from './LibraryGrid';
 import LibraryToolbar from './LibraryToolbar';
 import ActiveFilterChips from './ActiveFilterChips';
-import { fetchAssets, getAssetThumbnailUrl, type AssetRow, type SortOption } from '@/lib/supabase/assetService';
+import { fetchAssets, getAssetThumbnailFile, type AssetRow, type SortOption } from '@/lib/supabase/assetService';
 import { searchLibraryAssets, type LibrarySearchResult } from '@/lib/supabase/semanticSearch';
 import Link from 'next/link';
 import { Search, BookOpen } from 'lucide-react';
@@ -66,6 +66,9 @@ function mapAssetRow(asset: AssetRow) {
   };
   const meta = categoryEmoji[asset.category || ''] || { emoji: '🐠', bgColor: 'from-blue-200 to-blue-100' };
 
+  // Get thumbnail file entry for signed URL generation
+  const thumbFile = getAssetThumbnailFile(asset);
+
   return {
     id: asset.id,
     slug: asset.slug,
@@ -92,7 +95,10 @@ function mapAssetRow(asset: AssetRow) {
     isDemo: asset.is_demo,
     emoji: meta.emoji,
     bgColor: meta.bgColor,
-    thumbnailUrl: getAssetThumbnailUrl(asset),
+    // Storage file info for signed URL generation (replaces thumbnailUrl)
+    thumbnailBucket: thumbFile?.storage_bucket || null,
+    thumbnailPath: thumbFile?.storage_path || null,
+    thumbnailUrl: null, // deprecated — kept for type compat
   };
 }
 

@@ -20,7 +20,7 @@ import {
   type EncDocument,
 } from '@/lib/supabase/encyclopediaQueries';
 import { fetchSpeciesAssets } from '@/lib/supabase/queries';
-import { getAssetThumbnailUrl } from '@/lib/supabase/assetService';
+import { getAssetThumbnailFile } from '@/lib/supabase/assetService';
 import type { Asset } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -372,9 +372,15 @@ export default function SpeciesDetailPage() {
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
                   {assets.map((asset) => {
-                    const thumbUrl = getAssetThumbnailUrl(asset);
+                    const thumbFile = getAssetThumbnailFile(asset);
                     return (
-                      <SpeciesAssetCard key={asset.id} asset={asset} thumbnailUrl={thumbUrl} emoji={emoji} />
+                      <SpeciesAssetCard
+                        key={asset.id}
+                        asset={asset}
+                        thumbnailBucket={thumbFile?.storage_bucket || null}
+                        thumbnailPath={thumbFile?.storage_path || null}
+                        emoji={emoji}
+                      />
                     );
                   })}
                 </div>

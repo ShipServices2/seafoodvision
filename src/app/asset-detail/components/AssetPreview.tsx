@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Maximize2, ZoomIn, ZoomOut, Lock, ImageOff, AlertCircle } from 'lucide-react';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 interface AssetPreviewProps {
   asset: {
@@ -13,6 +14,10 @@ interface AssetPreviewProps {
     dimensions?: string;
     format?: string;
     isRealPhoto?: boolean;
+    // Storage file info for signed URL generation
+    previewBucket?: string | null;
+    previewPath?: string | null;
+    // Legacy — kept for backward compat
     previewUrl?: string | null;
   };
 }
@@ -20,25 +25,48 @@ interface AssetPreviewProps {
 export default function AssetPreview({ asset }: AssetPreviewProps) {
   const [zoom, setZoom] = useState(1);
   const [imgError, setImgError] = useState(false);
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+  const [urlLoading, setUrlLoading] = useState(false);
 
   const handleZoomIn = () => setZoom((z) => Math.min(z + 0.25, 2));
   const handleZoomOut = () => setZoom((z) => Math.max(z - 0.25, 0.5));
 
-  const hasRealImage = !!asset.previewUrl && !imgError;
+  // Generate signed URL for private bucket
+  useEffect(() => {
+    const bucket = asset.previewBucket;
+    const path = asset.previewPath;
+    if (!bucket || !path) {
+      setSignedUrl(null);
+      return;
+    }
+    let cancelled = false;
+    setUrlLoading(true);
+    getSignedStorageUrl(bucket, path, 3600).then((url) => {
+      if (!cancelled) {
+        setSignedUrl(url);
+        setUrlLoading(false);
+        setImgError(false);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [asset.previewBucket, asset.previewPath]);
+
+  const hasStorageFile = !!(asset.previewBucket && asset.previewPath);
+  const hasRealImage = !!signedUrl && !imgError && !urlLoading;
 
   return (
     <div className="bg-card rounded-xl border border-border overflow-hidden shadow-card">
       {/* Preview area */}
       <div className="relative aspect-[4/3] overflow-hidden select-none">
         {hasRealImage ? (
-          /* Real image from Supabase Storage */
+          /* Real image from Supabase Storage via signed URL */
           <div
             className="absolute inset-0 flex items-center justify-center bg-muted overflow-hidden"
             style={{ transform: `scale(${zoom})`, transformOrigin: 'center', transition: 'transform 0.2s' }}
           >
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src={asset.previewUrl!}
+              src={signedUrl!}
               alt={asset.title}
               className="w-full h-full object-contain"
               onError={() => setImgError(true)}
@@ -47,12 +75,16 @@ export default function AssetPreview({ asset }: AssetPreviewProps) {
         ) : (
           /* Fallback: gradient + emoji placeholder */
           <div className={`absolute inset-0 bg-gradient-to-br ${asset.bgColor} flex items-center justify-center`}>
-            <span
-              className="text-[120px] preview-protected transition-transform duration-200"
-              style={{ transform: `scale(${zoom})` }}
-            >
-              {asset.emoji}
-            </span>
+            {urlLoading && hasStorageFile ? (
+              <div className="w-10 h-10 border-2 border-border border-t-secondary rounded-full animate-spin" />
+            ) : (
+              <span
+                className="text-[120px] preview-protected transition-transform duration-200"
+                style={{ transform: `scale(${zoom})` }}
+              >
+                {asset.emoji}
+              </span>
+            )}
           </div>
         )}
 
@@ -77,8 +109,8 @@ export default function AssetPreview({ asset }: AssetPreviewProps) {
           </div>
         )}
 
-        {/* No-image notice when storage file is absent */}
-        {!hasRealImage && (
+        {/* No-image notice — only when no storage file registered */}
+        {!hasRealImage && !hasStorageFile && !urlLoading && (
           <div className="absolute top-3 left-3 flex items-center gap-1.5 bg-amber-50/90 border border-amber-200 backdrop-blur-sm rounded-lg px-2.5 py-1.5">
             <ImageOff size={11} className="text-amber-600" />
             <span className="text-xs text-amber-700 font-medium">Preview not available</span>
@@ -127,10 +159,15 @@ export default function AssetPreview({ asset }: AssetPreviewProps) {
           </span>
         </div>
         <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-          {!hasRealImage ? (
+          {!hasRealImage && !hasStorageFile ? (
             <>
               <AlertCircle size={11} className="text-amber-500" />
               <span className="text-amber-600">No storage file registered</span>
+            </>
+          ) : !hasRealImage && hasStorageFile && !urlLoading ? (
+            <>
+              <AlertCircle size={11} className="text-amber-500" />
+              <span className="text-amber-600">File not found in storage</span>
             </>
           ) : (
             <>
