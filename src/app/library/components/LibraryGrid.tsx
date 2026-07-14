@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Heart, Plus, Image as ImageIcon, CheckCircle2, Camera } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Heart, Plus, Image as ImageIcon, CheckCircle2, Camera, ImageOff } from 'lucide-react';
 import { useState } from 'react';
 import type { ViewMode } from './LibraryContent';
 import Badge from '@/components/ui/Badge';
@@ -34,6 +34,7 @@ interface AssetCardData {
   isDemo: boolean;
   emoji: string;
   bgColor: string;
+  thumbnailUrl?: string | null;
 }
 
 interface LibraryGridProps {
@@ -48,48 +49,105 @@ interface LibraryGridProps {
   onItemsPerPageChange: (n: number) => void;
 }
 
+function AssetThumbnail({
+  asset,
+  size = 'card',
+}: {
+  asset: AssetCardData;
+  size?: 'card' | 'list';
+}) {
+  const [imgError, setImgError] = useState(false);
+  const hasImage = !!asset.thumbnailUrl && !imgError;
+
+  if (size === 'list') {
+    return (
+      <div className={`w-20 h-14 rounded-lg bg-gradient-to-br ${asset.bgColor} flex items-center justify-center overflow-hidden relative`}>
+        {hasImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={asset.thumbnailUrl!}
+            alt={asset.title}
+            className="w-full h-full object-cover"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <span className="text-2xl select-none">{asset.emoji}</span>
+        )}
+        {!hasImage && asset.isRealPhoto && (
+          <div className="absolute bottom-0.5 right-0.5">
+            <ImageOff size={9} className="text-amber-500" />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`relative aspect-[4/3] bg-gradient-to-br ${asset.bgColor} flex items-center justify-center overflow-hidden`}>
+      {hasImage ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img
+          src={asset.thumbnailUrl!}
+          alt={asset.title}
+          className="w-full h-full object-cover"
+          onError={() => setImgError(true)}
+        />
+      ) : (
+        <span className="text-5xl select-none">{asset.emoji}</span>
+      )}
+
+      {/* Hover overlay */}
+      <div className="absolute inset-0 bg-primary/35 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
+        <span className="text-white text-xs font-semibold bg-primary/60 px-3 py-1.5 rounded-lg backdrop-blur-sm">
+          View Asset
+        </span>
+      </div>
+
+      {/* Top-left badges */}
+      <div className="absolute top-2 left-2 flex flex-col gap-1">
+        {asset.isRealPhoto && (
+          <span className="inline-flex items-center gap-1 badge-real-photo text-xs px-2 py-0.5 rounded-full font-medium">
+            <Camera size={9} />
+            Real Photo
+          </span>
+        )}
+        {asset.isVerified && (
+          <span className="inline-flex items-center gap-1 badge-verified text-xs px-2 py-0.5 rounded-full font-medium">
+            <CheckCircle2 size={9} />
+            Verified
+          </span>
+        )}
+      </div>
+
+      {/* No-image indicator */}
+      {!hasImage && asset.isRealPhoto && (
+        <div className="absolute top-2 right-2">
+          <span className="inline-flex items-center gap-1 bg-amber-50/90 border border-amber-200 text-amber-700 text-xs px-1.5 py-0.5 rounded-full font-medium">
+            <ImageOff size={9} />
+            No preview
+          </span>
+        </div>
+      )}
+
+      {/* Demo badge */}
+      {asset.isDemo && (
+        <div className="absolute bottom-2 left-2">
+          <span className="text-xs bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full font-medium">
+            Demo
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function AssetGridCard({ asset }: { asset: AssetCardData }) {
   const [favorited, setFavorited] = useState(false);
 
   return (
     <div className="group relative bg-card rounded-xl border border-border overflow-hidden shadow-card card-hover">
-      <Link href={`/asset-detail?slug=${asset.slug}`} className="block">
-        {/* Thumbnail */}
-        <div className={`relative aspect-[4/3] bg-gradient-to-br ${asset.bgColor} flex items-center justify-center overflow-hidden`}>
-          <span className="text-5xl select-none">{asset.emoji}</span>
-
-          {/* Hover overlay */}
-          <div className="absolute inset-0 bg-primary/35 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
-            <span className="text-white text-xs font-semibold bg-primary/60 px-3 py-1.5 rounded-lg backdrop-blur-sm">
-              View Asset
-            </span>
-          </div>
-
-          {/* Top-left badges */}
-          <div className="absolute top-2 left-2 flex flex-col gap-1">
-            {asset.isRealPhoto && (
-              <span className="inline-flex items-center gap-1 badge-real-photo text-xs px-2 py-0.5 rounded-full font-medium">
-                <Camera size={9} />
-                Real Photo
-              </span>
-            )}
-            {asset.isVerified && (
-              <span className="inline-flex items-center gap-1 badge-verified text-xs px-2 py-0.5 rounded-full font-medium">
-                <CheckCircle2 size={9} />
-                Verified
-              </span>
-            )}
-          </div>
-
-          {/* Demo badge */}
-          {asset.isDemo && (
-            <div className="absolute bottom-2 left-2">
-              <span className="text-xs bg-purple-100 text-purple-700 border border-purple-200 px-1.5 py-0.5 rounded-full font-medium">
-                Demo
-              </span>
-            </div>
-          )}
-        </div>
+      <Link href={`/asset/${asset.slug}`} className="block">
+        <AssetThumbnail asset={asset} size="card" />
 
         {/* Info */}
         <div className="p-3">
@@ -120,21 +178,26 @@ function AssetGridCard({ asset }: { asset: AssetCardData }) {
 
       {/* Hover action buttons */}
       <div className="asset-card-actions absolute top-2 right-2 flex flex-col gap-1">
-        <button
-          onClick={() => setFavorited(!favorited)}
+        <Link
+          href={`/asset/${asset.slug}`}
+          onClick={(e) => {
+            e.stopPropagation();
+            setFavorited(!favorited);
+          }}
           aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
           className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-150 active:scale-90 shadow-sm ${
             favorited ? 'bg-red-500 text-white' : 'bg-white text-muted-foreground hover:text-red-500'
           }`}
         >
           <Heart size={12} fill={favorited ? 'currentColor' : 'none'} />
-        </button>
-        <button
+        </Link>
+        <Link
+          href={`/asset/${asset.slug}`}
           aria-label="Add to collection"
           className="w-7 h-7 rounded-lg bg-white text-muted-foreground hover:text-secondary flex items-center justify-center transition-all duration-150 active:scale-90 shadow-sm"
         >
           <Plus size={12} />
-        </button>
+        </Link>
       </div>
     </div>
   );
@@ -146,14 +209,12 @@ function AssetListRow({ asset }: { asset: AssetCardData }) {
   return (
     <div className="group flex items-center gap-4 bg-card rounded-xl border border-border p-3 shadow-card hover:shadow-card-hover transition-shadow duration-200">
       {/* Thumbnail */}
-      <Link href={`/asset-detail?slug=${asset.slug}`} className="shrink-0">
-        <div className={`w-20 h-14 rounded-lg bg-gradient-to-br ${asset.bgColor} flex items-center justify-center overflow-hidden`}>
-          <span className="text-2xl select-none">{asset.emoji}</span>
-        </div>
+      <Link href={`/asset/${asset.slug}`} className="shrink-0">
+        <AssetThumbnail asset={asset} size="list" />
       </Link>
 
       {/* Info */}
-      <Link href={`/asset-detail?slug=${asset.slug}`} className="flex-1 min-w-0">
+      <Link href={`/asset/${asset.slug}`} className="flex-1 min-w-0">
         <div className="flex items-start gap-3">
           <div className="flex-1 min-w-0">
             <h3 className="text-sm font-semibold text-foreground line-clamp-1">{asset.title}</h3>

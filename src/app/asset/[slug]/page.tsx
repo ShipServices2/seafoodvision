@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { fetchAssetBySlug } from '@/lib/supabase/assetService';
+import { fetchAssetBySlug, getAssetPreviewUrl } from '@/lib/supabase/assetService';
 import type { AssetRow } from '@/lib/supabase/assetService';
 import Link from 'next/link';
 import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Globe2, Hash, Layers, Thermometer, Ruler } from 'lucide-react';
@@ -118,7 +118,7 @@ export default function AssetSlugPage() {
 
             <div className="grid grid-cols-1 lg:grid-cols-[1fr_420px] xl:grid-cols-[1fr_460px] gap-8 items-start">
               <div className="flex flex-col gap-5">
-                <AssetPreview asset={{ id: asset.id, slug: asset.slug, title: asset.title, isDemo: asset.is_demo, emoji, bgColor }} />
+                <AssetPreview asset={{ id: asset.id, slug: asset.slug, title: asset.title, isDemo: asset.is_demo, emoji, bgColor, dimensions: asset.width_px && asset.height_px ? `${asset.width_px} × ${asset.height_px} px` : undefined, format: asset.file_format || undefined, previewUrl: getAssetPreviewUrl(asset) }} />
                 {keywords.length > 0 && (
                   <div className="bg-card rounded-xl border border-border p-5">
                     <h2 className="text-sm font-semibold text-foreground mb-3 flex items-center gap-2">

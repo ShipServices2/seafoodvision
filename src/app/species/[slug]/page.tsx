@@ -20,10 +20,13 @@ import {
   type EncDocument,
 } from '@/lib/supabase/encyclopediaQueries';
 import { fetchSpeciesAssets } from '@/lib/supabase/queries';
+import { getAssetThumbnailUrl } from '@/lib/supabase/assetService';
 import type { Asset } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Icon from '@/components/ui/AppIcon';
+import SpeciesAssetCard from '@/components/SpeciesAssetCard';
+
 
 
 const SPECIES_COLORS: Record<string, string> = {
@@ -368,21 +371,12 @@ export default function SpeciesDetailPage() {
             ) : (
               <>
                 <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-                  {assets.map((asset) => (
-                    <Link
-                      key={asset.id}
-                      href={`/asset-detail?slug=${asset.slug}`}
-                      className="group bg-card rounded-xl border border-border overflow-hidden hover:shadow-sm transition-all"
-                    >
-                      <div className="aspect-[4/3] bg-gradient-to-br from-blue-100 to-blue-50 flex items-center justify-center">
-                        <span className="text-3xl">{emoji}</span>
-                      </div>
-                      <div className="p-2">
-                        <p className="text-xs font-semibold text-foreground line-clamp-1">{asset.title}</p>
-                        <p className="text-xs text-muted-foreground mt-0.5">{asset.product_form || asset.category}</p>
-                      </div>
-                    </Link>
-                  ))}
+                  {assets.map((asset) => {
+                    const thumbUrl = getAssetThumbnailUrl(asset);
+                    return (
+                      <SpeciesAssetCard key={asset.id} asset={asset} thumbnailUrl={thumbUrl} emoji={emoji} />
+                    );
+                  })}
                 </div>
                 <div className="mt-4 text-center">
                   <Link href={`/library?species=${encodeURIComponent(species.common_name)}`} className="text-sm text-secondary font-medium hover:underline">

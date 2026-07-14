@@ -123,6 +123,7 @@ export interface Asset {
   // Joined fields
   species?: Pick<Species, 'id' | 'slug' | 'common_name' | 'scientific_name' | 'family' | 'category'> | null;
   asset_keywords?: { keywords: { term: string } }[];
+  asset_files?: Pick<AssetFile, 'id' | 'file_level' | 'storage_bucket' | 'storage_path' | 'mime_type' | 'width_px' | 'height_px' | 'file_size_bytes'>[];
 }
 
 // ---- Asset Files ----

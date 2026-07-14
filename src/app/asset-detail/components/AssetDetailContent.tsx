@@ -10,7 +10,7 @@ import AssetPreview from './AssetPreview';
 import SimilarAssets from './SimilarAssets';
 import CollectionModal from './CollectionModal';
 
-import { fetchAssetBySlug, type AssetRow } from '@/lib/supabase/assetService';
+import { fetchAssetBySlug, getAssetPreviewUrl, type AssetRow } from '@/lib/supabase/assetService';
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -108,6 +108,9 @@ export default function AssetDetailContent({ slugOverride }: { slugOverride?: st
     isDemo: asset.is_demo,
     emoji,
     bgColor,
+    dimensions: formatDimensions(asset.width_px, asset.height_px),
+    format: asset.file_format || undefined,
+    previewUrl: getAssetPreviewUrl(asset),
   };
 
   const metadataGroups = [

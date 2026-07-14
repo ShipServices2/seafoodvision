@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database } from 'lucide-react';
+import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
@@ -150,6 +150,14 @@ export default function AdminPage() {
       description: 'Reviewer stats, QC, commercial candidates, reports',
       stat: stats.certifiedAssets,
       statLabel: 'certified',
+    },
+    {
+      href: '/mvp-report',
+      icon: ClipboardCheck,
+      label: 'MVP Readiness Report',
+      description: 'Phase 6.2 validation — catalog, storage, SEO checks',
+      stat: null,
+      statLabel: null,
     },
     {
       href: '/admin/imports',

@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CheckCircle2, Camera } from 'lucide-react';
-import { fetchSimilarAssets, type AssetRow } from '@/lib/supabase/assetService';
+import { ArrowRight, CheckCircle2, Camera, ImageOff } from 'lucide-react';
+import { fetchSimilarAssets, getAssetThumbnailUrl, type AssetRow } from '@/lib/supabase/assetService';
 
 interface SimilarAssetsProps {
   currentId: string;
@@ -20,6 +20,59 @@ const categoryEmoji: Record<string, { emoji: string; bgColor: string }> = {
   Packaging: { emoji: '📦', bgColor: 'from-slate-200 to-slate-100' },
   Aquaculture: { emoji: '🌊', bgColor: 'from-emerald-200 to-emerald-100' },
 };
+
+function SimilarAssetCard({ asset }: { asset: AssetRow }) {
+  const [imgError, setImgError] = useState(false);
+  const meta = categoryEmoji[asset.category || ''] || { emoji: '🐠', bgColor: 'from-blue-200 to-blue-100' };
+  const scientificName = (asset.species as { scientific_name?: string } | null)?.scientific_name || '';
+  const thumbnailUrl = getAssetThumbnailUrl(asset);
+  const hasImage = !!thumbnailUrl && !imgError;
+
+  return (
+    <Link
+      href={`/asset/${asset.slug}`}
+      className="group bg-card rounded-xl border border-border overflow-hidden card-hover shadow-card"
+    >
+      <div className={`relative aspect-[4/3] bg-gradient-to-br ${meta.bgColor} flex items-center justify-center overflow-hidden`}>
+        {hasImage ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={thumbnailUrl!}
+            alt={asset.title}
+            className="w-full h-full object-cover"
+            onError={() => setImgError(true)}
+          />
+        ) : (
+          <span className="text-3xl select-none">{meta.emoji}</span>
+        )}
+        <div className="absolute inset-0 bg-primary/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+        <div className="absolute top-1.5 left-1.5 flex gap-1">
+          {asset.is_real_photo && (
+            <span className="w-4 h-4 rounded-full badge-real-photo flex items-center justify-center">
+              <Camera size={8} />
+            </span>
+          )}
+          {asset.is_verified && (
+            <span className="w-4 h-4 rounded-full badge-verified flex items-center justify-center">
+              <CheckCircle2 size={8} />
+            </span>
+          )}
+        </div>
+        {!hasImage && asset.is_real_photo && (
+          <div className="absolute bottom-1 right-1">
+            <ImageOff size={10} className="text-amber-500" />
+          </div>
+        )}
+      </div>
+      <div className="p-2.5">
+        <h3 className="text-xs font-semibold text-foreground line-clamp-2 leading-snug">{asset.title}</h3>
+        {scientificName && (
+          <p className="text-xs font-mono-data text-muted-foreground italic mt-0.5 line-clamp-1">{scientificName}</p>
+        )}
+      </div>
+    </Link>
+  );
+}
 
 export default function SimilarAssets({ currentId, category }: SimilarAssetsProps) {
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -70,40 +123,9 @@ export default function SimilarAssets({ currentId, category }: SimilarAssetsProp
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-4">
-        {assets.map((asset) => {
-          const meta = categoryEmoji[asset.category || ''] || { emoji: '🐠', bgColor: 'from-blue-200 to-blue-100' };
-          const scientificName = (asset.species as { scientific_name?: string } | null)?.scientific_name || '';
-          return (
-            <Link
-              key={asset.id}
-              href={`/asset-detail?slug=${asset.slug}`}
-              className="group bg-card rounded-xl border border-border overflow-hidden card-hover shadow-card"
-            >
-              <div className={`relative aspect-[4/3] bg-gradient-to-br ${meta.bgColor} flex items-center justify-center overflow-hidden`}>
-                <span className="text-3xl select-none">{meta.emoji}</span>
-                <div className="absolute inset-0 bg-primary/30 opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
-                <div className="absolute top-1.5 left-1.5 flex gap-1">
-                  {asset.is_real_photo && (
-                    <span className="w-4 h-4 rounded-full badge-real-photo flex items-center justify-center">
-                      <Camera size={8} />
-                    </span>
-                  )}
-                  {asset.is_verified && (
-                    <span className="w-4 h-4 rounded-full badge-verified flex items-center justify-center">
-                      <CheckCircle2 size={8} />
-                    </span>
-                  )}
-                </div>
-              </div>
-              <div className="p-2.5">
-                <h3 className="text-xs font-semibold text-foreground line-clamp-2 leading-snug">{asset.title}</h3>
-                {scientificName && (
-                  <p className="text-xs font-mono-data text-muted-foreground italic mt-0.5 line-clamp-1">{scientificName}</p>
-                )}
-              </div>
-            </Link>
-          );
-        })}
+        {assets.map((asset) => (
+          <SimilarAssetCard key={asset.id} asset={asset} />
+        ))}
       </div>
     </section>
   );

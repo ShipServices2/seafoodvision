@@ -5,7 +5,7 @@ import LibraryFilters from './LibraryFilters';
 import LibraryGrid from './LibraryGrid';
 import LibraryToolbar from './LibraryToolbar';
 import ActiveFilterChips from './ActiveFilterChips';
-import { fetchAssets, type AssetRow, type SortOption } from '@/lib/supabase/assetService';
+import { fetchAssets, getAssetThumbnailUrl, type AssetRow, type SortOption } from '@/lib/supabase/assetService';
 import { searchLibraryAssets, type LibrarySearchResult } from '@/lib/supabase/semanticSearch';
 import Link from 'next/link';
 import { Search, BookOpen } from 'lucide-react';
@@ -92,6 +92,7 @@ function mapAssetRow(asset: AssetRow) {
     isDemo: asset.is_demo,
     emoji: meta.emoji,
     bgColor: meta.bgColor,
+    thumbnailUrl: getAssetThumbnailUrl(asset),
   };
 }
 
