@@ -421,7 +421,7 @@ export default function AdminImportsPage() {
         </div>
 
         {/* Mode tabs */}
-        <div className="flex gap-1 p-1 bg-muted rounded-xl mb-8 w-fit">
+        <div className="flex flex-wrap gap-1 p-1 bg-muted rounded-xl mb-8 w-fit">
           <button
             onClick={() => setImportMode('new_assets')}
             className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${importMode === 'new_assets' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
@@ -440,6 +440,13 @@ export default function AdminImportsPage() {
               Attach or replace media
             </span>
           </button>
+          <Link
+            href="/admin/reconcile-storage"
+            className="px-4 py-2 rounded-lg text-sm font-medium transition-colors text-muted-foreground hover:text-foreground flex items-center gap-2"
+          >
+            <RefreshCw size={14} />
+            Reconcile Storage
+          </Link>
         </div>
 
         {/* Step indicator — only for new assets mode */}
