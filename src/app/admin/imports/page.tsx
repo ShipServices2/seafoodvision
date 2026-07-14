@@ -14,6 +14,7 @@ import type { ImportBatch } from '@/lib/supabase/types';
 import { ALLOWED_CSV_COLUMNS } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import AttachMediaMode from './components/AttachMediaMode';
 
 // ============================================================
 // SECURITY PATTERNS (client-side pre-scan — mirrors server)
@@ -148,6 +149,7 @@ export default function AdminImportsPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
 
+  const [importMode, setImportMode] = useState<'new_assets' | 'attach_media'>('new_assets');
   const [step, setStep] = useState<Step>('upload');
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvRows, setCsvRows] = useState<Record<string, string>[]>([]);
@@ -410,7 +412,7 @@ export default function AdminImportsPage() {
           Back to admin
         </Link>
 
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-muted flex items-center justify-center">
               <Upload size={18} className="text-muted-foreground" />
@@ -420,7 +422,7 @@ export default function AdminImportsPage() {
               <p className="text-sm text-muted-foreground">Codex Pilot Batch Import — 10-step transactional workflow</p>
             </div>
           </div>
-          {step !== 'upload' && (
+          {importMode === 'new_assets' && step !== 'upload' && (
             <button onClick={handleReset} className="btn-outline text-xs flex items-center gap-1.5">
               <RefreshCw size={12} />
               New Import
@@ -428,7 +430,30 @@ export default function AdminImportsPage() {
           )}
         </div>
 
-        {/* Step indicator */}
+        {/* Mode tabs */}
+        <div className="flex gap-1 p-1 bg-muted rounded-xl mb-8 w-fit">
+          <button
+            onClick={() => setImportMode('new_assets')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${importMode === 'new_assets' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <span className="flex items-center gap-2">
+              <Database size={14} />
+              Import new assets
+            </span>
+          </button>
+          <button
+            onClick={() => setImportMode('attach_media')}
+            className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${importMode === 'attach_media' ? 'bg-white text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}
+          >
+            <span className="flex items-center gap-2">
+              <Image size={14} />
+              Attach or replace media
+            </span>
+          </button>
+        </div>
+
+        {/* Step indicator — only for new assets mode */}
+        {importMode === 'new_assets' && (
         <div className="flex items-center gap-2 mb-8 overflow-x-auto pb-1">
           {(['upload', 'dry_run', 'confirm', 'importing', 'done'] as Step[]).map((s, i) => {
             const labels: Record<Step, string> = {
@@ -454,7 +479,17 @@ export default function AdminImportsPage() {
             );
           })}
         </div>
+        )}
 
+        {/* ---- ATTACH MEDIA MODE ---- */}
+        {importMode === 'attach_media' && (
+          <div className="max-w-3xl">
+            <AttachMediaMode />
+          </div>
+        )}
+
+        {/* ---- NEW ASSETS IMPORT MODE ---- */}
+        {importMode === 'new_assets' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* Main panel */}
           <div className="lg:col-span-2 space-y-6">
@@ -1078,6 +1113,7 @@ export default function AdminImportsPage() {
             </div>
           </div>
         </div>
+        )} {/* end importMode === 'new_assets' */}
       </main>
       <Footer />
     </div>
