@@ -128,6 +128,8 @@ export async function fetchSpeciesAssets(
     .from('assets')
     .select('*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)')
     .eq('species_id', speciesId)
+    .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
+    .neq('publication_status', 'archived')
     .order('created_at', { ascending: false })
     .limit(limit);
 

@@ -160,6 +160,14 @@ export default function AdminPage() {
       statLabel: null,
     },
     {
+      href: '/admin/catalog-visibility',
+      icon: Database,
+      label: 'Public Catalog Visibility',
+      description: 'Audit publication chain — RLS, status filters, joins, public pages',
+      stat: null,
+      statLabel: null,
+    },
+    {
       href: '/admin/imports',
       icon: Upload,
       label: 'CSV Import',

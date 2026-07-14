@@ -149,13 +149,21 @@ export async function fetchAssets(
     .select(
       `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`,
       { count: 'exact' }
-    );
+    )
+    // Only show publicly visible assets (defense-in-depth alongside RLS)
+    .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
+    .neq('publication_status', 'archived');
 
   // Text search
   if (filters.query) {
     query = query.or(
       `title.ilike.%${filters.query}%,product_form.ilike.%${filters.query}%,country.ilike.%${filters.query}%`
     );
+  }
+
+  // Media type filter
+  if (filters.mediaType?.length) {
+    query = query.in('media_type', filters.mediaType);
   }
 
   // Category filter
@@ -239,6 +247,9 @@ export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {
       `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`
     )
     .eq('slug', slug)
+    // Only return publicly visible assets for the public detail page
+    .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
+    .neq('publication_status', 'archived')
     .maybeSingle();
 
   if (error) {
