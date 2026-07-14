@@ -3,7 +3,7 @@
 import { createClient } from '@/lib/supabase/client';
 
 // ============================================================
-// PHASE 5.2 — ENCYCLOPEDIA QUERIES
+// PHASE 5.2 / PHASE 7 — ENCYCLOPEDIA QUERIES
 // All queries return only public, verified, non-confidential data
 // ============================================================
 
@@ -16,15 +16,35 @@ export interface EncSpecies {
   scientific_name: string;
   genus: string | null;
   family: string | null;
+  order_name: string | null;
   category: string | null;
   fao_areas: string[] | null;
   fao_alpha3_code: string | null;
   taxonomic_status: string | null;
   validation_status: string | null;
   description: string | null;
+  // Phase 7 extended fields
+  habitat: string | null;
+  habitat_depth: string | null;
+  world_distribution: string | null;
+  fishing_methods: string[] | null;
+  aquaculture_methods: string[] | null;
+  seasonality: Record<string, unknown> | null;
+  size_info: Record<string, unknown> | null;
+  nutritional_values: Record<string, unknown> | null;
+  possible_certifications: string[] | null;
+  commercial_forms: string[] | null;
+  presentations: string[] | null;
+  packaging_notes: string | null;
+  conservation_methods: string[] | null;
+  seo_title: string | null;
+  seo_description: string | null;
+  seo_keywords: string[] | null;
+  // flags
   is_demo: boolean;
   is_public: boolean | null;
   is_validated: boolean;
+  cover_asset_id: string | null;
   created_at: string;
   updated_at: string;
   // computed
@@ -185,6 +205,7 @@ export async function fetchEncSpeciesList(opts: {
     .range(from, to);
 
   if (search?.trim()) {
+    // Search across scientific name, common name, family, and also species_names (synonyms/local)
     query = query.or(
       `common_name.ilike.%${search}%,scientific_name.ilike.%${search}%,family.ilike.%${search}%`
     );
@@ -196,6 +217,63 @@ export async function fetchEncSpeciesList(opts: {
   const { data, count, error } = await query;
   if (error) {
     console.error('fetchEncSpeciesList error:', error.message);
+    return { data: [], total: 0, page, pageSize };
+  }
+  return { data: (data as EncSpecies[]) || [], total: count ?? 0, page, pageSize };
+}
+
+/**
+ * Phase 7: Search species also by synonyms and local names from species_names table
+ */
+export async function fetchEncSpeciesListWithNames(opts: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  category?: string;
+  verifiedOnly?: boolean;
+}): Promise<PaginatedResult<EncSpecies>> {
+  const supabase = createClient();
+  const { page = 1, pageSize = 24, search, category, verifiedOnly } = opts;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  if (!search?.trim()) {
+    return fetchEncSpeciesList({ page, pageSize, category, verifiedOnly });
+  }
+
+  const q = search.trim();
+
+  // First find species IDs matching via species_names (synonyms, local names)
+  const { data: nameMatches } = await supabase
+    .from('species_names')
+    .select('species_id')
+    .ilike('name', `%${q}%`)
+    .limit(100);
+
+  const matchedIds = nameMatches?.map((n: { species_id: string }) => n.species_id) || [];
+
+  let query = supabase
+    .from('species')
+    .select('*', { count: 'exact' })
+    .order('common_name', { ascending: true })
+    .range(from, to);
+
+  if (matchedIds.length > 0) {
+    query = query.or(
+      `common_name.ilike.%${q}%,scientific_name.ilike.%${q}%,family.ilike.%${q}%,id.in.(${matchedIds.join(',')})`
+    );
+  } else {
+    query = query.or(
+      `common_name.ilike.%${q}%,scientific_name.ilike.%${q}%,family.ilike.%${q}%`
+    );
+  }
+
+  if (category) query = query.eq('category', category);
+  if (verifiedOnly) query = query.eq('is_validated', true);
+
+  const { data, count, error } = await query;
+  if (error) {
+    console.error('fetchEncSpeciesListWithNames error:', error.message);
     return { data: [], total: 0, page, pageSize };
   }
   return { data: (data as EncSpecies[]) || [], total: count ?? 0, page, pageSize };
@@ -275,13 +353,12 @@ export async function fetchSpeciesDocuments(speciesId: string): Promise<EncDocum
   return (
     data
       ?.map((r: any) => r.documents)
-      .filter((d: any) => d && d.is_public === true && d.confidentiality_level === 'public') as EncDocument[]
+      .filter((d: any) => d && d.is_public === true) as EncDocument[]
   ) || [];
 }
 
 export async function fetchRelatedSpecies(speciesId: string, limit = 4): Promise<EncSpecies[]> {
   const supabase = createClient();
-  const sp = await fetchEncSpeciesBySlug('');
   const { data: current } = await supabase.from('species').select('family, category').eq('id', speciesId).maybeSingle();
   if (!current) return [];
   const { data, error } = await supabase
@@ -292,6 +369,112 @@ export async function fetchRelatedSpecies(speciesId: string, limit = 4): Promise
     .limit(limit);
   if (error) return [];
   return (data as EncSpecies[]) || [];
+}
+
+// ============================================================
+// ADMIN SPECIES QUERIES (Phase 7)
+// ============================================================
+
+export async function adminFetchSpeciesList(opts: {
+  page?: number;
+  pageSize?: number;
+  search?: string;
+  category?: string;
+  validationStatus?: string;
+}): Promise<PaginatedResult<EncSpecies>> {
+  const supabase = createClient();
+  const { page = 1, pageSize = 25, search, category, validationStatus } = opts;
+  const from = (page - 1) * pageSize;
+  const to = from + pageSize - 1;
+
+  let query = supabase
+    .from('species')
+    .select('*', { count: 'exact' })
+    .order('common_name', { ascending: true })
+    .range(from, to);
+
+  if (search?.trim()) {
+    query = query.or(
+      `common_name.ilike.%${search}%,scientific_name.ilike.%${search}%,family.ilike.%${search}%`
+    );
+  }
+  if (category) query = query.eq('category', category);
+  if (validationStatus) query = query.eq('validation_status', validationStatus);
+
+  const { data, count, error } = await query;
+  if (error) {
+    console.error('adminFetchSpeciesList error:', error.message);
+    return { data: [], total: 0, page, pageSize };
+  }
+  return { data: (data as EncSpecies[]) || [], total: count ?? 0, page, pageSize };
+}
+
+export async function adminCreateSpecies(payload: Partial<EncSpecies>): Promise<EncSpecies | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('species')
+    .insert([payload])
+    .select()
+    .single();
+  if (error) { console.error('adminCreateSpecies error:', error.message); return null; }
+  return data as EncSpecies;
+}
+
+export async function adminUpdateSpecies(id: string, payload: Partial<EncSpecies>): Promise<EncSpecies | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('species')
+    .update({ ...payload, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) { console.error('adminUpdateSpecies error:', error.message); return null; }
+  return data as EncSpecies;
+}
+
+export async function adminLinkAssetToSpecies(speciesId: string, assetId: string): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('asset_species')
+    .upsert({ asset_id: assetId, species_id: speciesId });
+  if (error) { console.error('adminLinkAssetToSpecies error:', error.message); return false; }
+  return true;
+}
+
+export async function adminLinkDocumentToSpecies(speciesId: string, documentId: string): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('document_species')
+    .insert({ document_id: documentId, species_id: speciesId });
+  if (error) { console.error('adminLinkDocumentToSpecies error:', error.message); return false; }
+  return true;
+}
+
+export async function adminLinkProductToSpecies(speciesId: string, productId: string): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase
+    .from('commercial_product_species')
+    .upsert({ product_id: productId, species_id: speciesId, status: 'verified' });
+  if (error) { console.error('adminLinkProductToSpecies error:', error.message); return false; }
+  return true;
+}
+
+export async function adminAddSpeciesName(payload: Omit<EncSpeciesName, 'id'>): Promise<EncSpeciesName | null> {
+  const supabase = createClient();
+  const { data, error } = await supabase
+    .from('species_names')
+    .insert([payload])
+    .select()
+    .single();
+  if (error) { console.error('adminAddSpeciesName error:', error.message); return null; }
+  return data as EncSpeciesName;
+}
+
+export async function adminDeleteSpeciesName(nameId: string): Promise<boolean> {
+  const supabase = createClient();
+  const { error } = await supabase.from('species_names').delete().eq('id', nameId);
+  if (error) { console.error('adminDeleteSpeciesName error:', error.message); return false; }
+  return true;
 }
 
 // ============================================================
@@ -541,11 +724,16 @@ export async function encyclopediaSearch(query: string, limit = 30): Promise<Sea
   const supabase = createClient();
   const q = query.trim();
 
-  const [speciesRes, productRes, marketRes, certRes, docRes] = await Promise.all([
+  const [speciesRes, speciesNamesRes, productRes, marketRes, certRes, docRes] = await Promise.all([
     supabase
       .from('species')
       .select('id, slug, common_name, scientific_name, is_demo, is_validated')
       .or(`common_name.ilike.%${q}%,scientific_name.ilike.%${q}%,family.ilike.%${q}%`)
+      .limit(8),
+    supabase
+      .from('species_names')
+      .select('species_id, name')
+      .ilike('name', `%${q}%`)
       .limit(10),
     supabase
       .from('commercial_products')
@@ -575,12 +763,37 @@ export async function encyclopediaSearch(query: string, limit = 30): Promise<Sea
   ]);
 
   const results: SearchResult[] = [];
+  const seenSpeciesIds = new Set<string>();
 
-  speciesRes.data?.forEach((s: any) => results.push({
-    id: s.id, type: 'species', title: s.common_name,
-    subtitle: s.scientific_name, slug: s.slug,
-    status: s.is_validated ? 'verified' : 'unverified', is_demo: s.is_demo,
-  }));
+  speciesRes.data?.forEach((s: any) => {
+    seenSpeciesIds.add(s.id);
+    results.push({
+      id: s.id, type: 'species', title: s.common_name,
+      subtitle: s.scientific_name, slug: s.slug,
+      status: s.is_validated ? 'verified' : 'unverified', is_demo: s.is_demo,
+    });
+  });
+
+  // Add species found via synonym/local name search (avoid duplicates)
+  if (speciesNamesRes.data && speciesNamesRes.data.length > 0) {
+    const nameSpeciesIds = [...new Set(speciesNamesRes.data.map((n: any) => n.species_id))].filter(id => !seenSpeciesIds.has(id));
+    if (nameSpeciesIds.length > 0) {
+      const { data: extraSpecies } = await supabase
+        .from('species')
+        .select('id, slug, common_name, scientific_name, is_demo, is_validated')
+        .in('id', nameSpeciesIds)
+        .limit(5);
+      extraSpecies?.forEach((s: any) => {
+        const matchedName = speciesNamesRes.data?.find((n: any) => n.species_id === s.id);
+        results.push({
+          id: s.id, type: 'species', title: s.common_name,
+          subtitle: matchedName ? `"${matchedName.name}" — ${s.scientific_name}` : s.scientific_name,
+          slug: s.slug, status: s.is_validated ? 'verified' : 'unverified', is_demo: s.is_demo,
+        });
+      });
+    }
+  }
+
   productRes.data?.forEach((p: any) => results.push({
     id: p.id, type: 'product', title: p.public_name,
     subtitle: null, slug: p.slug, status: p.status, is_demo: p.is_demo,

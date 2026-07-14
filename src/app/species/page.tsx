@@ -2,10 +2,10 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, Filter, ChevronRight, CheckCircle, ArrowRight, X, SlidersHorizontal } from 'lucide-react';
+import { Search, Filter, ChevronRight, CheckCircle, ArrowRight, X, SlidersHorizontal, BookOpen } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { fetchEncSpeciesList, type EncSpecies } from '@/lib/supabase/encyclopediaQueries';
+import { fetchEncSpeciesListWithNames, type EncSpecies } from '@/lib/supabase/encyclopediaQueries';
 
 const CATEGORIES = ['Fish', 'Crustaceans', 'Cephalopods', 'Molluscs', 'Aquaculture'];
 const PAGE_SIZE = 24;
@@ -79,7 +79,8 @@ export default function SpeciesPage() {
 
   const load = useCallback(async () => {
     setLoading(true);
-    const result = await fetchEncSpeciesList({
+    // Phase 7: use enhanced search that also searches synonyms and local names
+    const result = await fetchEncSpeciesListWithNames({
       page, pageSize: PAGE_SIZE, search: debouncedSearch, category: category || undefined, verifiedOnly,
     });
     setSpeciesList(result.data);
@@ -98,18 +99,24 @@ export default function SpeciesPage() {
       <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
 
         {/* Breadcrumb */}
-        <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6">
+        <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6" aria-label="Breadcrumb">
+          <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
+          <ChevronRight size={12} />
           <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
           <ChevronRight size={12} />
-          <span className="text-foreground font-medium">Species</span>
+          <span className="text-foreground font-medium">Species Center</span>
         </nav>
 
         {/* Header */}
         <div className="mb-8">
-          <p className="text-xs font-semibold uppercase tracking-widest text-secondary mb-2">Species Center</p>
-          <h1 className="text-3xl font-bold text-foreground mb-2">Seafood Species Encyclopedia</h1>
+          <div className="flex items-center gap-2 mb-2">
+            <BookOpen size={16} className="text-secondary" />
+            <p className="text-xs font-semibold uppercase tracking-widest text-secondary">Species Center</p>
+          </div>
+          <h1 className="text-3xl font-bold text-foreground mb-2">Seafood Encyclopedia</h1>
           <p className="text-muted-foreground max-w-2xl leading-relaxed text-sm">
             Documented seafood species with scientific names, multilingual names, FAO codes, taxonomy, associated products and media.
+            Search by scientific name, commercial name, synonyms, or local names.
           </p>
         </div>
 
@@ -121,7 +128,7 @@ export default function SpeciesPage() {
               type="search"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Search by name, scientific name, family…"
+              placeholder="Search by name, scientific name, synonym, local name…"
               className="w-full pl-9 pr-4 py-2.5 bg-card border border-border rounded-xl text-sm outline-none focus:border-secondary/60 transition-colors"
             />
           </div>
@@ -180,6 +187,7 @@ export default function SpeciesPage() {
           <p className="text-xs text-muted-foreground mb-4">
             {total > 0 ? `${total} species found` : 'No species found'}
             {debouncedSearch && ` for "${debouncedSearch}"`}
+            {debouncedSearch && <span className="ml-1 text-secondary/70">(includes synonyms & local names)</span>}
           </p>
         )}
 
