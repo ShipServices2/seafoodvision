@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import AppLogo from '@/components/ui/AppLogo';
-import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, Compass, Sparkles, Microscope } from 'lucide-react';
+import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, Compass, Sparkles, Microscope, Building2 } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -26,6 +26,7 @@ const navLinks = [
   { href: '/how-it-works', label: 'How it works', icon: HelpCircle },
   { href: '/licensing', label: 'Licensing', icon: Tag },
   { href: '/pricing', label: 'Pricing', icon: DollarSign },
+  { href: '/enterprise', label: 'Enterprise', icon: Building2 },
   { href: '/about', label: 'About', icon: Info },
 ];
 

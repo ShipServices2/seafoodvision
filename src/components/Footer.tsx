@@ -52,6 +52,7 @@ const footerLinks = {
       { href: '/species', label: 'Species Index' },
       { href: '/collections', label: 'Collections' },
       { href: '/pricing', label: 'Pricing' },
+      { href: '/pricing/compare', label: 'Compare Plans' },
     ],
   },
   resources: {
@@ -59,7 +60,8 @@ const footerLinks = {
     links: [
       { href: '/how-it-works', label: 'How it works' },
       { href: '/licensing', label: 'Licensing' },
-      { href: '/about', label: 'About' },
+      { href: '/enterprise', label: 'Enterprise' },
+      { href: '/pricing/faq', label: 'Pricing FAQ' },
       { href: '/contact', label: 'Contact' },
     ],
   },
