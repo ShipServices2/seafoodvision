@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck } from 'lucide-react';
+import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck, HardDrive } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
@@ -174,6 +174,15 @@ export default function AdminPage() {
       description: 'Validate and preview Codex CSV exports',
       stat: null,
       statLabel: null,
+    },
+    {
+      href: '/admin/reconcile-storage',
+      icon: HardDrive,
+      label: 'Reconcile Storage',
+      description: 'Link already-uploaded Storage files to existing assets — no reimports',
+      stat: null,
+      statLabel: null,
+      badge: 'Storage',
     },
     {
       href: '/licensing-center',

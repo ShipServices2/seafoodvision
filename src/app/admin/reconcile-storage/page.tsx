@@ -38,6 +38,7 @@ interface ReconcileResult {
   errors: string[];
   unmatchedPaths: string[];
   matches: ReconcileMatch[];
+  detectedFormats?: string[];
 }
 
 type Step = 'idle' | 'scanning' | 'dry_run_done' | 'executing' | 'done';
@@ -157,9 +158,9 @@ export default function ReconcileStoragePage() {
             <p className="font-medium">How this works</p>
             <ul className="text-blue-300 space-y-0.5 list-disc list-inside">
               <li>Scans <code className="bg-blue-900/40 px-1 rounded">asset-thumbnails</code> and <code className="bg-blue-900/40 px-1 rounded">asset-previews</code> buckets</li>
-              <li>Matches files to assets using <code className="bg-blue-900/40 px-1 rounded">public_asset_id</code> extracted from the storage path</li>
+              <li>Matches files to assets using <code className="bg-blue-900/40 px-1 rounded">public_asset_id</code> — detects all path formats automatically</li>
+              <li>Supported formats: flat (<code className="bg-blue-900/40 px-1 rounded">SV-B500-0500.jpg</code>), subfolder (<code className="bg-blue-900/40 px-1 rounded">thumbnails/SV-B500-0500.jpg</code>), folder-based (<code className="bg-blue-900/40 px-1 rounded">pilot/SV-B500-0500/thumbnail.jpg</code>)</li>
               <li>Creates or updates <code className="bg-blue-900/40 px-1 rounded">asset_files</code> rows — no files are moved or deleted</li>
-              <li>Expected path pattern: <code className="bg-blue-900/40 px-1 rounded">pilot/&#123;publicAssetId&#125;/thumbnail.jpg</code></li>
             </ul>
           </div>
         </div>
@@ -252,7 +253,7 @@ export default function ReconcileStoragePage() {
 
                 {result.matched === 0 ? (
                   <div className="bg-yellow-950/30 border border-yellow-800/40 rounded-lg p-4 text-center text-yellow-300 text-sm">
-                    No matches found. Check that storage paths follow the pattern <code>pilot/&#123;publicAssetId&#125;/thumbnail.jpg</code>.
+                    No matches found. The tool tried all path formats (flat, subfolder, folder-based). Check that <code>public_asset_id</code> values in the assets table match the filenames in Storage.
                   </div>
                 ) : (
                   <div className="flex flex-col sm:flex-row gap-3">
@@ -327,6 +328,21 @@ export default function ReconcileStoragePage() {
                     ))}
                   </div>
                 )}
+              </div>
+            )}
+
+            {/* Detected Formats */}
+            {result.detectedFormats && result.detectedFormats.length > 0 && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
+                <p className="text-gray-400 text-xs font-medium mb-2 flex items-center gap-2">
+                  <Database className="w-3.5 h-3.5" />
+                  Detected path strategies
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {result.detectedFormats.map((f) => (
+                    <span key={f} className="px-2 py-1 bg-gray-800 text-gray-300 text-xs rounded font-mono">{f}</span>
+                  ))}
+                </div>
               </div>
             )}
 

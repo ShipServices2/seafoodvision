@@ -21,7 +21,7 @@ interface ReconcileMatch {
   fileLevel: 'thumbnail' | 'preview';
   mimeType: string | null;
   fileSizeBytes: number | null;
-  existingFileId: string | null; // null = will INSERT, string = will UPDATE
+  existingFileId: string | null;
 }
 
 interface ReconcileResult {
@@ -37,6 +37,8 @@ interface ReconcileResult {
   errors: string[];
   unmatchedPaths: string[];
   matches: ReconcileMatch[];
+  // Diagnostic info
+  detectedFormats: string[];
 }
 
 // List all files recursively from a storage bucket
@@ -67,24 +69,127 @@ async function listBucketFiles(
   return results;
 }
 
-// Parse public_asset_id and file_level from storage path
-// Expected pattern: pilot/{publicAssetId}/thumbnail.{ext} or pilot/{publicAssetId}/preview.{ext}
-// Also handles: {publicAssetId}/thumbnail.{ext} (without pilot/ prefix)
-function parsePath(storagePath: string): { publicAssetId: string; fileLevel: 'thumbnail' | 'preview' } | null {
+// Image/video extensions we consider valid media files
+const MEDIA_EXTENSIONS = new Set([
+  'jpg', 'jpeg', 'png', 'webp', 'gif', 'heic', 'heif', 'avif',
+  'mp4', 'mov', 'avi', 'mkv', 'webm',
+]);
+
+function isMediaFile(filename: string): boolean {
+  const ext = filename.split('.').pop()?.toLowerCase() ?? '';
+  return MEDIA_EXTENSIONS.has(ext);
+}
+
+/**
+ * Multi-strategy path parser.
+ *
+ * Handles all known and likely path formats:
+ *
+ * Strategy 1 — folder-based (original assumption):
+ *   pilot/{publicAssetId}/thumbnail.{ext}
+ *   pilot/{publicAssetId}/preview.{ext}
+ *   {publicAssetId}/thumbnail.{ext}
+ *   {publicAssetId}/preview.{ext}
+ *
+ * Strategy 2 — flat file named after publicAssetId:
+ *   SV-B500-0500.jpg                       → thumbnail (asset-thumbnails bucket)
+ *   SV-B500-0500.jpg                       → preview   (asset-previews bucket)
+ *
+ * Strategy 3 — subfolder with publicAssetId as filename:
+ *   thumbnails/SV-B500-0500.jpg
+ *   previews/SV-B500-0500.jpg
+ *   batch-500/SV-B500-0500.jpg
+ *   pilot/SV-B500-0500.jpg
+ *   any-folder/SV-B500-0500.jpg
+ *
+ * Strategy 4 — publicAssetId contains "thumbnail" or "preview" hint in path:
+ *   SV-B500-0500_thumbnail.jpg
+ *   SV-B500-0500_preview.jpg
+ *
+ * The file_level is inferred from:
+ *   1. filename keyword (thumbnail/preview/thumb/watermark/wm)
+ *   2. folder keyword (thumbnails/previews/thumb/preview)
+ *   3. bucket name (asset-thumbnails → thumbnail, asset-previews → preview)
+ */
+function parsePath(
+  storagePath: string,
+  bucket: string,
+  knownIds: Set<string>
+): { publicAssetId: string; fileLevel: 'thumbnail' | 'preview'; strategy: string } | null {
   const parts = storagePath.split('/');
-  if (parts.length < 2) return null;
+  const rawFilename = parts[parts.length - 1];
+  const filenameLower = rawFilename.toLowerCase();
+  const filenameNoExt = rawFilename.replace(/\.[^.]+$/, '');
+  const filenameNoExtLower = filenameNoExt.toLowerCase();
 
-  const filename = parts[parts.length - 1].toLowerCase();
-  const folderName = parts[parts.length - 2];
+  // Must be a media file
+  if (!isMediaFile(rawFilename)) return null;
 
-  let fileLevel: 'thumbnail' | 'preview' | null = null;
-  if (filename.startsWith('thumbnail')) fileLevel = 'thumbnail';
-  else if (filename.startsWith('preview')) fileLevel = 'preview';
+  // Infer file_level from bucket as fallback
+  const bucketLevel: 'thumbnail' | 'preview' =
+    bucket === 'asset-thumbnails' ? 'thumbnail' : 'preview';
 
-  if (!fileLevel) return null;
-  if (!folderName) return null;
+  // Helper: infer file_level from a string (filename or folder name)
+  function inferLevel(s: string): 'thumbnail' | 'preview' | null {
+    const sl = s.toLowerCase();
+    if (sl.includes('thumbnail') || sl.includes('thumb') || sl === 'thumbnails') return 'thumbnail';
+    if (sl.includes('preview') || sl.includes('watermark') || sl.includes('_wm') || sl === 'previews') return 'preview';
+    return null;
+  }
 
-  return { publicAssetId: folderName, fileLevel };
+  // ── Strategy 1: folder-based (pilot/{id}/thumbnail.ext or {id}/thumbnail.ext) ──
+  if (parts.length >= 2) {
+    const folderName = parts[parts.length - 2];
+    const levelFromFilename = inferLevel(filenameLower);
+    if (levelFromFilename && folderName) {
+      // The folder is the publicAssetId
+      const candidate = folderName;
+      if (knownIds.has(candidate.toLowerCase())) {
+        return { publicAssetId: candidate, fileLevel: levelFromFilename, strategy: 'folder-based' };
+      }
+    }
+  }
+
+  // ── Strategy 2 & 3: filename IS the publicAssetId (with or without subfolder) ──
+  // Try the bare filename (no extension) as publicAssetId
+  // Also try stripping _thumbnail / _preview / _thumb / _wm suffixes
+  const candidateNames = [
+    filenameNoExt,
+    filenameNoExt.replace(/_thumbnail$/i, ''),
+    filenameNoExt.replace(/_preview$/i, ''),
+    filenameNoExt.replace(/_thumb$/i, ''),
+    filenameNoExt.replace(/_watermark$/i, ''),
+    filenameNoExt.replace(/_wm$/i, ''),
+    filenameNoExt.replace(/-thumbnail$/i, ''),
+    filenameNoExt.replace(/-preview$/i, ''),
+    filenameNoExt.replace(/-thumb$/i, ''),
+  ];
+
+  for (const candidate of candidateNames) {
+    if (!candidate) continue;
+    if (knownIds.has(candidate.toLowerCase())) {
+      // Determine file_level: check filename suffix first, then folder, then bucket
+      const levelFromFilename = inferLevel(filenameNoExtLower);
+      const folderLevel = parts.length >= 2 ? inferLevel(parts[parts.length - 2]) : null;
+      const fileLevel = levelFromFilename ?? folderLevel ?? bucketLevel;
+      const strategy = candidate === filenameNoExt ? 'flat-filename' : 'filename-with-suffix-stripped';
+      return { publicAssetId: candidate, fileLevel, strategy };
+    }
+  }
+
+  // ── Strategy 4: path contains publicAssetId as a path segment (not the last folder) ──
+  // e.g. pilot/SV-B500-0500/thumbnail.jpg — already covered by strategy 1
+  // but also: some/deep/SV-B500-0500/file.jpg
+  for (let i = parts.length - 2; i >= 0; i--) {
+    const seg = parts[i];
+    if (knownIds.has(seg.toLowerCase())) {
+      const levelFromFilename = inferLevel(filenameLower);
+      const fileLevel = levelFromFilename ?? bucketLevel;
+      return { publicAssetId: seg, fileLevel, strategy: 'path-segment' };
+    }
+  }
+
+  return null;
 }
 
 export async function POST(request: NextRequest) {
@@ -132,10 +237,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: `Failed to fetch assets: ${assetsError.message}` }, { status: 500 });
     }
 
-    const assetMap = new Map<string, { id: string; title: string }>();
+    const assetMap = new Map<string, { id: string; title: string; publicAssetId: string }>();
+    // Build a set of all known public_asset_ids (lowercase) for fast lookup
+    const knownIds = new Set<string>();
+
     for (const asset of (assets || []) as { id: string; public_asset_id: string; title: string }[]) {
       if (asset.public_asset_id) {
-        assetMap.set(asset.public_asset_id.toLowerCase().trim(), { id: asset.id, title: asset.title });
+        const key = asset.public_asset_id.toLowerCase().trim();
+        assetMap.set(key, { id: asset.id, title: asset.title, publicAssetId: asset.public_asset_id });
+        knownIds.add(key);
       }
     }
 
@@ -158,9 +268,10 @@ export async function POST(request: NextRequest) {
     const matches: ReconcileMatch[] = [];
     const unmatchedPaths: string[] = [];
     let alreadyLinked = 0;
+    const detectedFormats = new Set<string>();
 
     for (const sf of allStorageFiles) {
-      const parsed = parsePath(sf.path);
+      const parsed = parsePath(sf.path, sf.bucket, knownIds);
       if (!parsed) {
         unmatchedPaths.push(`${sf.bucket}/${sf.path} (unrecognized path pattern)`);
         continue;
@@ -172,11 +283,11 @@ export async function POST(request: NextRequest) {
         continue;
       }
 
+      detectedFormats.add(parsed.strategy);
+
       const key = `${sf.bucket}::${sf.path}`;
       const existingId = existingMap.get(key) ?? null;
 
-      // Determine if this is already perfectly linked (same bucket+path already in asset_files for this asset)
-      // We still include it in matches but mark it
       const mimeType = sf.metadata?.mimetype ?? null;
       const fileSizeBytes = sf.metadata?.size ?? null;
 
@@ -210,7 +321,8 @@ export async function POST(request: NextRequest) {
       updated: 0,
       errors: [],
       unmatchedPaths,
-      matches: mode === 'dry_run' ? matches.slice(0, 50) : [], // preview only in dry_run
+      matches: mode === 'dry_run' ? matches.slice(0, 50) : [],
+      detectedFormats: Array.from(detectedFormats),
     };
 
     if (mode === 'dry_run') {
@@ -267,6 +379,7 @@ export async function POST(request: NextRequest) {
     result.inserted = inserted;
     result.updated = updated;
     result.errors = errors;
+    result.matches = []; // don't send full match list on execute
 
     return NextResponse.json(result);
   } catch (err) {

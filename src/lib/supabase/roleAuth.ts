@@ -30,6 +30,9 @@ export const ADMIN_ONLY_ROUTES = [
   '/admin/reviews',
   '/admin/reviewer-dashboard',
   '/admin/assistant',
+  '/admin/reconcile-storage',
+  '/admin/pricing',
+  '/admin/catalog-visibility',
 ];
 
 /**
