@@ -52,16 +52,17 @@
   "dependencies": {
     "@dhiwise/component-tagger": "^1.0.15",
     "@heroicons/react": "^2.2.0",
-    "@supabase/supabase-js": "2.49.4",
+    "@jest/globals": "^30.4.1",
     "@supabase/ssr": "0.6.1",
+    "@supabase/supabase-js": "2.49.4",
     "@tailwindcss/forms": "^0.5.10",
     "@tailwindcss/typography": "^0.5.16",
+    "lucide-react": "^1.7.0",
     "next": "15.5.18",
     "next-intl": "^3.26.3",
     "react": "19.0.3",
     "react-dom": "19.0.3",
     "recharts": "^2.15.2",
-    "lucide-react": "^1.7.0",
     "sonner": "^1.7.4"
   },
   "devDependencies": {
