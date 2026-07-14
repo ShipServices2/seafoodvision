@@ -15,25 +15,12 @@ import { ALLOWED_CSV_COLUMNS } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import AttachMediaMode from './components/AttachMediaMode';
+import { scanRowForSensitiveData } from '@/lib/importValidator';
 
 // ============================================================
-// SECURITY PATTERNS (client-side pre-scan — mirrors server)
+// SECURITY PATTERNS — now handled by shared importValidator
+// (removed inline REJECT_PATTERNS — use scanRowForSensitiveData)
 // ============================================================
-const REJECT_PATTERNS = [
-  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path (C:\\)' },
-  { pattern: /\/Users\//, label: 'macOS user path (/Users/)' },
-  { pattern: /dropbox/i, label: 'Dropbox path' },
-  { pattern: /\b\d{1,3}\.\d{4,}\s*,\s*[-]?\d{1,3}\.\d{4,}\b/, label: 'GPS decimal coordinates' },
-  { pattern: /\b(?:lat(?:itude)?|lon(?:gitude)?|gps)[_\s:=]+[-\d.]+/i, label: 'GPS/latitude/longitude field' },
-  { pattern: /\bgps\b/i, label: 'GPS keyword' },
-  { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, label: 'Email address' },
-  { pattern: /(?<!\d)(?:\+?\d[\d\s\-().]{6,}\d)(?!\d)/, label: 'Phone number' },
-  { pattern: /\b(?:secret|api[_-]?key|password|token|private[_-]?key)\b/i, label: 'Secret/credential' },
-  { pattern: /\/originals?\//i, label: 'Original file path' },
-  { pattern: /original[_-]?hd/i, label: 'Original HD reference' },
-  { pattern: /\.sqlite[3]?\b/i, label: 'SQLite file reference' },
-  { pattern: /\.db\b/i, label: 'Database file reference' },
-];
 
 // ============================================================
 // TYPES
@@ -117,13 +104,16 @@ function clientValidate(rows: Record<string, string>[]): { errors: string[]; war
   }
 
   rows.forEach((row, idx) => {
-    const rowStr = Object.values(row).join(' ');
-    for (const { pattern, label } of REJECT_PATTERNS) {
-      if (pattern.test(rowStr)) {
-        errors.push(`Row ${idx + 1}: Contains rejected data — ${label}`);
-        sensitiveCount++;
-        break;
-      }
+    // Per-cell scanning: each column value is checked individually.
+    // The phone-number regex is skipped for numeric columns (width, height,
+    // confidence_score, technical_score, commercial_score) to prevent
+    // false positives like "3840 2160" being flagged as a phone number.
+    const match = scanRowForSensitiveData(row);
+    if (match) {
+      errors.push(
+        `Row ${idx + 1} — column ${match.columnName} — ${match.rejectionType}`
+      );
+      sensitiveCount++;
     }
   });
 
