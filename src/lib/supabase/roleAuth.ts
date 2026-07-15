@@ -49,6 +49,18 @@ export const ADMIN_ONLY_ROUTES = [
   '/admin/commerce/customers',
   '/admin/commerce/refunds',
   '/admin/commerce/reports',
+  '/admin/metadata-review',
+  '/admin/metadata-review/import',
+  '/admin/metadata-review/assets',
+  '/admin/metadata-review/species',
+  '/admin/metadata-review/synonyms',
+  '/admin/metadata-review/keywords',
+  '/admin/metadata-review/history',
+  '/admin/ai-identification',
+  '/admin/ai-identification/queue',
+  '/admin/ai-identification/review',
+  '/admin/ai-identification/bulk',
+  '/admin/ai-identification/analytics',
 ];
 
 /**
