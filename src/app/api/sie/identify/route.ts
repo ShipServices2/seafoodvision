@@ -1,73 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { AIProviderRegistry, AIIdentificationRequest } from '@/lib/ai/providers';
-
-// ─── Mock species pool for deterministic proposals ────────────────────────────
-const MOCK_SPECIES_POOL = [
-  { commonName: 'Atlantic Salmon', scientificName: 'Salmo salar', family: 'Salmonidae', genus: 'Salmo' },
-  { commonName: 'Rainbow Trout', scientificName: 'Oncorhynchus mykiss', family: 'Salmonidae', genus: 'Oncorhynchus' },
-  { commonName: 'Atlantic Cod', scientificName: 'Gadus morhua', family: 'Gadidae', genus: 'Gadus' },
-  { commonName: 'European Sea Bass', scientificName: 'Dicentrarchus labrax', family: 'Moronidae', genus: 'Dicentrarchus' },
-  { commonName: 'Gilthead Sea Bream', scientificName: 'Sparus aurata', family: 'Sparidae', genus: 'Sparus' },
-  { commonName: 'Yellowfin Tuna', scientificName: 'Thunnus albacares', family: 'Scombridae', genus: 'Thunnus' },
-  { commonName: 'Bluefin Tuna', scientificName: 'Thunnus thynnus', family: 'Scombridae', genus: 'Thunnus' },
-  { commonName: 'Swordfish', scientificName: 'Xiphias gladius', family: 'Xiphiidae', genus: 'Xiphias' },
-  { commonName: 'Mahi-Mahi', scientificName: 'Coryphaena hippurus', family: 'Coryphaenidae', genus: 'Coryphaena' },
-  { commonName: 'Halibut', scientificName: 'Hippoglossus hippoglossus', family: 'Pleuronectidae', genus: 'Hippoglossus' },
-  { commonName: 'Sole', scientificName: 'Solea solea', family: 'Soleidae', genus: 'Solea' },
-  { commonName: 'Turbot', scientificName: 'Scophthalmus maximus', family: 'Scophthalmidae', genus: 'Scophthalmus' },
-  { commonName: 'Red Mullet', scientificName: 'Mullus surmuletus', family: 'Mullidae', genus: 'Mullus' },
-  { commonName: 'Monkfish', scientificName: 'Lophius piscatorius', family: 'Lophiidae', genus: 'Lophius' },
-  { commonName: 'Hake', scientificName: 'Merluccius merluccius', family: 'Merlucciidae', genus: 'Merluccius' },
-  { commonName: 'Mackerel', scientificName: 'Scomber scombrus', family: 'Scombridae', genus: 'Scomber' },
-  { commonName: 'Herring', scientificName: 'Clupea harengus', family: 'Clupeidae', genus: 'Clupea' },
-  { commonName: 'Sardine', scientificName: 'Sardina pilchardus', family: 'Clupeidae', genus: 'Sardina' },
-  { commonName: 'Whiting', scientificName: 'Merlangius merlangus', family: 'Gadidae', genus: 'Merlangius' },
-  { commonName: 'Seabream', scientificName: 'Pagellus erythrinus', family: 'Sparidae', genus: 'Pagellus' },
-];
-
-const PRODUCT_FORMS = ['Whole', 'HGT', 'Fillet', 'Steak', 'Loin', 'IQF', 'Block', 'Vacuum', 'Portion'];
-
-function generateMockCandidates(jobId: string, currentName: string | null, category: string | null) {
-  const seed = (currentName ?? jobId).split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const baseIdx = seed % MOCK_SPECIES_POOL.length;
-  const confidences = [72, 58, 41, 28, 18];
-  const similarities = [68, 55, 38, 25, 15];
-
-  return Array.from({ length: 5 }, (_, i) => {
-    const species = MOCK_SPECIES_POOL[(baseIdx + i) % MOCK_SPECIES_POOL.length];
-    const productForm = PRODUCT_FORMS[(seed + i) % PRODUCT_FORMS.length];
-    return {
-      job_id: jobId,
-      rank: i + 1,
-      common_name: species.commonName,
-      scientific_name: species.scientificName,
-      family: species.family,
-      genus: species.genus,
-      ai_score: confidences[i],
-      similarity_score: similarities[i],
-      product_form: productForm,
-      source_provider: 'mock',
-      main_reasons: [
-        i === 0
-          ? `Coloration et forme correspondent à ${species.family}`
-          : `Famille similaire au candidat #${i}`,
-        category ? `Catégorie "${category}" compatible` : 'Analyse visuelle générale',
-        i < 2 ? 'Silhouette et texture analysées' : 'Ambiguïté — validation humaine requise',
-      ],
-      commercial_name: species.commonName,
-      description_candidate: `${species.commonName} (${species.scientificName}) — proposition IA générée par le Mock Engine. Validation humaine requise avant publication.`,
-      category_candidate: category ?? 'Fish',
-      packaging_candidate: productForm,
-      product_candidate: productForm,
-      keywords_candidate: [species.commonName, species.scientificName, species.family, productForm, 'seafood'],
-    };
-  });
-}
+import { generateEnrichedMockCandidates, MockAssetContext } from '@/lib/ai/mockEngine';
 
 // ─── POST /api/sie/identify ───────────────────────────────────────────────────
-// Runs the Mock Engine for a single job, stores Top 5 candidates,
+// Runs the Mock Engine v2 for a single job, stores Top 5 candidates,
 // and pushes the top proposal to metadata_suggestions as pending review.
+// Uses full asset metadata (species, keywords, product_form, etc.) for
+// contextually relevant proposals — no external AI provider required.
 export async function POST(req: NextRequest) {
   try {
     const supabase = await createClient();
@@ -86,36 +26,91 @@ export async function POST(req: NextRequest) {
       progress_pct: 10,
     }).eq('id', jobId);
 
-    // Run AI identification via provider registry (falls back to Mock)
-    const registry = new AIProviderRegistry();
-    const provider = registry.getDefaultProvider();
-
-    const request: AIIdentificationRequest = {
-      jobId,
-      assetId,
-      imageUrl,
-      imageBase64,
-      contextHints: contextHints ?? {},
+    // ── Fetch full asset metadata for enriched Mock Engine ──────────────────
+    let assetContext: MockAssetContext = {
+      assetId: assetId ?? jobId,
+      title: contextHints?.currentName ?? null,
+      fileName: null,
+      category: contextHints?.currentCategory ?? null,
+      productForm: null,
+      packaging: null,
+      description: null,
+      existingSpeciesCommonName: null,
+      existingSpeciesScientificName: null,
+      existingSpeciesFamily: null,
+      existingSpeciesGenus: null,
+      keywords: contextHints?.tags ?? [],
+      importBatch: contextHints?.importBatch ?? null,
+      folderPath: contextHints?.folderPath ?? null,
     };
 
+    if (assetId) {
+      // Fetch asset with species join and keywords
+      const { data: asset } = await supabase
+        .from('assets')
+        .select(`
+          id, title, file_name, category, product_form, packaging, description,
+          species:species_id (
+            common_name, scientific_name, family
+          ),
+          asset_keywords (
+            keywords ( term )
+          )
+        `)
+        .eq('id', assetId)
+        .single();
+
+      if (asset) {
+        const speciesData = asset.species as { common_name: string; scientific_name: string; family: string } | null;
+        const keywordTerms = (asset.asset_keywords as { keywords: { term: string } | null }[] ?? [])
+          .map((ak) => ak.keywords?.term)
+          .filter((t): t is string => !!t);
+
+        // Derive genus from scientific name (first word = genus)
+        const genus = speciesData?.scientific_name?.split(' ')[0] ?? null;
+
+        assetContext = {
+          assetId: asset.id,
+          title: asset.title ?? contextHints?.currentName ?? null,
+          fileName: asset.file_name ?? null,
+          category: asset.category ?? contextHints?.currentCategory ?? null,
+          productForm: asset.product_form ?? null,
+          packaging: asset.packaging ?? null,
+          description: asset.description ?? null,
+          existingSpeciesCommonName: speciesData?.common_name ?? null,
+          existingSpeciesScientificName: speciesData?.scientific_name ?? null,
+          existingSpeciesFamily: speciesData?.family ?? null,
+          existingSpeciesGenus: genus,
+          keywords: [...keywordTerms, ...(contextHints?.tags ?? [])],
+          importBatch: contextHints?.importBatch ?? null,
+          folderPath: contextHints?.folderPath ?? null,
+        };
+      }
+    }
+
     await supabase.from('sie_jobs').update({ progress_step: 'vision_processing', progress_pct: 30 }).eq('id', jobId);
-    const result = await provider.identify(request);
 
-    await supabase.from('sie_jobs').update({ progress_step: 'taxonomy_search', progress_pct: 55 }).eq('id', jobId);
-    await new Promise((r) => setTimeout(r, 150));
-    await supabase.from('sie_jobs').update({ progress_step: 'building_metadata', progress_pct: 75 }).eq('id', jobId);
+    // ── Check if a real AI provider is available ────────────────────────────
+    const registry = new AIProviderRegistry();
+    const provider = registry.getDefaultProvider();
+    let usedProvider = 'mock';
+    let usedModel = 'seafood-vision-mock-v2';
 
-    // Generate deterministic Mock Engine candidates
-    const mockCandidates = generateMockCandidates(
-      jobId,
-      contextHints?.currentName ?? null,
-      contextHints?.currentCategory ?? null,
-    );
-
-    // Merge provider result with mock candidates (provider result takes priority if real AI)
-    const candidateRows = result.provider === 'mock'
-      ? mockCandidates
-      : result.candidates.map((c) => ({
+    if (provider.name !== 'mock') {
+      // Real AI provider available — use it
+      const request: AIIdentificationRequest = {
+        jobId,
+        assetId,
+        imageUrl,
+        imageBase64,
+        contextHints: contextHints ?? {},
+      };
+      try {
+        const result = await provider.identify(request);
+        usedProvider = result.provider;
+        usedModel = result.model;
+        // Store real AI candidates
+        const candidateRows = result.candidates.map((c) => ({
           job_id: jobId,
           rank: c.rank,
           common_name: c.commonName,
@@ -129,73 +124,129 @@ export async function POST(req: NextRequest) {
           source_provider: c.sourceProvider,
           commercial_name: c.commonName,
           description_candidate: `${c.commonName} (${c.scientificName}) — AI proposal. Human validation required.`,
-          category_candidate: contextHints?.currentCategory ?? 'Fish',
+          category_candidate: assetContext.category ?? 'Fish',
           packaging_candidate: c.productForm ?? 'Whole',
           product_candidate: c.productForm ?? 'Whole',
           keywords_candidate: [c.commonName, c.scientificName, c.family, 'seafood'],
         }));
 
+        await supabase.from('sie_jobs').update({ progress_step: 'taxonomy_search', progress_pct: 55 }).eq('id', jobId);
+        await supabase.from('sie_jobs').update({ progress_step: 'building_metadata', progress_pct: 75 }).eq('id', jobId);
+        await supabase.from('sie_species_candidates').delete().eq('job_id', jobId);
+        await supabase.from('sie_species_candidates').insert(candidateRows);
+
+        return await finalizeJob(supabase, jobId, assetId, candidateRows, usedProvider, usedModel, result.processingTimeMs);
+      } catch {
+        // Fall through to Mock Engine
+      }
+    }
+
+    await supabase.from('sie_jobs').update({ progress_step: 'taxonomy_search', progress_pct: 55 }).eq('id', jobId);
+    await new Promise((r) => setTimeout(r, 120));
+    await supabase.from('sie_jobs').update({ progress_step: 'building_metadata', progress_pct: 75 }).eq('id', jobId);
+
+    // ── Mock Engine v2 — generate enriched proposals from asset metadata ────
+    const processingStart = Date.now();
+    const mockCandidates = generateEnrichedMockCandidates(jobId, assetContext);
+
+    const candidateRows = mockCandidates.map((c) => ({
+      job_id: jobId,
+      rank: c.rank,
+      common_name: c.common_name,
+      scientific_name: c.scientific_name,
+      family: c.family,
+      genus: c.genus,
+      ai_score: c.ai_score,
+      similarity_score: c.similarity_score,
+      main_reasons: c.main_reasons,
+      product_form: c.product_form,
+      source_provider: c.source_provider,
+      commercial_name: c.commercial_name,
+      description_candidate: c.description_candidate,
+      category_candidate: c.category_candidate,
+      packaging_candidate: c.packaging_candidate,
+      product_candidate: c.product_candidate,
+      keywords_candidate: c.keywords_candidate,
+    }));
+
     // Delete existing candidates for this job (idempotent)
     await supabase.from('sie_species_candidates').delete().eq('job_id', jobId);
     await supabase.from('sie_species_candidates').insert(candidateRows);
 
-    // Push top candidate to metadata_suggestions as 'under_review' (never auto-publish)
-    // source must be 'ai_generated' per metadata_source_type ENUM
-    // confidence_score is NUMERIC(5,4) — store as 0-1 fraction
-    if (assetId && candidateRows.length > 0) {
-      const top = candidateRows[0];
-      const confidenceFraction = Math.min(1, (top.ai_score ?? 0) / 100);
-      await supabase.from('metadata_suggestions').upsert({
-        asset_id: assetId,
-        field_name: 'species_candidate',
-        suggested_value: top.scientific_name,
-        source: 'ai_generated',
-        confidence_score: confidenceFraction,
-        status: 'under_review',
-        review_note: `AI Job: ${jobId} | Top candidate: ${top.common_name} (${top.scientific_name}) | Confidence: ${top.ai_score}% | Mock Engine v1 | Validation humaine requise — jamais publié automatiquement`,
-      }, { onConflict: 'asset_id,field_name' });
-    }
-
-    // Calculate confidence scores
-    const topScore = candidateRows[0]?.ai_score ?? 0;
-    const globalConfidence = Math.round(topScore * 0.7 + (candidateRows[1]?.ai_score ?? 0) * 0.3);
-
-    // Update job to proposals_ready
-    await supabase.from('sie_jobs').update({
-      job_status: 'proposals_ready',
-      progress_step: 'proposals_ready',
-      progress_pct: 100,
-      ai_provider: result.provider,
-      ai_model: result.model,
-      processing_time_ms: result.processingTimeMs,
-      ambiguity_detected: true,
-      vision_confidence: Math.round(topScore * 0.9),
-      species_confidence: topScore,
-      commercial_confidence: Math.round(topScore * 0.6),
-      metadata_confidence: Math.round(topScore * 0.5),
-      documentation_confidence: Math.round(topScore * 0.4),
-      global_confidence: globalConfidence,
-    }).eq('id', jobId);
-
-    return NextResponse.json({
-      success: true,
-      jobId,
-      candidatesCount: candidateRows.length,
-      provider: result.provider,
-      model: result.model,
-      ambiguityDetected: true,
-      globalConfidence,
-      topCandidate: {
-        commonName: candidateRows[0]?.common_name,
-        scientificName: candidateRows[0]?.scientific_name,
-        confidence: candidateRows[0]?.ai_score,
-      },
-      message: 'Top 5 candidates ready for human review. Pushed to Metadata Review Center as under_review. No automatic publishing.',
-    });
+    const processingTimeMs = Date.now() - processingStart;
+    return await finalizeJob(supabase, jobId, assetId, candidateRows, usedProvider, usedModel, processingTimeMs, mockCandidates[0]);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });
   }
+}
+
+// ─── Finalize job: push to metadata_suggestions + update job status ──────────
+async function finalizeJob(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  jobId: string,
+  assetId: string | undefined,
+  candidateRows: Record<string, unknown>[],
+  provider: string,
+  model: string,
+  processingTimeMs: number,
+  topMockCandidate?: { vision_confidence?: number; species_confidence?: number; commercial_confidence?: number; metadata_confidence?: number } | null,
+) {
+  // Push top candidate to metadata_suggestions as 'under_review' (never auto-publish)
+  if (assetId && candidateRows.length > 0) {
+    const top = candidateRows[0];
+    const confidenceFraction = Math.min(1, ((top.ai_score as number) ?? 0) / 100);
+    await supabase.from('metadata_suggestions').upsert({
+      asset_id: assetId,
+      field_name: 'species_candidate',
+      suggested_value: top.scientific_name,
+      source: 'ai_generated',
+      confidence_score: confidenceFraction,
+      status: 'under_review',
+      review_note: `AI Job: ${jobId} | Top candidate: ${top.common_name} (${top.scientific_name}) | Confidence: ${top.ai_score}% | ${provider === 'mock' ? 'Mock Engine v2' : provider} | Validation humaine requise — jamais publié automatiquement`,
+    }, { onConflict: 'asset_id,field_name' });
+  }
+
+  const topScore = (candidateRows[0]?.ai_score as number) ?? 0;
+  const globalConfidence = Math.round(topScore * 0.7 + ((candidateRows[1]?.ai_score as number) ?? 0) * 0.3);
+
+  // Confidence breakdown (use mock engine values if available)
+  const visionConf = topMockCandidate?.vision_confidence ?? Math.round(topScore * 0.9);
+  const speciesConf = topMockCandidate?.species_confidence ?? topScore;
+  const commercialConf = topMockCandidate?.commercial_confidence ?? Math.round(topScore * 0.65);
+  const metadataConf = topMockCandidate?.metadata_confidence ?? Math.round(topScore * 0.55);
+
+  await supabase.from('sie_jobs').update({
+    job_status: 'proposals_ready',
+    progress_step: 'proposals_ready',
+    progress_pct: 100,
+    ai_provider: provider,
+    ai_model: model,
+    processing_time_ms: processingTimeMs,
+    ambiguity_detected: true,
+    vision_confidence: visionConf,
+    species_confidence: speciesConf,
+    commercial_confidence: commercialConf,
+    metadata_confidence: metadataConf,
+    documentation_confidence: Math.round(topScore * 0.4),
+    global_confidence: globalConfidence,
+  }).eq('id', jobId);
+
+  return NextResponse.json({
+    success: true,
+    jobId,
+    candidatesCount: candidateRows.length,
+    provider,
+    model,
+    ambiguityDetected: true,
+    globalConfidence,
+    topCandidate: {
+      commonName: candidateRows[0]?.common_name,
+      scientificName: candidateRows[0]?.scientific_name,
+      confidence: candidateRows[0]?.ai_score,
+    },
+    message: 'Top 5 candidates ready for human review. Pushed to Metadata Review Center as under_review. No automatic publishing.',
+  });
 }
 
 // ─── GET /api/sie/identify?jobId=xxx ─────────────────────────────────────────

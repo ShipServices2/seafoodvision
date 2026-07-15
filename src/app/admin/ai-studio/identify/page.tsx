@@ -8,6 +8,7 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, Filter, SlidersHorizontal, RefreshCw, Upload, Fish, Clock, Hash, Globe, Star } from 'lucide-react';
+import { generateEnrichedMockCandidates, MockAssetContext } from '@/lib/ai/mockEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -97,73 +98,6 @@ const STATUS_COLORS: Record<string, string> = {
   commercial: 'bg-indigo-100 text-indigo-700',
   editorial: 'bg-purple-100 text-purple-700',
 };
-
-// ─── Mock Engine ──────────────────────────────────────────────────────────────
-
-const MOCK_SPECIES_POOL = [
-  { commonName: 'Atlantic Salmon', scientificName: 'Salmo salar', family: 'Salmonidae', genus: 'Salmo' },
-  { commonName: 'Rainbow Trout', scientificName: 'Oncorhynchus mykiss', family: 'Salmonidae', genus: 'Oncorhynchus' },
-  { commonName: 'Atlantic Cod', scientificName: 'Gadus morhua', family: 'Gadidae', genus: 'Gadus' },
-  { commonName: 'European Sea Bass', scientificName: 'Dicentrarchus labrax', family: 'Moronidae', genus: 'Dicentrarchus' },
-  { commonName: 'Gilthead Sea Bream', scientificName: 'Sparus aurata', family: 'Sparidae', genus: 'Sparus' },
-  { commonName: 'Yellowfin Tuna', scientificName: 'Thunnus albacares', family: 'Scombridae', genus: 'Thunnus' },
-  { commonName: 'Bluefin Tuna', scientificName: 'Thunnus thynnus', family: 'Scombridae', genus: 'Thunnus' },
-  { commonName: 'Swordfish', scientificName: 'Xiphias gladius', family: 'Xiphiidae', genus: 'Xiphias' },
-  { commonName: 'Mahi-Mahi', scientificName: 'Coryphaena hippurus', family: 'Coryphaenidae', genus: 'Coryphaena' },
-  { commonName: 'Halibut', scientificName: 'Hippoglossus hippoglossus', family: 'Pleuronectidae', genus: 'Hippoglossus' },
-  { commonName: 'Sole', scientificName: 'Solea solea', family: 'Soleidae', genus: 'Solea' },
-  { commonName: 'Turbot', scientificName: 'Scophthalmus maximus', family: 'Scophthalmidae', genus: 'Scophthalmus' },
-  { commonName: 'Red Mullet', scientificName: 'Mullus surmuletus', family: 'Mullidae', genus: 'Mullus' },
-  { commonName: 'Monkfish', scientificName: 'Lophius piscatorius', family: 'Lophiidae', genus: 'Lophius' },
-  { commonName: 'Hake', scientificName: 'Merluccius merluccius', family: 'Merlucciidae', genus: 'Merluccius' },
-  { commonName: 'Seabream', scientificName: 'Pagellus erythrinus', family: 'Sparidae', genus: 'Pagellus' },
-  { commonName: 'Whiting', scientificName: 'Merlangius merlangus', family: 'Gadidae', genus: 'Merlangius' },
-  { commonName: 'Mackerel', scientificName: 'Scomber scombrus', family: 'Scombridae', genus: 'Scomber' },
-  { commonName: 'Herring', scientificName: 'Clupea harengus', family: 'Clupeidae', genus: 'Clupea' },
-  { commonName: 'Sardine', scientificName: 'Sardina pilchardus', family: 'Clupeidae', genus: 'Sardina' },
-];
-
-const PRODUCT_FORMS = ['Whole', 'HGT', 'Fillet', 'Steak', 'Loin', 'IQF', 'Block', 'Vacuum', 'Portion'];
-
-function generateMockCandidates(assetTitle: string | null, category: string | null) {
-  // Deterministic seed from asset title for consistent results
-  const seed = (assetTitle ?? 'unknown').split('').reduce((a, c) => a + c.charCodeAt(0), 0);
-  const baseIdx = seed % MOCK_SPECIES_POOL.length;
-
-  const candidates = [];
-  const confidences = [72, 58, 41, 28, 18];
-  const similarities = [68, 55, 38, 25, 15];
-
-  for (let i = 0; i < 5; i++) {
-    const speciesIdx = (baseIdx + i) % MOCK_SPECIES_POOL.length;
-    const species = MOCK_SPECIES_POOL[speciesIdx];
-    const productForm = PRODUCT_FORMS[(seed + i) % PRODUCT_FORMS.length];
-
-    candidates.push({
-      rank: i + 1,
-      common_name: species.commonName,
-      scientific_name: species.scientificName,
-      family: species.family,
-      genus: species.genus,
-      ai_score: confidences[i],
-      similarity_score: similarities[i],
-      product_form: productForm,
-      source_provider: 'mock',
-      main_reasons: [
-        i === 0 ? `Coloration et forme correspondent à ${species.family}` : `Famille similaire au candidat #${i}`,
-        category ? `Catégorie "${category}" compatible` : 'Analyse visuelle générale',
-        i < 2 ? 'Silhouette et texture analysées' : 'Ambiguïté détectée — validation humaine requise',
-      ],
-      commercial_name: species.commonName,
-      description_candidate: `${species.commonName} (${species.scientificName}) — proposition IA générée par le Mock Engine. Validation humaine requise avant publication.`,
-      category_candidate: category ?? 'Fish',
-      packaging_candidate: productForm,
-      product_candidate: productForm,
-      keywords_candidate: [species.commonName, species.scientificName, species.family, productForm, 'seafood'],
-    });
-  }
-  return candidates;
-}
 
 // ─── Main Component ───────────────────────────────────────────────────────────
 
@@ -333,7 +267,7 @@ export default function AIStudioIdentifyPage() {
       await new Promise((r) => setTimeout(r, stepDurations[i]));
     }
 
-    // Create SIE jobs + run Mock Engine per asset
+    // Create SIE jobs + run Mock Engine v2 per asset
     let created = 0;
     const batchChunk = 20; // process in chunks to avoid timeout
 
@@ -341,26 +275,77 @@ export default function AIStudioIdentifyPage() {
       if (abortRef.current) break;
       const chunk = toProcess.slice(i, i + batchChunk);
 
-      // Insert sie_jobs
-      const jobRows = chunk.map((asset) => ({
-        asset_id: asset.id,
-        public_asset_id: asset.public_asset_id ?? null,
-        current_name: asset.title ?? asset.file_name ?? null,
-        current_category: asset.category ?? null,
-        job_status: 'proposals_ready',
-        progress_step: 'proposals_ready',
-        progress_pct: 100,
-        ai_provider: 'mock',
-        ai_model: 'seafood-vision-mock-v1',
-        processing_time_ms: 300,
-        ambiguity_detected: true,
-        vision_confidence: 65,
-        species_confidence: 72,
-        commercial_confidence: 43,
-        metadata_confidence: 36,
-        documentation_confidence: 29,
-        global_confidence: 58,
-      }));
+      // ── Fetch full metadata for this chunk (species + keywords) ────────────
+      const chunkIds = chunk.map((a) => a.id);
+      const { data: enrichedAssets } = await supabase
+        .from('assets')
+        .select(`
+          id, title, file_name, category, product_form, packaging, description,
+          species:species_id (
+            common_name, scientific_name, family
+          ),
+          asset_keywords (
+            keywords ( term )
+          )
+        `)
+        .in('id', chunkIds);
+
+      // Build a lookup map for enriched data
+      const enrichedMap = new Map<string, {
+        title: string | null;
+        file_name: string | null;
+        category: string | null;
+        product_form: string | null;
+        packaging: string | null;
+        description: string | null;
+        species: { common_name: string; scientific_name: string; family: string } | null;
+        keywords: string[];
+      }>();
+
+      for (const ea of (enrichedAssets ?? [])) {
+        const speciesData = ea.species as { common_name: string; scientific_name: string; family: string } | null;
+        const kws = (ea.asset_keywords as { keywords: { term: string } | null }[] ?? [])
+          .map((ak: { keywords: { term: string } | null }) => ak.keywords?.term)
+          .filter((t: string | undefined): t is string => !!t);
+        enrichedMap.set(ea.id, {
+          title: ea.title ?? null,
+          file_name: ea.file_name ?? null,
+          category: ea.category ?? null,
+          product_form: ea.product_form ?? null,
+          packaging: ea.packaging ?? null,
+          description: ea.description ?? null,
+          species: speciesData,
+          keywords: kws,
+        });
+      }
+
+      // ── Build job rows with enriched confidence scores ──────────────────────
+      const jobRows = chunk.map((asset) => {
+        const enriched = enrichedMap.get(asset.id);
+        const hasSpecies = !!(enriched?.species?.common_name);
+        const hasKeywords = (enriched?.keywords?.length ?? 0) > 0;
+        const hasProductForm = !!(enriched?.product_form);
+        const baseConf = hasSpecies ? 88 : hasKeywords ? 74 : 65;
+        return {
+          asset_id: asset.id,
+          public_asset_id: asset.public_asset_id ?? null,
+          current_name: enriched?.title ?? asset.title ?? asset.file_name ?? null,
+          current_category: enriched?.category ?? asset.category ?? null,
+          job_status: 'proposals_ready',
+          progress_step: 'proposals_ready',
+          progress_pct: 100,
+          ai_provider: 'mock',
+          ai_model: 'seafood-vision-mock-v2',
+          processing_time_ms: 180,
+          ambiguity_detected: true,
+          vision_confidence: Math.round(baseConf * 0.9),
+          species_confidence: baseConf,
+          commercial_confidence: Math.round(baseConf * (hasProductForm ? 0.82 : 0.65)),
+          metadata_confidence: Math.round(baseConf * (hasKeywords ? 0.78 : 0.55)),
+          documentation_confidence: Math.round(baseConf * 0.4),
+          global_confidence: Math.round(baseConf * 0.7 + (baseConf * 0.85) * 0.3),
+        };
+      });
 
       const { data: insertedJobs, error: jobErr } = await supabase
         .from('sie_jobs')
@@ -373,13 +358,52 @@ export default function AIStudioIdentifyPage() {
         return;
       }
 
-      // Insert Top 5 candidates per job
+      // ── Generate enriched Top 5 candidates per job ──────────────────────────
       const candidateRows: Record<string, unknown>[] = [];
       for (const job of (insertedJobs ?? [])) {
         const asset = chunk.find((a) => a.id === job.asset_id);
-        const candidates = generateMockCandidates(asset?.title ?? asset?.file_name ?? null, asset?.category ?? null);
+        const enriched = enrichedMap.get(job.asset_id);
+        const speciesData = enriched?.species ?? null;
+        const genus = speciesData?.scientific_name?.split(' ')[0] ?? null;
+
+        const context: MockAssetContext = {
+          assetId: job.asset_id,
+          title: enriched?.title ?? asset?.title ?? asset?.file_name ?? null,
+          fileName: enriched?.file_name ?? asset?.file_name ?? null,
+          category: enriched?.category ?? asset?.category ?? null,
+          productForm: enriched?.product_form ?? null,
+          packaging: enriched?.packaging ?? null,
+          description: enriched?.description ?? null,
+          existingSpeciesCommonName: speciesData?.common_name ?? null,
+          existingSpeciesScientificName: speciesData?.scientific_name ?? null,
+          existingSpeciesFamily: speciesData?.family ?? null,
+          existingSpeciesGenus: genus,
+          keywords: enriched?.keywords ?? [],
+          importBatch: asset?.import_batch_id ?? null,
+          folderPath: null,
+        };
+
+        const candidates = generateEnrichedMockCandidates(job.id, context);
         for (const c of candidates) {
-          candidateRows.push({ job_id: job.id, ...c });
+          candidateRows.push({
+            job_id: job.id,
+            rank: c.rank,
+            common_name: c.common_name,
+            scientific_name: c.scientific_name,
+            family: c.family,
+            genus: c.genus,
+            ai_score: c.ai_score,
+            similarity_score: c.similarity_score,
+            main_reasons: c.main_reasons,
+            product_form: c.product_form,
+            source_provider: c.source_provider,
+            commercial_name: c.commercial_name,
+            description_candidate: c.description_candidate,
+            category_candidate: c.category_candidate,
+            packaging_candidate: c.packaging_candidate,
+            product_candidate: c.product_candidate,
+            keywords_candidate: c.keywords_candidate,
+          });
         }
       }
 
@@ -387,12 +411,33 @@ export default function AIStudioIdentifyPage() {
         await supabase.from('sie_species_candidates').insert(candidateRows);
       }
 
-      // Push top candidate to metadata_suggestions as pending review
+      // ── Push top candidate to metadata_suggestions as pending review ────────
       const suggestionRows: Record<string, unknown>[] = [];
       for (const job of (insertedJobs ?? [])) {
         const asset = chunk.find((a) => a.id === job.asset_id);
-        const topCandidate = generateMockCandidates(asset?.title ?? asset?.file_name ?? null, asset?.category ?? null)[0];
-        if (asset?.id) {
+        const enriched = enrichedMap.get(job.asset_id);
+        const speciesData = enriched?.species ?? null;
+        const genus = speciesData?.scientific_name?.split(' ')[0] ?? null;
+
+        const context: MockAssetContext = {
+          assetId: job.asset_id,
+          title: enriched?.title ?? asset?.title ?? null,
+          fileName: enriched?.file_name ?? null,
+          category: enriched?.category ?? asset?.category ?? null,
+          productForm: enriched?.product_form ?? null,
+          packaging: enriched?.packaging ?? null,
+          description: enriched?.description ?? null,
+          existingSpeciesCommonName: speciesData?.common_name ?? null,
+          existingSpeciesScientificName: speciesData?.scientific_name ?? null,
+          existingSpeciesFamily: speciesData?.family ?? null,
+          existingSpeciesGenus: genus,
+          keywords: enriched?.keywords ?? [],
+          importBatch: asset?.import_batch_id ?? null,
+          folderPath: null,
+        };
+
+        const topCandidate = generateEnrichedMockCandidates(job.id, context)[0];
+        if (asset?.id && topCandidate) {
           suggestionRows.push({
             asset_id: asset.id,
             field_name: 'species_candidate',
@@ -400,13 +445,12 @@ export default function AIStudioIdentifyPage() {
             source: 'ai_generated',
             confidence_score: Math.min(1, (topCandidate.ai_score ?? 0) / 100),
             status: 'under_review',
-            review_note: `AI Job: ${job.id} | Top candidate: ${topCandidate.common_name} (${topCandidate.scientific_name}) | Confidence: ${topCandidate.ai_score}% | Mock Engine v1 | Validation humaine requise`,
+            review_note: `AI Job: ${job.id} | Top candidate: ${topCandidate.common_name} (${topCandidate.scientific_name}) | Confidence: ${topCandidate.ai_score}% | Mock Engine v2 | Validation humaine requise`,
           });
         }
       }
 
       if (suggestionRows.length > 0) {
-        // Insert suggestions — ignore errors if table doesn't have all fields
         await supabase.from('metadata_suggestions').insert(suggestionRows).select('id');
       }
 
@@ -418,7 +462,7 @@ export default function AIStudioIdentifyPage() {
     setCurrentStepIdx(PIPELINE_STEPS.length - 1);
     setProgressPct(100);
     setJobsCreated(created);
-    setSuccess(`${created} job(s) créés. ${created * 5} propositions Top 5 générées. Résultats disponibles dans Metadata Review Center.`);
+    setSuccess(`${created} job(s) créés. ${created * 5} propositions Top 5 générées par Mock Engine v2 (métadonnées enrichies). Résultats disponibles dans Metadata Review Center.`);
     setRunning(false);
   };
 
