@@ -209,8 +209,8 @@ export async function POST(req: NextRequest) {
     const resultRow = resultRows.find((r) => r.public_asset_id === publicAssetId);
     if (!resultRow) continue;
 
-    // Upsert pilot result
-    const { data: pilotResult } = await supabase
+    // Upsert pilot result — requires unique index on public_asset_id (migration 20260715900000)
+    const { data: pilotResult, error: resultError } = await supabase
       .from('openai_pilot_results')
       .upsert({
         asset_id: asset.id,
@@ -231,13 +231,22 @@ export async function POST(req: NextRequest) {
       .select('id')
       .single();
 
-    if (!pilotResult) continue;
+    if (resultError || !pilotResult) {
+      console.error(`[Import] Failed to upsert result for ${publicAssetId}:`, resultError?.message ?? 'null result');
+      continue;
+    }
     resultsImported++;
+
+    // Delete existing candidates for this result before re-inserting (idempotent re-import)
+    await supabase
+      .from('openai_pilot_candidates')
+      .delete()
+      .eq('result_id', pilotResult.id);
 
     // Import candidates for this asset
     const assetCandidates = candidateRows.filter((c) => c.public_asset_id === publicAssetId);
     for (const cRow of assetCandidates) {
-      const { data: candidate } = await supabase
+      const { data: candidate, error: candidateError } = await supabase
         .from('openai_pilot_candidates')
         .insert({
           result_id: pilotResult.id,
@@ -262,7 +271,10 @@ export async function POST(req: NextRequest) {
         .select('id')
         .single();
 
-      if (!candidate) continue;
+      if (candidateError || !candidate) {
+        console.error(`[Import] Failed to insert candidate rank ${cRow.rank} for ${publicAssetId}:`, candidateError?.message ?? 'null result');
+        continue;
+      }
       candidatesImported++;
 
       // Import metadata for this candidate
@@ -277,7 +289,7 @@ export async function POST(req: NextRequest) {
       );
 
       if (metaRow || localNameRow || keywordRow) {
-        await supabase.from('openai_pilot_candidate_metadata').insert({
+        const { error: metaError } = await supabase.from('openai_pilot_candidate_metadata').insert({
           candidate_id: candidate.id,
           result_id: pilotResult.id,
           public_asset_id: publicAssetId,
@@ -306,7 +318,11 @@ export async function POST(req: NextRequest) {
           global_confidence: parseFloat(metaRow?.global_confidence || cRow.confidence_score || '0'),
           warnings: parseArray(metaRow?.warnings || ''),
         });
-        metadataImported++;
+        if (metaError) {
+          console.error(`[Import] Failed to insert metadata for candidate ${candidate.id}:`, metaError.message);
+        } else {
+          metadataImported++;
+        }
       }
     }
   }
