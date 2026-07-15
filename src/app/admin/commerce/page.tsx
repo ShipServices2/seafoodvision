@@ -7,51 +7,76 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Package, CreditCard, Map, Webhook, Settings, BarChart2, ShoppingCart, AlertCircle } from 'lucide-react';
+import {
+  BarChart2, ShoppingCart, CreditCard, FileText, Download, Coins,
+  Package, Map, Webhook, Settings, Users, Tag, Layers, RefreshCw,
+  TrendingUp, AlertCircle
+} from 'lucide-react';
 
 interface CommerceStats {
   totalOrders: number;
   paidOrders: number;
+  pendingOrders: number;
   activeSubscriptions: number;
   totalRevenue: number;
+  activeLicenses: number;
+  totalDownloads: number;
+  totalCustomers: number;
 }
 
 const COMMERCE_SECTIONS = [
-  { href: '/admin/commerce/products', icon: Package, label: 'Products & Plans', desc: 'Manage unit products, subscription plans, credit packs and license types', badge: 'Catalog' },
-  { href: '/admin/commerce/plans', icon: CreditCard, label: 'Subscription Plans', desc: 'Configure plan pricing, quotas, billing cycles and trial periods', badge: 'Plans' },
-  { href: '/admin/commerce/mappings', icon: Map, label: 'Dodo Mappings', desc: 'Map internal products to Dodo Payments product and price IDs', badge: 'Dodo' },
-  { href: '/admin/commerce/webhooks', icon: Webhook, label: 'Webhook Events', desc: 'Monitor incoming webhook events, processing status and errors', badge: 'Events' },
-  { href: '/admin/commerce/settings', icon: Settings, label: 'Payment Settings', desc: 'Configure Dodo Payments environment, keys and return URLs', badge: 'Config' },
+  { href: '/admin/commerce/orders', icon: ShoppingCart, label: 'Orders', desc: 'All orders, statuses and payment references', badge: 'Orders' },
+  { href: '/admin/commerce/payments', icon: CreditCard, label: 'Payments', desc: 'Payment transactions and provider status', badge: 'Payments' },
+  { href: '/admin/commerce/licenses', icon: FileText, label: 'Licenses', desc: 'Purchased licenses and entitlements', badge: 'Licenses' },
+  { href: '/admin/commerce/downloads', icon: Download, label: 'Downloads', desc: 'Download events and quota monitoring', badge: 'Downloads' },
+  { href: '/admin/commerce/credits', icon: Coins, label: 'Credits', desc: 'Credit ledger and pack management', badge: 'Credits' },
+  { href: '/admin/commerce/products', icon: Package, label: 'Products', desc: 'Unit products, plans and credit packs', badge: 'Catalog' },
+  { href: '/admin/commerce/plans', icon: TrendingUp, label: 'Plans', desc: 'Subscription plans, pricing and quotas', badge: 'Plans' },
+  { href: '/admin/commerce/coupons', icon: Tag, label: 'Coupons & Promotions', desc: 'Discount codes, campaigns and promotions', badge: 'Promos' },
+  { href: '/admin/commerce/collections', icon: Layers, label: 'Collections', desc: 'Commercial collections and packs', badge: 'Collections' },
+  { href: '/admin/commerce/customers', icon: Users, label: 'Customers', desc: 'Customer accounts and purchase history', badge: 'Customers' },
+  { href: '/admin/commerce/refunds', icon: RefreshCw, label: 'Refunds', desc: 'Refund requests and workflow', badge: 'Refunds' },
+  { href: '/admin/commerce/reports', icon: BarChart2, label: 'Reports', desc: 'Revenue, sales, downloads and license reports', badge: 'Reports' },
+  { href: '/admin/commerce/mappings', icon: Map, label: 'Dodo Mappings', desc: 'Map internal products to Dodo Payments IDs', badge: 'Dodo' },
+  { href: '/admin/commerce/webhooks', icon: Webhook, label: 'Webhooks', desc: 'Incoming webhook events and processing status', badge: 'Events' },
+  { href: '/admin/commerce/settings', icon: Settings, label: 'Settings', desc: 'Marketplace configuration and payment provider', badge: 'Config' },
 ];
 
 export default function AdminCommercePage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
   const [stats, setStats] = useState<CommerceStats | null>(null);
-  const [dodoEnabled] = useState(process.env.NEXT_PUBLIC_DODO_PAYMENTS_ENABLED === 'true');
+  const dodoEnabled = process.env.NEXT_PUBLIC_DODO_PAYMENTS_ENABLED === 'true';
 
   useEffect(() => {
     if (!loading && !user) router.replace('/auth?next=/admin/commerce');
-    if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role ?? '')) {
-      router.replace('/admin');
-    }
+    if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role ?? '')) router.replace('/admin');
   }, [loading, user, profile, router]);
 
   useEffect(() => {
     if (!user) return;
     const supabase = createClient();
     (async () => {
-      const [ordersRes, subsRes] = await Promise.all([
+      const [ordersRes, subsRes, licensesRes, downloadsRes, customersRes] = await Promise.all([
         supabase.from('orders').select('status, total_amount'),
         supabase.from('user_subscriptions').select('status').eq('status', 'active'),
+        supabase.from('purchased_licenses').select('status').eq('status', 'active'),
+        supabase.from('download_events').select('id'),
+        supabase.from('orders').select('user_id'),
       ]);
       const orders = ordersRes.data ?? [];
       const paid = orders.filter((o) => o.status === 'paid');
+      const pending = orders.filter((o) => o.status === 'pending');
+      const uniqueCustomers = new Set((customersRes.data ?? []).map((o) => o.user_id)).size;
       setStats({
         totalOrders: orders.length,
         paidOrders: paid.length,
+        pendingOrders: pending.length,
         activeSubscriptions: subsRes.data?.length ?? 0,
         totalRevenue: paid.reduce((s, o) => s + Number(o.total_amount ?? 0), 0),
+        activeLicenses: licensesRes.data?.length ?? 0,
+        totalDownloads: downloadsRes.data?.length ?? 0,
+        totalCustomers: uniqueCustomers,
       });
     })();
   }, [user]);
@@ -71,12 +96,12 @@ export default function AdminCommercePage() {
           <div className="flex items-center justify-between">
             <div>
               <h1 className="text-2xl font-bold text-foreground">Commerce</h1>
-              <p className="text-muted-foreground text-sm mt-1">Dodo Payments infrastructure — Phase 7.2</p>
+              <p className="text-muted-foreground text-sm mt-1">Marketplace — Phase 7.2 · Dodo Payments (future)</p>
             </div>
             {!dodoEnabled && (
               <div className="flex items-center gap-2 bg-amber-50 border border-amber-200 text-amber-700 rounded-xl px-4 py-2 text-sm">
                 <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                Dodo Payments disabled
+                Dodo Payments (Not Configured)
               </div>
             )}
           </div>
@@ -86,23 +111,24 @@ export default function AdminCommercePage() {
         {stats && (
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             {[
-              { label: 'Total orders', value: stats.totalOrders, icon: ShoppingCart },
-              { label: 'Paid orders', value: stats.paidOrders, icon: CreditCard },
-              { label: 'Active subscriptions', value: stats.activeSubscriptions, icon: BarChart2 },
-              { label: 'Revenue (test)', value: `${stats.totalRevenue.toFixed(2)} €`, icon: Package },
+              { label: 'Total orders', value: stats.totalOrders },
+              { label: 'Paid orders', value: stats.paidOrders },
+              { label: 'Active subscriptions', value: stats.activeSubscriptions },
+              { label: `Revenue (test)`, value: `${stats.totalRevenue.toFixed(2)} €` },
+              { label: 'Active licenses', value: stats.activeLicenses },
+              { label: 'Total downloads', value: stats.totalDownloads },
+              { label: 'Customers', value: stats.totalCustomers },
+              { label: 'Pending orders', value: stats.pendingOrders },
             ].map((s) => (
               <div key={s.label} className="bg-card border border-border rounded-xl p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <s.icon className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground">{s.label}</span>
-                </div>
+                <div className="text-xs text-muted-foreground mb-1">{s.label}</div>
                 <div className="text-2xl font-bold text-foreground">{s.value}</div>
               </div>
             ))}
           </div>
         )}
 
-        {/* Sections */}
+        {/* Sections grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {COMMERCE_SECTIONS.map((section) => (
             <Link

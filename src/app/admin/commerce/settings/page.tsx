@@ -1,48 +1,84 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
-import { AlertCircle, CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
+import { createClient } from '@/lib/supabase/client';
+import { Settings, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
 
-interface ConfigRow {
+interface Setting {
+  id: string;
+  setting_key: string;
+  setting_value: string | null;
+  setting_type: string;
   label: string;
-  envKey: string;
-  value: string;
-  isSecret: boolean;
-  isPublic: boolean;
-  required: boolean;
+  description: string | null;
+  category: string;
+  is_public: boolean;
 }
 
-const CONFIG_ROWS: ConfigRow[] = [
-  { label: 'Provider enabled', envKey: 'NEXT_PUBLIC_DODO_PAYMENTS_ENABLED', value: process.env.NEXT_PUBLIC_DODO_PAYMENTS_ENABLED ?? 'false', isSecret: false, isPublic: true, required: true },
-  { label: 'Environment', envKey: 'DODO_PAYMENTS_ENVIRONMENT', value: process.env.DODO_PAYMENTS_ENVIRONMENT ?? '(not set)', isSecret: false, isPublic: false, required: true },
-  { label: 'API Key', envKey: 'DODO_PAYMENTS_API_KEY', value: process.env.DODO_PAYMENTS_API_KEY ? '••••••••' : '(not set)', isSecret: true, isPublic: false, required: true },
-  { label: 'Webhook Secret', envKey: 'DODO_PAYMENTS_WEBHOOK_SECRET', value: process.env.DODO_PAYMENTS_WEBHOOK_SECRET ? '••••••••' : '(not set)', isSecret: true, isPublic: false, required: true },
-  { label: 'Return URL', envKey: 'DODO_PAYMENTS_RETURN_URL', value: process.env.DODO_PAYMENTS_RETURN_URL ?? '(uses NEXT_PUBLIC_SITE_URL/checkout/success)', isSecret: false, isPublic: false, required: false },
-  { label: 'Cancel URL', envKey: 'DODO_PAYMENTS_CANCEL_URL', value: process.env.DODO_PAYMENTS_CANCEL_URL ?? '(uses NEXT_PUBLIC_SITE_URL/checkout/cancel)', isSecret: false, isPublic: false, required: false },
-  { label: 'Webhook URL', envKey: 'DODO_PAYMENTS_WEBHOOK_URL', value: process.env.DODO_PAYMENTS_WEBHOOK_URL ?? '(uses NEXT_PUBLIC_SITE_URL/api/webhooks/dodo-payments)', isSecret: false, isPublic: false, required: false },
-];
+const CATEGORY_ORDER = ['general', 'payments', 'downloads', 'tax', 'promotions', 'subscriptions'];
 
 export default function AdminCommerceSettingsPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
+  const [settings, setSettings] = useState<Setting[]>([]);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [fetching, setFetching] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/auth?next=/admin/commerce/settings');
     if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role ?? '')) router.replace('/admin');
   }, [loading, user, profile, router]);
 
-  if (loading) return null;
+  useEffect(() => {
+    if (!user) return;
+    const supabase = createClient();
+    supabase
+      .from('marketplace_settings')
+      .select('*')
+      .order('category')
+      .then(({ data }) => {
+        const s = (data as Setting[]) ?? [];
+        setSettings(s);
+        const v: Record<string, string> = {};
+        s.forEach((row) => { v[row.setting_key] = row.setting_value ?? ''; });
+        setValues(v);
+        setFetching(false);
+      });
+  }, [user]);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    const supabase = createClient();
+    const updates = Object.entries(values).map(([key, val]) =>
+      supabase.from('marketplace_settings').update({ setting_value: val, updated_by: user!.id, updated_at: new Date().toISOString() }).eq('setting_key', key)
+    );
+    const results = await Promise.all(updates);
+    const failed = results.find((r) => r.error);
+    if (failed?.error) { setError(failed.error.message); setSaving(false); return; }
+    setSaved(true);
+    setTimeout(() => setSaved(false), 3000);
+    setSaving(false);
+  };
+
+  const grouped = CATEGORY_ORDER.reduce<Record<string, Setting[]>>((acc, cat) => {
+    acc[cat] = settings.filter((s) => s.category === cat);
+    return acc;
+  }, {});
 
   const isEnabled = process.env.NEXT_PUBLIC_DODO_PAYMENTS_ENABLED === 'true';
-  const environment = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
   const hasApiKey = !!process.env.DODO_PAYMENTS_API_KEY;
   const hasWebhookSecret = !!process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
-  const isConfigured = hasApiKey && hasWebhookSecret;
+
+  if (loading) return null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -56,92 +92,142 @@ export default function AdminCommerceSettingsPage() {
             <span>/</span>
             <span>Settings</span>
           </div>
-          <h1 className="text-2xl font-bold text-foreground">Payment Settings</h1>
-          <p className="text-muted-foreground text-sm mt-1">Dodo Payments configuration and environment status</p>
-        </div>
-
-        {/* Status banner */}
-        <div className={`flex items-start gap-3 rounded-xl px-4 py-3 text-sm mb-6 border ${
-          isEnabled && isConfigured && environment === 'test' ?'bg-amber-50 border-amber-200 text-amber-700'
-            : isEnabled && isConfigured
-            ? 'bg-green-50 border-green-200 text-green-700' :'bg-muted border-border text-muted-foreground'
-        }`}>
-          {isEnabled && isConfigured ? (
-            <CheckCircle2 className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          ) : (
-            <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-          )}
-          <div>
-            {!isEnabled && <p><strong>Dodo Payments is disabled.</strong> Set <code className="bg-muted px-1 rounded">NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true</code> to enable checkout.</p>}
-            {isEnabled && !isConfigured && <p><strong>Configuration incomplete.</strong> API key and webhook secret are required.</p>}
-            {isEnabled && isConfigured && environment === 'test' && <p><strong>Test mode active.</strong> No real payments will be processed. Production mode is not yet enabled in Phase 7.2.</p>}
-            {isEnabled && isConfigured && environment === 'production' && <p><strong>⚠️ Production mode is not yet enabled in Phase 7.2.</strong> Switch to test mode.</p>}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-secondary/10 flex items-center justify-center">
+                <Settings className="w-5 h-5 text-secondary" />
+              </div>
+              <div>
+                <h1 className="text-2xl font-bold text-foreground">Marketplace Settings</h1>
+                <p className="text-sm text-muted-foreground">Configure the marketplace and payment provider</p>
+              </div>
+            </div>
+            <button
+              onClick={handleSave}
+              disabled={saving || fetching}
+              className="flex items-center gap-2 bg-secondary text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-secondary/90 transition-colors disabled:opacity-50"
+            >
+              {saved ? <CheckCircle2 className="w-4 h-4" /> : <Save className="w-4 h-4" />}
+              {saved ? 'Saved!' : saving ? 'Saving...' : 'Save Settings'}
+            </button>
           </div>
         </div>
 
-        {/* Config table */}
-        <div className="bg-card border border-border rounded-xl overflow-hidden mb-6">
-          <div className="px-5 py-4 border-b border-border">
-            <h2 className="font-semibold text-foreground">Environment Variables</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Configure these in your <code>.env</code> file. Never commit secrets to Git.</p>
+        {error && (
+          <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 rounded-xl px-4 py-3 text-sm mb-4">
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            {error}
           </div>
-          <div className="divide-y divide-border">
-            {CONFIG_ROWS.map((row) => {
-              const isSet = !row.value.includes('(not set)');
-              const isMissing = row.required && !isSet;
-              return (
-                <div key={row.envKey} className="flex items-center justify-between px-5 py-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <span className="text-sm font-medium text-foreground">{row.label}</span>
-                      {row.isPublic && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">public</span>}
-                      {row.isSecret && <span className="text-xs bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full">secret</span>}
-                      {row.required && <span className="text-xs bg-muted text-muted-foreground px-1.5 py-0.5 rounded-full">required</span>}
-                    </div>
-                    <code className="text-xs text-muted-foreground">{row.envKey}</code>
-                  </div>
-                  <div className="flex items-center gap-3 ml-4">
-                    <span className={`text-sm font-mono ${isMissing ? 'text-red-500' : 'text-foreground'}`}>
-                      {row.value}
-                    </span>
-                    {isMissing ? (
-                      <XCircle className="w-4 h-4 text-red-500 flex-shrink-0" />
-                    ) : isSet ? (
-                      <CheckCircle2 className="w-4 h-4 text-green-500 flex-shrink-0" />
-                    ) : (
-                      <span className="w-4 h-4 flex-shrink-0" />
-                    )}
-                  </div>
-                </div>
-              );
-            })}
+        )}
+
+        {/* Payment Provider Status */}
+        <div className="bg-card border border-border rounded-xl p-5 mb-6">
+          <h2 className="font-semibold text-foreground mb-3">Payment Provider</h2>
+          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-xl border border-border">
+            <div>
+              <p className="font-medium text-foreground">Dodo Payments</p>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                {isEnabled && hasApiKey && hasWebhookSecret
+                  ? 'Configured — test mode' :'Not Configured'}
+              </p>
+            </div>
+            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border ${
+              isEnabled && hasApiKey ? 'text-amber-600 bg-amber-50 border-amber-200' : 'text-muted-foreground bg-muted border-border'
+            }`}>
+              {isEnabled && hasApiKey ? (
+                <><CheckCircle2 className="w-3.5 h-3.5" /> Test Mode</>
+              ) : (
+                <><AlertCircle className="w-3.5 h-3.5" /> Not Configured</>
+              )}
+            </span>
           </div>
+          <p className="text-xs text-muted-foreground mt-3">
+            Configure <code className="bg-muted px-1 rounded">DODO_PAYMENTS_API_KEY</code> and <code className="bg-muted px-1 rounded">DODO_PAYMENTS_WEBHOOK_SECRET</code> in your <code className="bg-muted px-1 rounded">.env</code> file.
+            Production mode is not yet enabled in Phase 7.2.
+          </p>
         </div>
 
         {/* Webhook endpoint */}
         <div className="bg-card border border-border rounded-xl p-5 mb-6">
           <h2 className="font-semibold text-foreground mb-2">Webhook Endpoint</h2>
-          <p className="text-sm text-muted-foreground mb-3">Register this URL in your Dodo Payments dashboard to receive events:</p>
-          <div className="flex items-center gap-2 bg-muted rounded-lg px-4 py-2.5">
-            <code className="text-sm text-foreground flex-1 break-all">
+          <div className="bg-muted rounded-lg px-4 py-2.5">
+            <code className="text-sm text-foreground break-all">
               {process.env.NEXT_PUBLIC_SITE_URL ?? 'https://your-domain.com'}/api/webhooks/dodo-payments
             </code>
-            <ExternalLink className="w-4 h-4 text-muted-foreground flex-shrink-0" />
           </div>
         </div>
 
-        {/* Next steps */}
-        <div className="bg-card border border-border rounded-xl p-5">
-          <h2 className="font-semibold text-foreground mb-3">Next steps to activate Dodo Payments</h2>
-          <ol className="space-y-2 text-sm text-muted-foreground list-decimal list-inside">
-            <li>Create a Dodo Payments account and access the test dashboard</li>
-            <li>Create products matching your subscription plans, unit products and credit packs</li>
-            <li>Copy the API key and webhook secret to your <code className="bg-muted px-1 rounded">.env</code> file</li>
-            <li>Register the webhook URL above in the Dodo Payments dashboard</li>
-            <li>Add product mappings in <Link href="/admin/commerce/mappings" className="text-secondary hover:underline">Commerce → Mappings</Link></li>
-            <li>Set <code className="bg-muted px-1 rounded">NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true</code></li>
-            <li>Implement <code className="bg-muted px-1 rounded">DodoPaymentsProvider</code> methods with the official Dodo Payments API</li>
-          </ol>
+        {/* Database settings */}
+        {fetching ? (
+          <div className="flex justify-center py-12">
+            <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin" />
+          </div>
+        ) : (
+          <div className="space-y-6">
+            {CATEGORY_ORDER.map((cat) => {
+              const catSettings = grouped[cat] ?? [];
+              if (catSettings.length === 0) return null;
+              return (
+                <div key={cat} className="bg-card border border-border rounded-xl overflow-hidden">
+                  <div className="px-5 py-3 border-b border-border bg-muted/30">
+                    <h3 className="font-semibold text-foreground capitalize">{cat}</h3>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {catSettings.map((s) => (
+                      <div key={s.setting_key} className="px-5 py-4 flex items-start gap-4">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-0.5">
+                            <label htmlFor={s.setting_key} className="text-sm font-medium text-foreground">{s.label}</label>
+                            {s.is_public && <span className="text-xs bg-blue-100 text-blue-600 px-1.5 py-0.5 rounded-full">public</span>}
+                          </div>
+                          {s.description && <p className="text-xs text-muted-foreground">{s.description}</p>}
+                          <code className="text-xs text-muted-foreground">{s.setting_key}</code>
+                        </div>
+                        <div className="shrink-0 w-48">
+                          {s.setting_type === 'boolean' ? (
+                            <select
+                              id={s.setting_key}
+                              value={values[s.setting_key] ?? 'false'}
+                              onChange={(e) => setValues({ ...values, [s.setting_key]: e.target.value })}
+                              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                            >
+                              <option value="true">Enabled</option>
+                              <option value="false">Disabled</option>
+                            </select>
+                          ) : (
+                            <input
+                              id={s.setting_key}
+                              type={s.setting_type === 'number' ? 'number' : 'text'}
+                              value={values[s.setting_key] ?? ''}
+                              onChange={(e) => setValues({ ...values, [s.setting_key]: e.target.value })}
+                              className="w-full px-3 py-2 bg-background border border-border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-secondary/30"
+                            />
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+
+        {/* Future compatibility */}
+        <div className="mt-6 bg-card border border-border rounded-xl p-5">
+          <h2 className="font-semibold text-foreground mb-3">Future Compatibility</h2>
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+            {[
+              'Seafood Encyclopedia', 'Species Center', 'Smart Search',
+              'Seafood Identification AI', 'AI Assistant', 'Marketing Kit', 'Public API'
+            ].map((item) => (
+              <div key={item} className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/50 rounded-lg px-3 py-2">
+                <span className="w-1.5 h-1.5 rounded-full bg-muted-foreground/40 shrink-0" />
+                {item}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-muted-foreground mt-3">These modules will integrate with the marketplace once implemented. No AI features in Phase 7.2.</p>
         </div>
       </main>
       <Footer />

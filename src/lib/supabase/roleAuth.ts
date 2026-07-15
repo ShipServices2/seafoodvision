@@ -39,6 +39,16 @@ export const ADMIN_ONLY_ROUTES = [
   '/admin/commerce/mappings',
   '/admin/commerce/webhooks',
   '/admin/commerce/settings',
+  '/admin/commerce/orders',
+  '/admin/commerce/payments',
+  '/admin/commerce/licenses',
+  '/admin/commerce/downloads',
+  '/admin/commerce/credits',
+  '/admin/commerce/coupons',
+  '/admin/commerce/collections',
+  '/admin/commerce/customers',
+  '/admin/commerce/refunds',
+  '/admin/commerce/reports',
 ];
 
 /**
