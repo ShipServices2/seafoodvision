@@ -9,6 +9,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, Filter } from 'lucide-react';
 import { generateEnrichedMockCandidates, MockAssetContext } from '@/lib/ai/mockEngine';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,7 +18,8 @@ interface AssetRow {
   public_asset_id: string | null;
   title: string | null;
   category: string | null;
-  thumbnail_url: string | null;
+  preview_storage_bucket: string | null;
+  preview_storage_path: string | null;
   review_status: string | null;
   species_id: string | null;
   created_at: string | null;
@@ -106,6 +108,35 @@ const STATUS_COLORS: Record<string, string> = {
   editorial: 'bg-purple-100 text-purple-700',
 };
 
+// ─── Signed URL hook ──────────────────────────────────────────────────────────
+function useSignedUrl(bucket: string | null | undefined, path: string | null | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bucket || !path) { setUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(bucket, path, 3600).then((signed) => {
+      if (!cancelled) setUrl(signed);
+    });
+    return () => { cancelled = true; };
+  }, [bucket, path]);
+  return url;
+}
+
+// ─── Asset thumbnail card ─────────────────────────────────────────────────────
+function AssetThumb({ asset }: { asset: AssetRow }) {
+  const [imgError, setImgError] = useState(false);
+  const signedUrl = useSignedUrl(asset.preview_storage_bucket, asset.preview_storage_path);
+  const hasImage = !!signedUrl && !imgError;
+  return hasImage ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={signedUrl!} alt={asset.title ?? 'Asset'} className="w-full h-full object-cover" onError={() => setImgError(true)} />
+  ) : (
+    <div className="w-full h-full flex items-center justify-center">
+      <Fish size={24} className="text-muted-foreground" />
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AIStudioIdentifyPage() {
@@ -174,7 +205,7 @@ export default function AIStudioIdentifyPage() {
 
     let query = supabase
       .from('assets')
-      .select('id, public_asset_id, title, category, thumbnail_url, review_status, species_id, created_at, import_batch_id, is_demo', { count: 'exact' })
+      .select('id, public_asset_id, title, category, review_status, species_id, created_at, import_batch_id, is_demo, asset_previews(storage_bucket, storage_path)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -195,10 +226,24 @@ export default function AIStudioIdentifyPage() {
       return;
     }
 
-    let rows: AssetRow[] = (data ?? []).map((a: AssetRow) => ({
-      ...a,
-      ai_identified: identifiedAssetIds.has(a.id),
-    }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rows: AssetRow[] = (data ?? []).map((a: any) => {
+      const preview = Array.isArray(a.asset_previews) ? a.asset_previews[0] : a.asset_previews;
+      return {
+        id: a.id,
+        public_asset_id: a.public_asset_id,
+        title: a.title,
+        category: a.category,
+        review_status: a.review_status,
+        species_id: a.species_id,
+        created_at: a.created_at,
+        import_batch_id: a.import_batch_id,
+        is_demo: a.is_demo,
+        preview_storage_bucket: preview?.storage_bucket ?? null,
+        preview_storage_path: preview?.storage_path ?? null,
+        ai_identified: identifiedAssetIds.has(a.id),
+      };
+    });
 
     // AI status filter (client-side after fetch)
     if (filters.aiStatus === 'not_identified') {
@@ -917,14 +962,7 @@ export default function AIStudioIdentifyPage() {
 
                         {/* Thumbnail */}
                         <div className="aspect-square bg-muted relative">
-                          {asset.thumbnail_url ? (
-                            <img src={asset.thumbnail_url} alt={asset.title ?? 'Asset'}
-                              className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <Fish size={24} className="text-muted-foreground" />
-                            </div>
-                          )}
+                          <AssetThumb asset={asset} />
 
                           {/* Selection overlay */}
                           {isSelected && (
