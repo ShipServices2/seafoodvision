@@ -33,6 +33,7 @@ interface Candidate {
   is_selected: boolean;
   is_validated: boolean;
   source_provider: string;
+  asset_id: string | null;
 }
 
 interface SIEJob {
@@ -262,17 +263,40 @@ function AIStudioValidationPageInner() {
   useEffect(() => { fetchJobs(); }, [fetchJobs]);
   useEffect(() => { fetchValidationStats(); }, [fetchValidationStats]);
 
-  const fetchCandidates = useCallback(async (jobId: string) => {
+  const fetchCandidates = useCallback(async (jobId: string, assetId?: string | null) => {
     const supabase = createClient();
-    const { data } = await supabase
+
+    // Primary query: by job_id (correct relationship)
+    const { data, error } = await supabase
       .from('sie_species_candidates')
       .select('*')
       .eq('job_id', jobId)
       .order('rank', { ascending: true });
-    setCandidates(data ?? []);
+
+    if (error) {
+      console.error('[Validation] fetchCandidates error:', error.message, error.hint);
+    }
+
+    let rows = data ?? [];
+
+    // Fallback: if no rows by job_id but we have asset_id, try asset_id lookup
+    // (handles legacy rows inserted without job_id linkage)
+    if (rows.length === 0 && assetId) {
+      const { data: fallbackData } = await supabase
+        .from('sie_species_candidates')
+        .select('*')
+        .eq('asset_id', assetId)
+        .order('rank', { ascending: true })
+        .limit(5);
+      rows = fallbackData ?? [];
+    }
+
+    setCandidates(rows);
     // Auto-select rank 1 candidate
-    const rank1 = (data ?? []).find((c: Candidate) => c.rank === 1);
+    const rank1 = rows.find((c: Candidate) => c.rank === 1);
     if (rank1) setSelectedCandidateId(rank1.id);
+    else if (rows.length > 0) setSelectedCandidateId(rows[0].id);
+    else setSelectedCandidateId(null);
   }, []);
 
   const fetchHistory = useCallback(async (jobId: string) => {
@@ -305,7 +329,7 @@ function AIStudioValidationPageInner() {
 
   useEffect(() => {
     if (selectedJob) {
-      fetchCandidates(selectedJob.id);
+      fetchCandidates(selectedJob.id, selectedJob.asset_id);
       fetchHistory(selectedJob.id);
       fetchAssetPreview(selectedJob.asset_id);
       setFieldDecisions({});
@@ -527,20 +551,23 @@ function AIStudioValidationPageInner() {
       reviewed_at: new Date().toISOString(),
       reviewer_id: profile.id,
       reviewer_comment: comment || null,
-      // Store human validation metadata
       validation_progress: (selectedJob.validation_progress ?? 0) + 1,
     }).eq('id', selectedJob.id);
 
-    // 3. Log validation history with human_validated action
+    // 3. Log validation history — action must be valid sie_validation_action enum value
+    // Valid values: 'approve' | 'reject' | 'edit' | 'unknown' | 'undo' | 'comment'
     const fieldEntries = Object.entries(fieldDecisions);
     if (fieldEntries.length > 0) {
       await supabase.from('sie_validation_history').insert(
         fieldEntries.map(([field, decision]) => ({
           job_id: selectedJob.id,
           candidate_id: candidate.id,
-          action: decision.action === 'approve' ? 'human_validated' : decision.action,
+          action: decision.action === 'approve' ? 'approve' :
+                  decision.action === 'reject' ? 'reject' :
+                  decision.action === 'edit' ? 'edit' : 'unknown',
           field_name: field,
-          comment: decision.action === 'edit' ? (editValues[field] ?? null) : (comment || null),
+          new_value: decision.action === 'edit' ? (editValues[field] ?? null) : null,
+          comment: comment || null,
           previous_status: prevStatus,
           new_status: 'validated',
           reviewer_id: profile.id,
@@ -548,11 +575,14 @@ function AIStudioValidationPageInner() {
         }))
       );
     } else {
+      // No field decisions — log as a comment (species approved implicitly)
       await supabase.from('sie_validation_history').insert({
         job_id: selectedJob.id,
         candidate_id: candidate.id,
         action: 'human_validated',
-        comment: comment || null,
+        field_name: 'species',
+        new_value: candidate.common_name,
+        comment: comment || `Human validated: ${candidate.common_name} (${candidate.scientific_name ?? 'unknown'})`,
         previous_status: prevStatus,
         new_status: 'validated',
         reviewer_id: profile.id,
@@ -593,8 +623,8 @@ function AIStudioValidationPageInner() {
     }).eq('id', selectedJob.id);
     await supabase.from('sie_validation_history').insert({
       job_id: selectedJob.id,
-      action: 'mark_unknown',
-      comment: comment || null,
+      action: 'unknown',
+      comment: comment || 'Marked as unknown by reviewer',
       previous_status: selectedJob.job_status,
       new_status: 'unknown',
       reviewer_id: profile.id,
@@ -613,12 +643,13 @@ function AIStudioValidationPageInner() {
     await supabase.from('sie_validation_history').insert({
       job_id: selectedJob.id,
       candidate_id: candidateId,
-      action: 'reject_candidate',
+      action: 'reject',
+      field_name: 'candidate',
       comment: 'Candidate rejected by reviewer',
       reviewer_id: profile.id,
       reviewer_name: profile.display_name ?? profile.email ?? null,
     });
-    fetchCandidates(selectedJob.id);
+    fetchCandidates(selectedJob.id, selectedJob.asset_id);
   };
 
   // ── Undo ─────────────────────────────────────────────────────────────────────
@@ -673,6 +704,7 @@ function AIStudioValidationPageInner() {
       await supabase.from('sie_validation_history').insert({
         job_id: jobId,
         action: 'bulk_human_validated',
+        field_name: 'species',
         comment: `Bulk validation — ${ids.length} jobs selected explicitly`,
         reviewer_id: profile.id,
         reviewer_name: profile.display_name ?? profile.email ?? null,
@@ -1286,14 +1318,39 @@ function AIStudioValidationPageInner() {
                     </div>
 
                     {candidates.length === 0 ? (
-                      <div className="bg-card border border-border rounded-xl p-8 text-center">
-                        <AlertTriangle size={24} className="text-amber-500 mx-auto mb-2" />
-                        <p className="text-sm text-muted-foreground">No proposals available for this job</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          Job status: <strong>{selectedJob.job_status}</strong>
-                        </p>
-                        <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
-                          Launch identification to generate proposals
+                      <div className="bg-card border border-border rounded-xl p-6 text-center">
+                        <AlertTriangle size={24} className="text-amber-500 mx-auto mb-3" />
+                        <p className="text-sm font-semibold text-foreground mb-2">No proposals found for this job</p>
+                        <div className="text-left bg-muted/40 border border-border rounded-lg p-3 mb-4 text-xs space-y-1.5">
+                          <p className="font-semibold text-foreground">Diagnostic:</p>
+                          <p className="text-muted-foreground">
+                            <span className="font-mono text-foreground">job_id:</span> {selectedJob.id}
+                          </p>
+                          <p className="text-muted-foreground">
+                            <span className="font-mono text-foreground">asset_id:</span> {selectedJob.asset_id ?? '— (null)'}
+                          </p>
+                          <p className="text-muted-foreground">
+                            <span className="font-mono text-foreground">job_status:</span>{' '}
+                            <span className={`px-1.5 py-0.5 rounded font-medium ${JOB_STATUS_COLORS[selectedJob.job_status] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {selectedJob.job_status}
+                            </span>
+                          </p>
+                          <p className="text-muted-foreground">
+                            <span className="font-mono text-foreground">ai_provider:</span> {selectedJob.ai_provider ?? 'mock'}
+                          </p>
+                          <div className="pt-1 border-t border-border">
+                            <p className="font-semibold text-foreground mb-1">Possible causes:</p>
+                            <ul className="space-y-0.5 text-muted-foreground">
+                              <li>• Candidate rows were never inserted (check browser console for insert errors)</li>
+                              <li>• RLS policy blocked the insert (reviewer role may lack write permission)</li>
+                              <li>• product_form enum mismatch caused a silent insert failure</li>
+                              <li>• This job was created before the fix — re-run identification to generate candidates</li>
+                            </ul>
+                          </div>
+                        </div>
+                        <Link href={`/admin/ai-studio/identify`}
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 underline">
+                          Re-run identification to generate proposals →
                         </Link>
                       </div>
                     ) : (

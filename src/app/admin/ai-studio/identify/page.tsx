@@ -8,7 +8,7 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, Filter, ShieldAlert, Target } from 'lucide-react';
-import { generateEnrichedMockCandidates, MockAssetContext } from '@/lib/ai/mockEngine';
+import { generateEnrichedMockCandidates, toSieProductForm, MockAssetContext } from '@/lib/ai/mockEngine';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -491,13 +491,23 @@ export default function AIStudioIdentifyPage() {
         const candidates = generateEnrichedMockCandidates(job.id, context);
         for (const c of candidates) {
           candidateRows.push({
-            job_id: job.id, rank: c.rank, common_name: c.common_name,
-            scientific_name: c.scientific_name, family: c.family, genus: c.genus,
-            ai_score: c.ai_score, similarity_score: c.similarity_score,
-            main_reasons: c.main_reasons, product_form: c.product_form,
-            source_provider: c.source_provider, commercial_name: c.commercial_name,
-            description_candidate: c.description_candidate, category_candidate: c.category_candidate,
-            packaging_candidate: c.packaging_candidate, product_candidate: c.product_candidate,
+            job_id: job.id,
+            asset_id: job.asset_id,
+            rank: c.rank,
+            common_name: c.common_name,
+            scientific_name: c.scientific_name,
+            family: c.family,
+            genus: c.genus,
+            ai_score: c.ai_score,
+            similarity_score: c.similarity_score,
+            main_reasons: c.main_reasons,
+            product_form: toSieProductForm(c.product_form),
+            source_provider: c.source_provider,
+            commercial_name: c.commercial_name,
+            description_candidate: c.description_candidate,
+            category_candidate: c.category_candidate,
+            packaging_candidate: c.packaging_candidate,
+            product_candidate: c.product_candidate,
             keywords_candidate: c.keywords_candidate,
           });
         }
@@ -518,8 +528,20 @@ export default function AIStudioIdentifyPage() {
         allJobIds.push(job.id);
       }
 
-      if (candidateRows.length > 0) await supabase.from('sie_species_candidates').insert(candidateRows);
-      if (suggestionRows.length > 0) await supabase.from('metadata_suggestions').insert(suggestionRows);
+      if (candidateRows.length > 0) {
+        const { error: candErr } = await supabase.from('sie_species_candidates').insert(candidateRows);
+        if (candErr) {
+          console.error('[AI Studio] Candidate insert error:', candErr.message, candErr.details, candErr.hint);
+          errorCount++;
+          setBatchJob((prev) => prev ? { ...prev, errors: [...prev.errors, `Candidate insert: ${candErr.message}`] } : prev);
+        }
+      }
+      if (suggestionRows.length > 0) {
+        const { error: suggErr } = await supabase.from('metadata_suggestions').insert(suggestionRows);
+        if (suggErr) {
+          console.warn('[AI Studio] Suggestion insert warning (non-critical):', suggErr.message);
+        }
+      }
 
       const newProcessed = Math.min(i + CHUNK, toProcessIds.length);
       setBatchJob((prev) => prev ? {
