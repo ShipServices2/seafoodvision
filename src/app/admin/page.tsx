@@ -194,6 +194,15 @@ export default function AdminPage() {
       badge: 'Phase 7.2',
     },
     {
+      href: '/admin/metadata-review',
+      icon: ClipboardCheck,
+      label: 'Metadata Review Center',
+      description: 'Validate, correct and publish Codex metadata — species, synonyms, keywords, bulk review',
+      stat: null,
+      statLabel: null,
+      badge: 'Phase 7.15',
+    },
+    {
       href: '/licensing-center',
       icon: Award,
       label: 'Licensing Center',
