@@ -23,7 +23,6 @@ interface AssetRow {
   review_status: string | null;
   species_id: string | null;
   created_at: string | null;
-  import_batch_id: string | null;
   is_demo: boolean | null;
   species_common_name?: string | null;
   ai_identified?: boolean;
@@ -33,7 +32,6 @@ interface FilterState {
   reviewStatus: string;
   metadataFilter: string;
   category: string;
-  importBatch: string;
   textSearch: string;
   aiStatus: string;
 }
@@ -152,14 +150,12 @@ export default function AIStudioIdentifyPage() {
   const [assetsLoading, setAssetsLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
-  const [importBatches, setImportBatches] = useState<{ id: string; name: string }[]>([]);
   const [identifiedAssetIds, setIdentifiedAssetIds] = useState<Set<string>>(new Set());
 
   const [filters, setFilters] = useState<FilterState>({
     reviewStatus: '',
     metadataFilter: '',
     category: '',
-    importBatch: '',
     textSearch: '',
     aiStatus: '',
   });
@@ -205,7 +201,7 @@ export default function AIStudioIdentifyPage() {
 
     let query = supabase
       .from('assets')
-      .select('id, public_asset_id, title, category, review_status, species_id, created_at, import_batch_id, is_demo, asset_previews(storage_bucket, storage_path)', { count: 'exact' })
+      .select('id, public_asset_id, title, category, review_status, species_id, created_at, is_demo, asset_previews(storage_bucket, storage_path)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
 
@@ -214,7 +210,6 @@ export default function AIStudioIdentifyPage() {
     }
     if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
     if (filters.category) query = query.eq('category', filters.category);
-    if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
     if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
 
     const { data, count, error: queryError } = await query;
@@ -237,7 +232,6 @@ export default function AIStudioIdentifyPage() {
         review_status: a.review_status,
         species_id: a.species_id,
         created_at: a.created_at,
-        import_batch_id: a.import_batch_id,
         is_demo: a.is_demo,
         preview_storage_bucket: preview?.storage_bucket ?? null,
         preview_storage_path: preview?.storage_path ?? null,
@@ -260,12 +254,10 @@ export default function AIStudioIdentifyPage() {
 
   const fetchMeta = useCallback(async () => {
     if (!profile) return;
-    const [cats, batches] = await Promise.all([
+    const [cats] = await Promise.all([
       supabase.from('categories').select('name').order('name'),
-      supabase.from('import_batches').select('id, name').order('created_at', { ascending: false }).limit(50),
     ]);
     setCategories((cats.data ?? []).map((c: { name: string }) => c.name));
-    setImportBatches((batches.data ?? []) as { id: string; name: string }[]);
   }, [profile, supabase]);
 
   const fetchRecentJobs = useCallback(async () => {
@@ -310,7 +302,6 @@ export default function AIStudioIdentifyPage() {
     if (filters.textSearch) query = query.or(`title.ilike.%${filters.textSearch}%`);
     if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
     if (filters.category) query = query.eq('category', filters.category);
-    if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
     if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
 
     const { data } = await query;
@@ -478,7 +469,7 @@ export default function AIStudioIdentifyPage() {
           existingSpeciesFamily: speciesData?.family ?? null,
           existingSpeciesGenus: genus,
           keywords: enriched?.keywords ?? [],
-          importBatch: asset?.import_batch_id ?? null,
+          importBatch: null,
           folderPath: null,
         };
 
@@ -547,7 +538,7 @@ export default function AIStudioIdentifyPage() {
   };
 
   const clearFilters = () => {
-    setFilters({ reviewStatus: '', metadataFilter: '', category: '', importBatch: '', textSearch: '', aiStatus: '' });
+    setFilters({ reviewStatus: '', metadataFilter: '', category: '', textSearch: '', aiStatus: '' });
     setSearchInput('');
     setCurrentPage(0);
   };
@@ -688,17 +679,6 @@ export default function AIStudioIdentifyPage() {
                         className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
                         <option value="">All categories</option>
                         {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  )}
-
-                  {importBatches.length > 0 && (
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Import Batch</label>
-                      <select value={filters.importBatch} onChange={(e) => updateFilter('importBatch', e.target.value)}
-                        className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
-                        <option value="">All batches</option>
-                        {importBatches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                     </div>
                   )}
