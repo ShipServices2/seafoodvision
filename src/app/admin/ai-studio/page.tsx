@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Brain, Zap, Layers, Eye, CheckCircle2, BarChart2, AlertTriangle, Database, Cpu, TrendingUp, Sparkles, ArrowRight, Fish, Target, CheckSquare, Star, Globe, RefreshCw } from 'lucide-react';
+import { Brain, Zap, Layers, Eye, CheckCircle2, BarChart2, AlertTriangle, Database, Cpu, TrendingUp, Sparkles, ArrowRight, Fish, Target, CheckSquare, Star, Globe, RefreshCw, Upload } from 'lucide-react';
 
 interface SIEStats {
   totalJobs: number;
@@ -91,6 +91,16 @@ const STUDIO_MODULES = [
     iconBg: 'bg-amber-100',
     badge: null,
     badgeColor: '',
+  },
+  {
+    href: '/admin/ai-studio/import-real-ai',
+    icon: Upload,
+    label: 'Import Real AI Results',
+    desc: 'OpenAI Vision Pilot · 20 actifs · Dry Run · provider=openai · Real AI badges',
+    color: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    iconBg: 'bg-emerald-100',
+    badge: 'REAL AI',
+    badgeColor: 'bg-emerald-600 text-white',
   },
 ];
 
@@ -317,6 +327,29 @@ export default function AIStudioPage() {
             </div>
           </div>
         )}
+
+        {/* OpenAI Vision Pilot CTA */}
+        <div className="bg-gradient-to-r from-emerald-600 to-teal-600 rounded-2xl p-6 mb-6 text-white">
+          <div className="flex items-center justify-between flex-wrap gap-4">
+            <div>
+              <div className="flex items-center gap-2 mb-1">
+                <h2 className="text-lg font-bold">OpenAI Vision Pilot — 20 Assets</h2>
+                <span className="text-xs bg-white/20 border border-white/30 px-2 py-0.5 rounded-full font-semibold">
+                  REAL AI — OPENAI VISION
+                </span>
+              </div>
+              <p className="text-sm text-white/80">
+                Importer les résultats réels OpenAI Vision · provider=openai · model=gpt-5-mini-2025-08-07 · Dry Run obligatoire
+              </p>
+            </div>
+            <Link href="/admin/ai-studio/import-real-ai"
+              className="flex items-center gap-2 bg-white text-emerald-700 font-bold px-5 py-3 rounded-xl hover:bg-emerald-50 transition-colors text-sm shadow-sm shrink-0">
+              <Upload size={16} />
+              Import Real AI Results
+              <ArrowRight size={14} />
+            </Link>
+          </div>
+        </div>
 
         {/* Main grid */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">

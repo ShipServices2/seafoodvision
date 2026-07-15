@@ -34,6 +34,65 @@ interface Candidate {
   is_validated: boolean;
   source_provider: string;
   asset_id: string | null;
+  // Real AI fields
+  provider_mode?: string;
+  confidence_score?: number | null;
+  biological_order?: string | null;
+  visual_evidence?: string[] | null;
+  identification_limits?: string[] | null;
+  reasoning_summary?: string | null;
+  is_real_ai?: boolean;
+}
+
+interface OpenAIPilotCandidate {
+  id: string;
+  rank: number;
+  common_name: string;
+  scientific_name: string | null;
+  family: string | null;
+  genus: string | null;
+  biological_order: string | null;
+  taxonomic_level: string | null;
+  confidence_score: number | null;
+  visual_evidence: string[] | null;
+  identification_limits: string[] | null;
+  source: string | null;
+  provider: string | null;
+  provider_mode: string | null;
+  is_selected: boolean;
+  is_validated: boolean;
+  status: string | null;
+  result_id: string;
+  asset_id: string | null;
+  public_asset_id: string;
+}
+
+interface OpenAIPilotMetadata {
+  id: string;
+  species_name: string | null;
+  scientific_name: string | null;
+  family: string | null;
+  genus: string | null;
+  biological_order: string | null;
+  commercial_names: string[] | null;
+  local_names_fr: string[] | null;
+  local_names_en: string[] | null;
+  local_names_es: string[] | null;
+  local_names_pt: string[] | null;
+  local_names_ar: string[] | null;
+  synonyms: string[] | null;
+  category: string | null;
+  product_form: string | null;
+  conservation_method: string | null;
+  packaging: string | null;
+  keywords: string[] | null;
+  short_description: string | null;
+  vision_confidence: number | null;
+  species_confidence: number | null;
+  commercial_confidence: number | null;
+  metadata_confidence: number | null;
+  global_confidence: number | null;
+  warnings: string[] | null;
 }
 
 interface SIEJob {
@@ -195,6 +254,8 @@ function AIStudioValidationPageInner() {
   const [bulkMode, setBulkMode] = useState(false);
   const [bulkProcessing, setBulkProcessing] = useState(false);
   const [validationStats, setValidationStats] = useState<{ total: number; validated: number }>({ total: 0, validated: 0 });
+  const [pilotMetadata, setPilotMetadata] = useState<OpenAIPilotMetadata | null>(null);
+  const [showPilotMetadata, setShowPilotMetadata] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -291,6 +352,62 @@ function AIStudioValidationPageInner() {
       rows = fallbackData ?? [];
     }
 
+    // Also check for OpenAI pilot candidates (Real AI) linked to this asset
+    if (assetId) {
+      const { data: pilotResultData } = await supabase
+        .from('openai_pilot_results')
+        .select('id')
+        .eq('asset_id', assetId)
+        .eq('provider_mode', 'real_ai')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pilotResultData?.id) {
+        const { data: pilotCandidates } = await supabase
+          .from('openai_pilot_candidates')
+          .select('*')
+          .eq('result_id', pilotResultData.id)
+          .order('rank', { ascending: true });
+
+        if (pilotCandidates && pilotCandidates.length > 0) {
+          // Map pilot candidates to the Candidate interface
+          const mappedPilot: Candidate[] = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
+            id: pc.id,
+            rank: pc.rank,
+            common_name: pc.common_name,
+            scientific_name: pc.scientific_name,
+            family: pc.family,
+            genus: pc.genus,
+            order_name: pc.biological_order,
+            ai_score: Math.round((pc.confidence_score ?? 0) * 100),
+            similarity_score: Math.round((pc.confidence_score ?? 0) * 100),
+            main_reasons: pc.visual_evidence ?? [],
+            product_form: null,
+            commercial_name: null,
+            description_candidate: null,
+            category_candidate: null,
+            packaging_candidate: null,
+            product_candidate: null,
+            keywords_candidate: null,
+            is_selected: pc.is_selected,
+            is_validated: pc.is_validated,
+            source_provider: 'openai',
+            asset_id: pc.asset_id,
+            provider_mode: 'real_ai',
+            confidence_score: pc.confidence_score,
+            biological_order: pc.biological_order,
+            visual_evidence: pc.visual_evidence,
+            identification_limits: pc.identification_limits,
+            is_real_ai: true,
+          }));
+
+          // Merge: Real AI candidates take precedence, shown first
+          rows = [...mappedPilot, ...rows.map((r) => ({ ...r, is_real_ai: false, provider_mode: r.provider_mode ?? 'mock' }))];
+        }
+      }
+    }
+
     setCandidates(rows);
     // Auto-select rank 1 candidate
     const rank1 = rows.find((c: Candidate) => c.rank === 1);
@@ -308,6 +425,17 @@ function AIStudioValidationPageInner() {
       .order('created_at', { ascending: false })
       .limit(20);
     setHistory(data ?? []);
+  }, []);
+
+  // Fetch OpenAI pilot metadata for a selected candidate
+  const fetchPilotMetadata = useCallback(async (candidateId: string) => {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('openai_pilot_candidate_metadata')
+      .select('*')
+      .eq('candidate_id', candidateId)
+      .maybeSingle();
+    setPilotMetadata(data ?? null);
   }, []);
 
   // Fetch asset preview for selected job
@@ -1312,10 +1440,32 @@ function AIStudioValidationPageInner() {
                     <div className="flex items-center gap-2">
                       <Brain size={14} className="text-violet-500" />
                       <h3 className="text-sm font-semibold text-foreground">Top 5 AI Proposals</h3>
-                      <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full ml-auto font-medium">
-                        Mock Engine v2
-                      </span>
+                      {candidates.some((c) => c.is_real_ai) ? (
+                        <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full ml-auto font-semibold">
+                          REAL AI — OPENAI VISION
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full ml-auto font-medium">
+                          Mock Engine v2
+                        </span>
+                      )}
                     </div>
+
+                    {/* Confidence alert */}
+                    {selectedCandidate && (
+                      <div className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 ${
+                        selectedCandidate.ai_score < 40
+                          ? 'bg-red-50 border-red-200 text-red-700'
+                          : selectedCandidate.ai_score < 70
+                          ? 'bg-amber-50 border-amber-200 text-amber-700' :'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      }`}>
+                        <AlertTriangle size={12} className="shrink-0" />
+                        {selectedCandidate.ai_score < 40
+                          ? 'Low confidence — identification uncertain'
+                          : selectedCandidate.ai_score < 70
+                          ? 'Medium confidence — review carefully' :'Higher confidence — human review still required'}
+                      </div>
+                    )}
 
                     {candidates.length === 0 ? (
                       <div className="bg-card border border-border rounded-xl p-6 text-center">
@@ -1388,9 +1538,15 @@ function AIStudioValidationPageInner() {
 
                             {/* Source + Mock indicator */}
                             <div className="flex flex-wrap gap-1.5 mb-3">
-                              <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-mono">
-                                {c.source_provider === 'mock' ? '⚠ Mock' : '✓ Real AI'}
-                              </span>
+                              {c.is_real_ai ? (
+                                <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full font-semibold">
+                                  ✓ REAL AI — OPENAI VISION
+                                </span>
+                              ) : (
+                                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-mono">
+                                  ⚠ Mock Engine
+                                </span>
+                              )}
                               {c.family && (
                                 <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
                                   <Fish size={9} />Family: {c.family}
@@ -1401,9 +1557,9 @@ function AIStudioValidationPageInner() {
                                   Genus: {c.genus}
                                 </span>
                               )}
-                              {c.order_name && (
+                              {(c.order_name || c.biological_order) && (
                                 <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full">
-                                  Order: {c.order_name}
+                                  Order: {c.order_name ?? c.biological_order}
                                 </span>
                               )}
                               {c.product_form && (
@@ -1417,6 +1573,34 @@ function AIStudioValidationPageInner() {
                                 </span>
                               )}
                             </div>
+
+                            {/* Real AI: visual evidence */}
+                            {c.is_real_ai && c.visual_evidence && c.visual_evidence.length > 0 && (
+                              <div className="mb-3">
+                                <p className="text-xs text-muted-foreground font-medium mb-1">Visual evidence:</p>
+                                <ul className="space-y-0.5">
+                                  {c.visual_evidence.slice(0, 3).map((ev, i) => (
+                                    <li key={i} className="text-xs text-foreground flex items-start gap-1.5">
+                                      <Eye size={9} className="text-emerald-500 shrink-0 mt-0.5" />{ev}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {/* Real AI: identification limits */}
+                            {c.is_real_ai && c.identification_limits && c.identification_limits.length > 0 && (
+                              <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-xs text-amber-700 font-medium mb-1">Identification limits:</p>
+                                <ul className="space-y-0.5">
+                                  {c.identification_limits.slice(0, 2).map((lim, i) => (
+                                    <li key={i} className="text-xs text-amber-700 flex items-start gap-1.5">
+                                      <AlertTriangle size={9} className="shrink-0 mt-0.5" />{lim}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
 
                             {/* Description */}
                             {c.description_candidate && (
@@ -1461,7 +1645,7 @@ function AIStudioValidationPageInner() {
                             {/* Per-candidate actions */}
                             <div className="flex gap-1.5">
                               <button
-                                onClick={(e) => { e.stopPropagation(); setSelectedCandidateId(c.id); }}
+                                onClick={(e) => { e.stopPropagation(); setSelectedCandidateId(c.id); if (c.is_real_ai) { fetchPilotMetadata(c.id); setShowPilotMetadata(true); } }}
                                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-xs font-medium transition-all ${
                                   isSelected
                                     ? 'bg-violet-100 border-violet-400 text-violet-700 ring-1 ring-violet-300'
@@ -1470,6 +1654,13 @@ function AIStudioValidationPageInner() {
                                 <Eye size={11} />
                                 {isSelected ? 'Selected' : 'Select this species'}
                               </button>
+                              {c.is_real_ai && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); fetchPilotMetadata(c.id); setShowPilotMetadata(true); }}
+                                  className="flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100 transition-all">
+                                  <Tag size={11} />Metadata
+                                </button>
+                              )}
                               <button
                                 onClick={(e) => { e.stopPropagation(); handleRejectCandidate(c.id); }}
                                 className="flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs font-medium hover:bg-red-100 transition-all">
@@ -1511,6 +1702,85 @@ function AIStudioValidationPageInner() {
                         Only approved fields are propagated. Rejected and unknown fields are never published.
                       </p>
                     </div>
+
+                    {/* OpenAI Pilot Candidate Metadata Panel */}
+                    {showPilotMetadata && pilotMetadata && (
+                      <div className="bg-card border border-emerald-200 rounded-xl p-4" id="candidate-metadata">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                            <Tag size={14} className="text-emerald-500" />
+                            CANDIDATE METADATA
+                            <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-semibold">
+                              REAL AI — OPENAI VISION
+                            </span>
+                          </h4>
+                          <button onClick={() => setShowPilotMetadata(false)} className="text-muted-foreground hover:text-foreground">
+                            <XCircle size={14} />
+                          </button>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          {[
+                            { label: 'Species', value: pilotMetadata.species_name },
+                            { label: 'Scientific Name', value: pilotMetadata.scientific_name },
+                            { label: 'Family', value: pilotMetadata.family },
+                            { label: 'Genus', value: pilotMetadata.genus },
+                            { label: 'Biological Order', value: pilotMetadata.biological_order },
+                            { label: 'Commercial Names', value: pilotMetadata.commercial_names?.join(', ') },
+                            { label: 'Local Names — French', value: pilotMetadata.local_names_fr?.join(', ') },
+                            { label: 'Local Names — English', value: pilotMetadata.local_names_en?.join(', ') },
+                            { label: 'Local Names — Spanish', value: pilotMetadata.local_names_es?.join(', ') },
+                            { label: 'Local Names — Portuguese', value: pilotMetadata.local_names_pt?.join(', ') },
+                            { label: 'Local Names — Arabic', value: pilotMetadata.local_names_ar?.join(', ') },
+                            { label: 'Synonyms', value: pilotMetadata.synonyms?.join(', ') },
+                            { label: 'Category', value: pilotMetadata.category },
+                            { label: 'Product Form', value: pilotMetadata.product_form },
+                            { label: 'Conservation Method', value: pilotMetadata.conservation_method },
+                            { label: 'Packaging', value: pilotMetadata.packaging },
+                            { label: 'Keywords', value: pilotMetadata.keywords?.join(', ') },
+                            { label: 'Description', value: pilotMetadata.short_description },
+                          ].filter((f) => f.value).map((field) => (
+                            <div key={field.label} className="flex items-start gap-2 p-2 rounded-lg bg-muted/30 border border-border">
+                              <span className="font-medium text-foreground shrink-0 w-36">{field.label}</span>
+                              <span className="text-muted-foreground flex-1">{field.value}</span>
+                            </div>
+                          ))}
+
+                          {/* Confidence scores */}
+                          <div className="pt-2 border-t border-border">
+                            <p className="font-semibold text-foreground mb-2">Confidence Scores</p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {[
+                                { label: 'Vision', value: pilotMetadata.vision_confidence },
+                                { label: 'Species', value: pilotMetadata.species_confidence },
+                                { label: 'Commercial', value: pilotMetadata.commercial_confidence },
+                                { label: 'Metadata', value: pilotMetadata.metadata_confidence },
+                                { label: 'Global', value: pilotMetadata.global_confidence },
+                              ].filter((s) => s.value != null).map((score) => (
+                                <div key={score.label} className="flex items-center justify-between p-1.5 rounded bg-muted/40">
+                                  <span className="text-muted-foreground">{score.label}</span>
+                                  <span className={`font-mono font-bold ${confidenceColor(Math.round((score.value ?? 0) * 100))}`}>
+                                    {Math.round((score.value ?? 0) * 100)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {/* Warnings */}
+                          {pilotMetadata.warnings && pilotMetadata.warnings.length > 0 && (
+                            <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                              <p className="font-semibold text-amber-800 mb-1">Warnings</p>
+                              {pilotMetadata.warnings.map((w, i) => (
+                                <p key={i} className="text-amber-700 flex items-start gap-1.5">
+                                  <AlertTriangle size={10} className="shrink-0 mt-0.5" />{w}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
