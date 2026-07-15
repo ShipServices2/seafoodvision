@@ -166,8 +166,9 @@ export default function AIStudioIdentifyPage() {
 
   // ── Fetch assets ────────────────────────────────────────────────────────────
   const fetchAssets = useCallback(async (page = 0) => {
-    if (!profile) return;
+    if (!user) return; // wait for auth — RLS requires authenticated session
     setAssetsLoading(true);
+    setError(null);
 
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
@@ -186,7 +187,15 @@ export default function AIStudioIdentifyPage() {
     if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
     if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
 
-    const { data, count } = await query;
+    const { data, count, error: queryError } = await query;
+
+    if (queryError) {
+      console.error('[AI Studio] fetchAssets error:', queryError);
+      setError(`Failed to load assets: ${queryError.message}`);
+      setAssetsLoading(false);
+      return;
+    }
+
     let rows: AssetRow[] = (data ?? []).map((a: AssetRow) => ({
       ...a,
       ai_identified: identifiedAssetIds.has(a.id),
@@ -203,7 +212,7 @@ export default function AIStudioIdentifyPage() {
     setTotalCount(count ?? 0);
     setCurrentPage(page);
     setAssetsLoading(false);
-  }, [profile, filters, identifiedAssetIds, supabase]);
+  }, [filters, identifiedAssetIds, supabase, user]);
 
   const fetchMeta = useCallback(async () => {
     if (!profile) return;
@@ -225,7 +234,7 @@ export default function AIStudioIdentifyPage() {
   }, [supabase]);
 
   useEffect(() => { fetchIdentifiedIds(); }, [fetchIdentifiedIds]);
-  useEffect(() => { fetchAssets(0); }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { fetchAssets(0); }, [fetchAssets]); // re-runs when profile loads (fetchAssets deps include profile indirectly via supabase client)
   useEffect(() => { fetchMeta(); }, [fetchMeta]);
   useEffect(() => { fetchRecentJobs(); }, [fetchRecentJobs]);
 
