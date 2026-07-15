@@ -16,7 +16,6 @@ interface AssetRow {
   id: string;
   public_asset_id: string | null;
   title: string | null;
-  file_name: string | null;
   category: string | null;
   thumbnail_url: string | null;
   review_status: string | null;
@@ -175,12 +174,12 @@ export default function AIStudioIdentifyPage() {
 
     let query = supabase
       .from('assets')
-      .select('id, public_asset_id, title, file_name, category, thumbnail_url, review_status, species_id, created_at, import_batch_id, is_demo', { count: 'exact' })
+      .select('id, public_asset_id, title, category, thumbnail_url, review_status, species_id, created_at, import_batch_id, is_demo', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
 
     if (filters.textSearch) {
-      query = query.or(`title.ilike.%${filters.textSearch}%,file_name.ilike.%${filters.textSearch}%,public_asset_id.ilike.%${filters.textSearch}%`);
+      query = query.or(`title.ilike.%${filters.textSearch}%,public_asset_id.ilike.%${filters.textSearch}%`);
     }
     if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
     if (filters.category) query = query.eq('category', filters.category);
@@ -263,7 +262,7 @@ export default function AIStudioIdentifyPage() {
       .order('created_at', { ascending: false })
       .limit(2000);
 
-    if (filters.textSearch) query = query.or(`title.ilike.%${filters.textSearch}%,file_name.ilike.%${filters.textSearch}%`);
+    if (filters.textSearch) query = query.or(`title.ilike.%${filters.textSearch}%`);
     if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
     if (filters.category) query = query.eq('category', filters.category);
     if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
@@ -338,7 +337,7 @@ export default function AIStudioIdentifyPage() {
       const { data: enrichedAssets, error: fetchErr } = await supabase
         .from('assets')
         .select(`
-          id, title, file_name, category, product_form, packaging, description,
+          id, title, category, product_form, packaging, description,
           species:species_id (common_name, scientific_name, family),
           asset_keywords (keywords (term))
         `)
@@ -351,7 +350,7 @@ export default function AIStudioIdentifyPage() {
       }
 
       const enrichedMap = new Map<string, {
-        title: string | null; file_name: string | null; category: string | null;
+        title: string | null; category: string | null;
         product_form: string | null; packaging: string | null; description: string | null;
         species: { common_name: string; scientific_name: string; family: string } | null;
         keywords: string[];
@@ -363,7 +362,7 @@ export default function AIStudioIdentifyPage() {
           .map((ak: { keywords: { term: string } | null }) => ak.keywords?.term)
           .filter((t: string | undefined): t is string => !!t);
         enrichedMap.set(ea.id, {
-          title: ea.title ?? null, file_name: ea.file_name ?? null,
+          title: ea.title ?? null,
           category: ea.category ?? null, product_form: ea.product_form ?? null,
           packaging: ea.packaging ?? null, description: ea.description ?? null,
           species: speciesData, keywords: kws,
@@ -381,7 +380,7 @@ export default function AIStudioIdentifyPage() {
         return {
           asset_id: assetId,
           public_asset_id: asset?.public_asset_id ?? null,
-          current_name: enriched?.title ?? asset?.title ?? asset?.file_name ?? null,
+          current_name: enriched?.title ?? asset?.title ?? null,
           current_category: enriched?.category ?? asset?.category ?? null,
           job_status: 'proposals_ready',
           progress_step: 'proposals_ready',
@@ -423,8 +422,8 @@ export default function AIStudioIdentifyPage() {
 
         const context: MockAssetContext = {
           assetId: job.asset_id,
-          title: enriched?.title ?? asset?.title ?? asset?.file_name ?? null,
-          fileName: enriched?.file_name ?? asset?.file_name ?? null,
+          title: enriched?.title ?? asset?.title ?? null,
+          fileName: null,
           category: enriched?.category ?? asset?.category ?? null,
           productForm: enriched?.product_form ?? null,
           packaging: enriched?.packaging ?? null,
@@ -919,7 +918,7 @@ export default function AIStudioIdentifyPage() {
                         {/* Thumbnail */}
                         <div className="aspect-square bg-muted relative">
                           {asset.thumbnail_url ? (
-                            <img src={asset.thumbnail_url} alt={asset.title ?? asset.file_name ?? 'Asset'}
+                            <img src={asset.thumbnail_url} alt={asset.title ?? 'Asset'}
                               className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
@@ -965,7 +964,7 @@ export default function AIStudioIdentifyPage() {
                         {/* Info */}
                         <div className="p-2 bg-card">
                           <p className="text-xs font-medium text-foreground truncate leading-tight">
-                            {asset.title ?? asset.file_name ?? '—'}
+                            {asset.title ?? '—'}
                           </p>
                           {asset.public_asset_id && (
                             <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5">
