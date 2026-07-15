@@ -1,30 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { scanRowForSensitiveData, scanColumnNamesForSensitiveData } from '@/lib/importValidator';
 
 // ============================================================
-// SECURITY PATTERNS — reject any row containing these
+// SECURITY PATTERNS — now handled by shared importValidator
+// (REJECT_PATTERNS, NUMERIC_COLUMNS, validateSensitiveValue,
+//  scanRowForSensitiveData, scanColumnNamesForSensitiveData)
 // ============================================================
-const REJECT_PATTERNS = [
-  { pattern: /[A-Za-z]:\\/, label: 'Windows absolute path (C:\\)' },
-  { pattern: /\/Users\//, label: 'macOS user path (/Users/)' },
-  { pattern: /dropbox/i, label: 'Dropbox path' },
-  // GPS: decimal coordinates, DMS notation, or explicit GPS/lat/lon fields
-  { pattern: /\b\d{1,3}\.\d{4,}\s*,\s*[-]?\d{1,3}\.\d{4,}\b/, label: 'GPS decimal coordinates' },
-  { pattern: /\b(?:lat(?:itude)?|lon(?:gitude)?|gps)[_\s:=]+[-\d.]+/i, label: 'GPS/latitude/longitude field' },
-  { pattern: /\bgps\b/i, label: 'GPS keyword' },
-  // Email
-  { pattern: /\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}\b/i, label: 'Email address' },
-  // Phone (7+ digit sequences with separators)
-  { pattern: /(?<!\d)(?:\+?\d[\d\s\-().]{6,}\d)(?!\d)/, label: 'Phone number' },
-  // Credentials
-  { pattern: /\b(?:secret|api[_-]?key|password|token|private[_-]?key)\b/i, label: 'Secret/credential' },
-  // Original file paths
-  { pattern: /\/originals?\//i, label: 'Original file path' },
-  { pattern: /original[_-]?hd/i, label: 'Original HD reference' },
-  // SQLite / database files
-  { pattern: /\.sqlite[3]?\b/i, label: 'SQLite file reference' },
-  { pattern: /\.db\b/i, label: 'Database file reference' },
-];
 
 // MIME types allowed for media uploads
 const ALLOWED_MIME_TYPES = new Set([
@@ -40,26 +22,30 @@ function slugify(text: string): string {
     .replace(/^-+|-+$/g, '');
 }
 
-function scanForRejectedPatterns(value: string): string | null {
-  for (const { pattern, label } of REJECT_PATTERNS) {
-    if (pattern.test(value)) return label;
+function validateRow(
+  row: Record<string, string>,
+  rowIndex: number
+): { valid: boolean; reason?: string } {
+  // Scan each cell individually (per-cell scanning prevents false positives
+  // such as width=3840 + height=2160 being joined into "3840 2160" and
+  // misidentified as a phone number).
+  const cellMatch = scanRowForSensitiveData(row);
+  if (cellMatch) {
+    return {
+      valid: false,
+      reason: `Row ${rowIndex + 1} — column ${cellMatch.columnName} — ${cellMatch.rejectionType}`,
+    };
   }
-  return null;
-}
 
-function validateRow(row: Record<string, string>, rowIndex: number): { valid: boolean; reason?: string } {
-  // Scan all values
-  const allValues = Object.values(row).join(' ');
-  const rejection = scanForRejectedPatterns(allValues);
-  if (rejection) {
-    return { valid: false, reason: `Row ${rowIndex + 1}: Rejected — ${rejection}` };
+  // Scan column names themselves for sensitive patterns
+  const colMatch = scanColumnNamesForSensitiveData(Object.keys(row));
+  if (colMatch) {
+    return {
+      valid: false,
+      reason: `Row ${rowIndex + 1} — column name "${colMatch.columnName}" — ${colMatch.rejectionType}`,
+    };
   }
-  // Also scan keys (column names) for sensitive field names
-  const allKeys = Object.keys(row).join(' ');
-  const keyRejection = scanForRejectedPatterns(allKeys);
-  if (keyRejection) {
-    return { valid: false, reason: `Row ${rowIndex + 1}: Rejected — sensitive column detected (${keyRejection})` };
-  }
+
   if (!row.title || row.title.trim() === '') {
     return { valid: false, reason: `Row ${rowIndex + 1}: Missing required field 'title'` };
   }
@@ -144,10 +130,11 @@ export async function POST(request: NextRequest) {
       const validation = validateRow(row, idx);
       if (!validation.valid) {
         rejectedRows.push({ row: idx + 1, reason: validation.reason! });
-        // Track if it was a sensitive data rejection
-        if (validation.reason?.includes('Rejected —')) {
-          const match = validation.reason.match(/Rejected — (.+)$/);
-          if (match) sensitiveDataFound.push(`Row ${idx + 1}: ${match[1]}`);
+        // Track sensitive data rejections (format: "Row X — column Y — Rule")
+        // Exclude duplicate and missing-field rejections
+        const reason = validation.reason || '';
+        if (!reason.includes('Duplicate') && !reason.includes('Missing required field')) {
+          sensitiveDataFound.push(reason);
         }
         return;
       }

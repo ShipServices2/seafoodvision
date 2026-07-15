@@ -1,11 +1,11 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ChevronLeft, ChevronRight, Heart, Plus, Image as ImageIcon, CheckCircle2, Camera, ImageOff } from 'lucide-react';
-import { useState } from 'react';
 import type { ViewMode } from './LibraryContent';
 import Badge from '@/components/ui/Badge';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 // Compatible asset shape (works for both DB assets and demo assets)
 interface AssetCardData {
@@ -34,6 +34,10 @@ interface AssetCardData {
   isDemo: boolean;
   emoji: string;
   bgColor: string;
+  // Storage file info for signed URL generation
+  thumbnailBucket?: string | null;
+  thumbnailPath?: string | null;
+  // Legacy — kept for backward compat but ignored (use bucket+path)
   thumbnailUrl?: string | null;
 }
 
@@ -49,6 +53,22 @@ interface LibraryGridProps {
   onItemsPerPageChange: (n: number) => void;
 }
 
+// Hook: generate a signed URL for a private storage object
+function useSignedUrl(bucket: string | null | undefined, path: string | null | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!bucket || !path) { setUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(bucket, path, 3600).then((signed) => {
+      if (!cancelled) setUrl(signed);
+    });
+    return () => { cancelled = true; };
+  }, [bucket, path]);
+
+  return url;
+}
+
 function AssetThumbnail({
   asset,
   size = 'card',
@@ -57,7 +77,8 @@ function AssetThumbnail({
   size?: 'card' | 'list';
 }) {
   const [imgError, setImgError] = useState(false);
-  const hasImage = !!asset.thumbnailUrl && !imgError;
+  const signedUrl = useSignedUrl(asset.thumbnailBucket, asset.thumbnailPath);
+  const hasImage = !!signedUrl && !imgError;
 
   if (size === 'list') {
     return (
@@ -65,7 +86,7 @@ function AssetThumbnail({
         {hasImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={asset.thumbnailUrl!}
+            src={signedUrl!}
             alt={asset.title}
             className="w-full h-full object-cover"
             onError={() => setImgError(true)}
@@ -87,7 +108,7 @@ function AssetThumbnail({
       {hasImage ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={asset.thumbnailUrl!}
+          src={signedUrl!}
           alt={asset.title}
           className="w-full h-full object-cover"
           onError={() => setImgError(true)}
@@ -119,8 +140,8 @@ function AssetThumbnail({
         )}
       </div>
 
-      {/* No-image indicator */}
-      {!hasImage && asset.isRealPhoto && (
+      {/* No-image indicator — only when real photo but no storage file */}
+      {!hasImage && asset.isRealPhoto && asset.thumbnailPath && (
         <div className="absolute top-2 right-2">
           <span className="inline-flex items-center gap-1 bg-amber-50/90 border border-amber-200 text-amber-700 text-xs px-1.5 py-0.5 rounded-full font-medium">
             <ImageOff size={9} />
@@ -248,33 +269,13 @@ function AssetListRow({ asset }: { asset: AssetCardData }) {
         <button
           onClick={() => setFavorited(!favorited)}
           aria-label={favorited ? 'Remove from favorites' : 'Add to favorites'}
-          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-150 active:scale-90 ${
-            favorited ? 'bg-red-50 text-red-500' : 'text-muted-foreground hover:text-red-500 hover:bg-red-50'
+          className={`w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-150 active:scale-90 border ${
+            favorited ? 'border-red-200 bg-red-50 text-red-500' : 'border-border bg-card text-muted-foreground hover:text-red-500'
           }`}
         >
           <Heart size={13} fill={favorited ? 'currentColor' : 'none'} />
         </button>
-        <button
-          aria-label="Add to collection"
-          className="w-7 h-7 rounded-lg text-muted-foreground hover:text-secondary hover:bg-sky-50 flex items-center justify-center transition-all duration-150 active:scale-90"
-        >
-          <Plus size={13} />
-        </button>
       </div>
-    </div>
-  );
-}
-
-function EmptyState() {
-  return (
-    <div className="flex flex-col items-center justify-center py-20 text-center">
-      <div className="w-16 h-16 rounded-2xl bg-muted flex items-center justify-center mb-4">
-        <ImageIcon size={28} className="text-muted-foreground" />
-      </div>
-      <h3 className="text-base font-semibold text-foreground mb-2">No assets match your filters</h3>
-      <p className="text-sm text-muted-foreground max-w-sm leading-relaxed">
-        The current filter combination returned no results. Try removing some filters or broadening your search to see more assets.
-      </p>
     </div>
   );
 }
@@ -290,26 +291,28 @@ export default function LibraryGrid({
   onPageChange,
   onItemsPerPageChange,
 }: LibraryGridProps) {
-  if (assets.length === 0) return <EmptyState />;
-
-  const pageNumbers: number[] = [];
-  const maxVisible = 5;
-  let start = Math.max(1, currentPage - Math.floor(maxVisible / 2));
-  const end = Math.min(totalPages, start + maxVisible - 1);
-  if (end - start < maxVisible - 1) start = Math.max(1, end - maxVisible + 1);
-  for (let i = start; i <= end; i++) pageNumbers.push(i);
+  if (assets.length === 0) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20 text-center">
+        <ImageIcon size={40} className="text-muted-foreground/40 mb-4" />
+        <h3 className="text-base font-semibold text-foreground mb-1">No assets found</h3>
+        <p className="text-sm text-muted-foreground max-w-xs">
+          Try adjusting your filters or search terms to find what you&apos;re looking for.
+        </p>
+      </div>
+    );
+  }
 
   return (
-    <div className="flex flex-col gap-5">
-      {/* Grid or List */}
+    <div>
       {viewMode === 'grid' ? (
-        <div className="grid grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-4">
           {assets.map((asset) => (
             <AssetGridCard key={asset.id} asset={asset} />
           ))}
         </div>
       ) : (
-        <div className="flex flex-col gap-2.5">
+        <div className="flex flex-col gap-2">
           {assets.map((asset) => (
             <AssetListRow key={asset.id} asset={asset} />
           ))}
@@ -318,86 +321,60 @@ export default function LibraryGrid({
 
       {/* Pagination */}
       {totalPages > 1 && (
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-4 border-t border-border">
-          {/* Items per page */}
+        <div className="mt-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2 text-sm text-muted-foreground">
             <span>Show</span>
             <select
               value={itemsPerPage}
               onChange={(e) => onItemsPerPageChange(Number(e.target.value))}
-              className="input-base py-1.5 px-3 w-auto text-sm"
-              aria-label="Items per page"
+              className="input-base text-sm py-1 px-2 w-auto"
             >
               {itemsPerPageOptions.map((n) => (
-                <option key={`ipp-${n}`} value={n}>{n}</option>
+                <option key={n} value={n}>{n}</option>
               ))}
             </select>
-            <span>
-              of <span className="font-mono-data font-semibold text-foreground">{totalResults}</span> assets
-            </span>
+            <span>per page · {totalResults.toLocaleString()} total</span>
           </div>
 
-          {/* Page buttons */}
           <div className="flex items-center gap-1">
             <button
               onClick={() => onPageChange(currentPage - 1)}
-              disabled={currentPage === 1}
-              className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
+              disabled={currentPage <= 1}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Previous page"
             >
               <ChevronLeft size={14} />
             </button>
 
-            {start > 1 && (
-              <>
+            {Array.from({ length: Math.min(totalPages, 7) }, (_, i) => {
+              let page: number;
+              if (totalPages <= 7) {
+                page = i + 1;
+              } else if (currentPage <= 4) {
+                page = i + 1;
+              } else if (currentPage >= totalPages - 3) {
+                page = totalPages - 6 + i;
+              } else {
+                page = currentPage - 3 + i;
+              }
+              return (
                 <button
-                  onClick={() => onPageChange(1)}
-                  className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-sm text-muted-foreground hover:bg-muted transition-colors duration-150"
+                  key={page}
+                  onClick={() => onPageChange(page)}
+                  className={`w-8 h-8 flex items-center justify-center rounded-lg text-sm font-medium transition-colors ${
+                    page === currentPage
+                      ? 'bg-secondary text-white' :'border border-border bg-card text-muted-foreground hover:bg-muted'
+                  }`}
                 >
-                  1
+                  {page}
                 </button>
-                {start > 2 && (
-                  <span className="w-8 h-8 flex items-center justify-center text-muted-foreground text-sm">
-                    …
-                  </span>
-                )}
-              </>
-            )}
-
-            {pageNumbers.map((n) => (
-              <button
-                key={`page-${n}`}
-                onClick={() => onPageChange(n)}
-                className={`w-8 h-8 rounded-lg border flex items-center justify-center text-sm font-medium transition-colors duration-150 ${
-                  n === currentPage
-                    ? 'bg-primary border-primary text-white' :'border-border text-muted-foreground hover:bg-muted'
-                }`}
-                aria-current={n === currentPage ? 'page' : undefined}
-              >
-                {n}
-              </button>
-            ))}
-
-            {end < totalPages && (
-              <>
-                {end < totalPages - 1 && (
-                  <span className="w-8 h-8 flex items-center justify-center text-muted-foreground text-sm">
-                    …
-                  </span>
-                )}
-                <button
-                  onClick={() => onPageChange(totalPages)}
-                  className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-sm text-muted-foreground hover:bg-muted transition-colors duration-150"
-                >
-                  {totalPages}
-                </button>
-              </>
-            )}
+              );
+            })}
 
             <button
               onClick={() => onPageChange(currentPage + 1)}
-              disabled={currentPage === totalPages}
-              className="w-8 h-8 rounded-lg border border-border flex items-center justify-center text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors duration-150"
+              disabled={currentPage >= totalPages}
+              className="w-8 h-8 flex items-center justify-center rounded-lg border border-border bg-card text-muted-foreground hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
               aria-label="Next page"
             >
               <ChevronRight size={14} />

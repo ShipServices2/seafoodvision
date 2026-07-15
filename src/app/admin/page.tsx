@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck } from 'lucide-react';
+import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck, HardDrive, ShoppingCart, Brain, Sparkles } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
@@ -174,6 +174,51 @@ export default function AdminPage() {
       description: 'Validate and preview Codex CSV exports',
       stat: null,
       statLabel: null,
+    },
+    {
+      href: '/admin/reconcile-storage',
+      icon: HardDrive,
+      label: 'Reconcile Storage',
+      description: 'Link already-uploaded Storage files to existing assets — no reimports',
+      stat: null,
+      statLabel: null,
+      badge: 'Storage',
+    },
+    {
+      href: '/admin/commerce',
+      icon: ShoppingCart,
+      label: 'Commerce',
+      description: 'Dodo Payments infrastructure — orders, subscriptions, credits, webhooks',
+      stat: null,
+      statLabel: null,
+      badge: 'Phase 7.2',
+    },
+    {
+      href: '/admin/metadata-review',
+      icon: ClipboardCheck,
+      label: 'Metadata Review Center',
+      description: 'Validate, correct and publish Codex metadata — species, synonyms, keywords, bulk review',
+      stat: null,
+      statLabel: null,
+      badge: 'Phase 7.15',
+    },
+    {
+      href: '/admin/ai-identification',
+      icon: Brain,
+      label: 'AI Identification Center',
+      description: 'AI species recognition engine — Top 5 candidates, bulk identification, human validation',
+      stat: null,
+      statLabel: null,
+      badge: 'Phase 8',
+    },
+    {
+      href: '/admin/ai-studio',
+      icon: Sparkles,
+      label: 'AI Identification Studio',
+      description: 'Seafood Intelligence Engine — batch identification, Vision Engine, human validation, propagation',
+      stat: null,
+      statLabel: null,
+      badge: 'SIE · Phase 8',
     },
     {
       href: '/licensing-center',

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, CheckCircle2, Camera, ImageOff } from 'lucide-react';
-import { fetchSimilarAssets, getAssetThumbnailUrl, type AssetRow } from '@/lib/supabase/assetService';
+import { fetchSimilarAssets, getAssetThumbnailFile, getSignedStorageUrl, type AssetRow } from '@/lib/supabase/assetService';
 
 interface SimilarAssetsProps {
   currentId: string;
@@ -23,10 +23,21 @@ const categoryEmoji: Record<string, { emoji: string; bgColor: string }> = {
 
 function SimilarAssetCard({ asset }: { asset: AssetRow }) {
   const [imgError, setImgError] = useState(false);
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const meta = categoryEmoji[asset.category || ''] || { emoji: '🐠', bgColor: 'from-blue-200 to-blue-100' };
   const scientificName = (asset.species as { scientific_name?: string } | null)?.scientific_name || '';
-  const thumbnailUrl = getAssetThumbnailUrl(asset);
-  const hasImage = !!thumbnailUrl && !imgError;
+  const thumbFile = getAssetThumbnailFile(asset);
+
+  useEffect(() => {
+    if (!thumbFile?.storage_bucket || !thumbFile?.storage_path) { setSignedUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(thumbFile.storage_bucket, thumbFile.storage_path, 3600).then((url) => {
+      if (!cancelled) setSignedUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [thumbFile?.storage_bucket, thumbFile?.storage_path]);
+
+  const hasImage = !!signedUrl && !imgError;
 
   return (
     <Link
@@ -37,7 +48,7 @@ function SimilarAssetCard({ asset }: { asset: AssetRow }) {
         {hasImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={thumbnailUrl!}
+            src={signedUrl!}
             alt={asset.title}
             className="w-full h-full object-cover"
             onError={() => setImgError(true)}
@@ -58,7 +69,7 @@ function SimilarAssetCard({ asset }: { asset: AssetRow }) {
             </span>
           )}
         </div>
-        {!hasImage && asset.is_real_photo && (
+        {!hasImage && asset.is_real_photo && thumbFile?.storage_path && (
           <div className="absolute bottom-1 right-1">
             <ImageOff size={10} className="text-amber-500" />
           </div>

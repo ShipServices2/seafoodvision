@@ -1,19 +1,35 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { ImageOff } from 'lucide-react';
 import type { Asset } from '@/lib/supabase/types';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 interface SpeciesAssetCardProps {
   asset: Asset;
-  thumbnailUrl: string | null;
+  // Storage file info for signed URL generation
+  thumbnailBucket?: string | null;
+  thumbnailPath?: string | null;
+  // Legacy — kept for backward compat
+  thumbnailUrl?: string | null;
   emoji: string;
 }
 
-export default function SpeciesAssetCard({ asset, thumbnailUrl, emoji }: SpeciesAssetCardProps) {
+export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath, emoji }: SpeciesAssetCardProps) {
   const [imgError, setImgError] = useState(false);
-  const hasImage = !!thumbnailUrl && !imgError;
+  const [signedUrl, setSignedUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!thumbnailBucket || !thumbnailPath) { setSignedUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(thumbnailBucket, thumbnailPath, 3600).then((url) => {
+      if (!cancelled) setSignedUrl(url);
+    });
+    return () => { cancelled = true; };
+  }, [thumbnailBucket, thumbnailPath]);
+
+  const hasImage = !!signedUrl && !imgError;
 
   return (
     <Link
@@ -24,7 +40,7 @@ export default function SpeciesAssetCard({ asset, thumbnailUrl, emoji }: Species
         {hasImage ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={thumbnailUrl!}
+            src={signedUrl!}
             alt={asset.title}
             className="w-full h-full object-cover"
             onError={() => setImgError(true)}
@@ -32,7 +48,7 @@ export default function SpeciesAssetCard({ asset, thumbnailUrl, emoji }: Species
         ) : (
           <span className="text-3xl select-none">{emoji}</span>
         )}
-        {!hasImage && asset.is_real_photo && (
+        {!hasImage && asset.is_real_photo && thumbnailPath && (
           <div className="absolute bottom-1 right-1">
             <ImageOff size={10} className="text-amber-500" />
           </div>
