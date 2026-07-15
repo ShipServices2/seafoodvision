@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, Filter, SlidersHorizontal, RefreshCw, Upload, Fish, Clock, Hash, Globe, Star } from 'lucide-react';
+import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, Filter } from 'lucide-react';
 import { generateEnrichedMockCandidates, MockAssetContext } from '@/lib/ai/mockEngine';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -24,18 +24,8 @@ interface AssetRow {
   created_at: string | null;
   import_batch_id: string | null;
   is_demo: boolean | null;
-  // joined
   species_common_name?: string | null;
-  species_scientific_name?: string | null;
-  // metadata completeness flags (computed)
-  has_scientific_name?: boolean;
-  has_common_name?: boolean;
-  has_keywords?: boolean;
-  has_description?: boolean;
-  // confidence from sie_jobs
-  confidence?: number | null;
-  // review status from metadata_review
-  metadata_review_status?: string | null;
+  ai_identified?: boolean;
 }
 
 interface FilterState {
@@ -44,12 +34,33 @@ interface FilterState {
   category: string;
   importBatch: string;
   textSearch: string;
-  pilot: boolean;
-  review100: boolean;
-  review500: boolean;
+  aiStatus: string;
 }
 
-type BatchSize = 1 | 50 | 100 | 500 | 'all';
+interface SIEJob {
+  id: string;
+  asset_id: string | null;
+  public_asset_id: string | null;
+  current_name: string | null;
+  job_status: string;
+  created_at: string;
+  global_confidence: number | null;
+}
+
+interface BatchJob {
+  id: string;
+  jobIds: string[];
+  assetCount: number;
+  reviewer: string;
+  createdAt: string;
+  status: 'queued' | 'running' | 'completed' | 'failed' | 'paused';
+  processed: number;
+  errors: string[];
+  startedAt?: number;
+  estimatedMs?: number;
+}
+
+const PAGE_SIZE = 50;
 
 const PIPELINE_STEPS = [
   { key: 'analyse', label: 'Analyse Vision', icon: Eye },
@@ -61,31 +72,28 @@ const PIPELINE_STEPS = [
   { key: 'done', label: 'Terminé', icon: CheckCircle2 },
 ];
 
-const BATCH_OPTIONS: { label: string; value: BatchSize }[] = [
-  { label: '1 photo', value: 1 },
-  { label: '50 photos', value: 50 },
-  { label: '100 photos', value: 100 },
-  { label: '500 photos', value: 500 },
-  { label: 'Tout le résultat filtré', value: 'all' },
-];
-
 const REVIEW_STATUS_OPTIONS = [
-  { value: '', label: 'Tous les statuts' },
+  { value: '', label: 'All statuses' },
   { value: 'approved', label: 'Approved' },
   { value: 'under_review', label: 'Under Review' },
-  { value: 'draft', label: 'Unknown / Draft' },
+  { value: 'draft', label: 'Draft / Unknown' },
   { value: 'imported', label: 'Imported' },
   { value: 'rejected', label: 'Rejected' },
 ];
 
 const METADATA_FILTER_OPTIONS = [
-  { value: '', label: 'Tous les actifs' },
-  { value: 'without_species', label: 'Without Species' },
-  { value: 'without_metadata', label: 'Without Metadata' },
+  { value: '', label: 'All assets' },
+  { value: 'without_species', label: 'Unknown species' },
   { value: 'without_scientific_name', label: 'Without Scientific Name' },
   { value: 'without_common_name', label: 'Without Common Name' },
   { value: 'without_keywords', label: 'Without Keywords' },
   { value: 'without_description', label: 'Without Description' },
+];
+
+const AI_STATUS_OPTIONS = [
+  { value: '', label: 'All AI status' },
+  { value: 'not_identified', label: 'Not identified' },
+  { value: 'already_identified', label: 'Already identified' },
 ];
 
 const STATUS_COLORS: Record<string, string> = {
@@ -106,14 +114,16 @@ export default function AIStudioIdentifyPage() {
   const router = useRouter();
   const supabase = createClient();
 
+  // Gallery state
   const [assets, setAssets] = useState<AssetRow[]>([]);
   const [totalCount, setTotalCount] = useState(0);
+  const [currentPage, setCurrentPage] = useState(0);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
-  const [batchSize, setBatchSize] = useState<BatchSize>(50);
   const [assetsLoading, setAssetsLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
   const [importBatches, setImportBatches] = useState<{ id: string; name: string }[]>([]);
+  const [identifiedAssetIds, setIdentifiedAssetIds] = useState<Set<string>>(new Set());
 
   const [filters, setFilters] = useState<FilterState>({
     reviewStatus: '',
@@ -121,22 +131,20 @@ export default function AIStudioIdentifyPage() {
     category: '',
     importBatch: '',
     textSearch: '',
-    pilot: false,
-    review100: false,
-    review500: false,
+    aiStatus: '',
   });
   const [searchInput, setSearchInput] = useState('');
 
-  // Pipeline state
-  const [running, setRunning] = useState(false);
+  // Batch job state
+  const [batchJob, setBatchJob] = useState<BatchJob | null>(null);
   const [currentStepIdx, setCurrentStepIdx] = useState(-1);
-  const [progressPct, setProgressPct] = useState(0);
-  const [processedCount, setProcessedCount] = useState(0);
-  const [totalToProcess, setTotalToProcess] = useState(0);
-  const [jobsCreated, setJobsCreated] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const abortRef = useRef(false);
+  const pauseRef = useRef(false);
+
+  // Recent jobs
+  const [recentJobs, setRecentJobs] = useState<SIEJob[]>([]);
 
   useEffect(() => {
     if (!loading && !user) { router.replace('/auth?next=/admin/ai-studio/identify'); return; }
@@ -145,68 +153,57 @@ export default function AIStudioIdentifyPage() {
     }
   }, [user, profile, loading, router]);
 
-  // ── Fetch assets ────────────────────────────────────────────────────────────
+  // ── Fetch identified asset IDs ──────────────────────────────────────────────
+  const fetchIdentifiedIds = useCallback(async () => {
+    const { data } = await supabase
+      .from('sie_jobs')
+      .select('asset_id')
+      .not('asset_id', 'is', null)
+      .in('job_status', ['proposals_ready', 'validated', 'under_review']);
+    const ids = new Set<string>((data ?? []).map((r: { asset_id: string }) => r.asset_id).filter(Boolean));
+    setIdentifiedAssetIds(ids);
+  }, [supabase]);
 
-  const fetchAssets = useCallback(async () => {
+  // ── Fetch assets ────────────────────────────────────────────────────────────
+  const fetchAssets = useCallback(async (page = 0) => {
     if (!profile) return;
     setAssetsLoading(true);
 
+    const from = page * PAGE_SIZE;
+    const to = from + PAGE_SIZE - 1;
+
     let query = supabase
       .from('assets')
-      .select(`
-        id, public_asset_id, title, file_name, category,
-        thumbnail_url, review_status, species_id, created_at,
-        import_batch_id, is_demo
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false });
+      .select('id, public_asset_id, title, file_name, category, thumbnail_url, review_status, species_id, created_at, import_batch_id, is_demo', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(from, to);
 
-    // Text search
     if (filters.textSearch) {
       query = query.or(`title.ilike.%${filters.textSearch}%,file_name.ilike.%${filters.textSearch}%,public_asset_id.ilike.%${filters.textSearch}%`);
     }
-
-    // Review status filter
-    if (filters.reviewStatus) {
-      query = query.eq('review_status', filters.reviewStatus);
-    }
-
-    // Category filter
-    if (filters.category) {
-      query = query.eq('category', filters.category);
-    }
-
-    // Import batch filter
-    if (filters.importBatch) {
-      query = query.eq('import_batch_id', filters.importBatch);
-    }
-
-    // Metadata completeness filters
-    if (filters.metadataFilter === 'without_species') {
-      query = query.is('species_id', null);
-    }
-
-    // Pilot / review batch flags
-    if (filters.pilot) {
-      query = query.eq('is_demo', false);
-    }
-
-    // Limit
-    const limit = batchSize === 'all' ? 2000 : (batchSize as number);
-    query = query.limit(limit);
+    if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
+    if (filters.category) query = query.eq('category', filters.category);
+    if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
+    if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
 
     const { data, count } = await query;
-    const rows: AssetRow[] = (data ?? []).map((a: AssetRow) => ({
+    let rows: AssetRow[] = (data ?? []).map((a: AssetRow) => ({
       ...a,
-      has_scientific_name: false,
-      has_common_name: false,
-      has_keywords: false,
-      has_description: false,
+      ai_identified: identifiedAssetIds.has(a.id),
     }));
+
+    // AI status filter (client-side after fetch)
+    if (filters.aiStatus === 'not_identified') {
+      rows = rows.filter((r) => !identifiedAssetIds.has(r.id));
+    } else if (filters.aiStatus === 'already_identified') {
+      rows = rows.filter((r) => identifiedAssetIds.has(r.id));
+    }
 
     setAssets(rows);
     setTotalCount(count ?? 0);
+    setCurrentPage(page);
     setAssetsLoading(false);
-  }, [profile, filters, batchSize, supabase]);
+  }, [profile, filters, identifiedAssetIds, supabase]);
 
   const fetchMeta = useCallback(async () => {
     if (!profile) return;
@@ -218,11 +215,21 @@ export default function AIStudioIdentifyPage() {
     setImportBatches((batches.data ?? []) as { id: string; name: string }[]);
   }, [profile, supabase]);
 
-  useEffect(() => { fetchAssets(); }, [fetchAssets]);
+  const fetchRecentJobs = useCallback(async () => {
+    const { data } = await supabase
+      .from('sie_jobs')
+      .select('id, asset_id, public_asset_id, current_name, job_status, created_at, global_confidence')
+      .order('created_at', { ascending: false })
+      .limit(5);
+    setRecentJobs(data ?? []);
+  }, [supabase]);
+
+  useEffect(() => { fetchIdentifiedIds(); }, [fetchIdentifiedIds]);
+  useEffect(() => { fetchAssets(0); }, [filters]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => { fetchMeta(); }, [fetchMeta]);
+  useEffect(() => { fetchRecentJobs(); }, [fetchRecentJobs]);
 
   // ── Selection ───────────────────────────────────────────────────────────────
-
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -231,7 +238,7 @@ export default function AIStudioIdentifyPage() {
     });
   };
 
-  const selectAll = () => setSelectedIds(new Set(assets.map((a) => a.id)));
+  const selectPage = () => setSelectedIds(new Set(assets.map((a) => a.id)));
   const clearSelection = () => setSelectedIds(new Set());
 
   const selectCount = (n: number) => {
@@ -239,65 +246,104 @@ export default function AIStudioIdentifyPage() {
     setSelectedIds(new Set(ids));
   };
 
+  // Select all filtered assets (up to 2000)
+  const selectAllFiltered = useCallback(async () => {
+    let query = supabase
+      .from('assets')
+      .select('id')
+      .order('created_at', { ascending: false })
+      .limit(2000);
+
+    if (filters.textSearch) query = query.or(`title.ilike.%${filters.textSearch}%,file_name.ilike.%${filters.textSearch}%`);
+    if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
+    if (filters.category) query = query.eq('category', filters.category);
+    if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
+    if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
+
+    const { data } = await query;
+    setSelectedIds(new Set((data ?? []).map((r: { id: string }) => r.id)));
+  }, [filters, supabase]);
+
+  // ── ETA calculation ──────────────────────────────────────────────────────────
+  const calcETA = (processed: number, total: number, startedAt: number): string => {
+    if (processed === 0) return '—';
+    const elapsed = Date.now() - startedAt;
+    const rate = processed / elapsed; // assets per ms
+    const remaining = (total - processed) / rate;
+    if (remaining < 60000) return `~${Math.ceil(remaining / 1000)}s`;
+    return `~${Math.ceil(remaining / 60000)}min`;
+  };
+
   // ── Run identification ───────────────────────────────────────────────────────
-
   const runIdentification = async () => {
-    const toProcess = selectedIds.size > 0
-      ? assets.filter((a) => selectedIds.has(a.id))
-      : assets;
+    const toProcessIds = selectedIds.size > 0
+      ? Array.from(selectedIds)
+      : assets.map((a) => a.id);
 
-    if (toProcess.length === 0) { setError('Sélectionnez au moins une photo.'); return; }
+    if (toProcessIds.length === 0) { setError('Select at least one asset.'); return; }
 
     setError(null);
     setSuccess(null);
-    setRunning(true);
-    setCurrentStepIdx(0);
-    setProgressPct(5);
-    setProcessedCount(0);
-    setTotalToProcess(toProcess.length);
-    setJobsCreated(0);
     abortRef.current = false;
+    pauseRef.current = false;
 
-    // Step-by-step pipeline animation
-    const stepDurations = [500, 600, 500, 400, 500, 400, 300];
-    for (let i = 0; i < PIPELINE_STEPS.length - 1; i++) {
+    const batchId = `batch-${Date.now()}`;
+    const newBatch: BatchJob = {
+      id: batchId,
+      jobIds: [],
+      assetCount: toProcessIds.length,
+      reviewer: profile?.full_name ?? profile?.email ?? 'Reviewer',
+      createdAt: new Date().toISOString(),
+      status: 'running',
+      processed: 0,
+      errors: [],
+      startedAt: Date.now(),
+      estimatedMs: toProcessIds.length * 200,
+    };
+    setBatchJob(newBatch);
+
+    // Pipeline animation (initial steps)
+    for (let i = 0; i < 5; i++) {
       if (abortRef.current) break;
       setCurrentStepIdx(i);
-      setProgressPct(Math.round(((i + 1) / PIPELINE_STEPS.length) * 60));
-      await new Promise((r) => setTimeout(r, stepDurations[i]));
+      await new Promise((r) => setTimeout(r, 400 + i * 100));
     }
 
-    // Create SIE jobs + run Mock Engine v2 per asset
-    let created = 0;
-    const batchChunk = 20; // process in chunks to avoid timeout
+    const CHUNK = 20;
+    const allJobIds: string[] = [];
+    let errorCount = 0;
 
-    for (let i = 0; i < toProcess.length; i += batchChunk) {
+    for (let i = 0; i < toProcessIds.length; i += CHUNK) {
+      // Pause support
+      while (pauseRef.current && !abortRef.current) {
+        setBatchJob((prev) => prev ? { ...prev, status: 'paused' } : prev);
+        await new Promise((r) => setTimeout(r, 500));
+      }
       if (abortRef.current) break;
-      const chunk = toProcess.slice(i, i + batchChunk);
 
-      // ── Fetch full metadata for this chunk (species + keywords) ────────────
-      const chunkIds = chunk.map((a) => a.id);
-      const { data: enrichedAssets } = await supabase
+      setBatchJob((prev) => prev ? { ...prev, status: 'running' } : prev);
+
+      const chunkIds = toProcessIds.slice(i, i + CHUNK);
+
+      // Fetch full metadata for chunk
+      const { data: enrichedAssets, error: fetchErr } = await supabase
         .from('assets')
         .select(`
           id, title, file_name, category, product_form, packaging, description,
-          species:species_id (
-            common_name, scientific_name, family
-          ),
-          asset_keywords (
-            keywords ( term )
-          )
+          species:species_id (common_name, scientific_name, family),
+          asset_keywords (keywords (term))
         `)
         .in('id', chunkIds);
 
-      // Build a lookup map for enriched data
+      if (fetchErr) {
+        errorCount++;
+        setBatchJob((prev) => prev ? { ...prev, errors: [...prev.errors, `Chunk ${i}: ${fetchErr.message}`] } : prev);
+        continue;
+      }
+
       const enrichedMap = new Map<string, {
-        title: string | null;
-        file_name: string | null;
-        category: string | null;
-        product_form: string | null;
-        packaging: string | null;
-        description: string | null;
+        title: string | null; file_name: string | null; category: string | null;
+        product_form: string | null; packaging: string | null; description: string | null;
         species: { common_name: string; scientific_name: string; family: string } | null;
         keywords: string[];
       }>();
@@ -308,29 +354,26 @@ export default function AIStudioIdentifyPage() {
           .map((ak: { keywords: { term: string } | null }) => ak.keywords?.term)
           .filter((t: string | undefined): t is string => !!t);
         enrichedMap.set(ea.id, {
-          title: ea.title ?? null,
-          file_name: ea.file_name ?? null,
-          category: ea.category ?? null,
-          product_form: ea.product_form ?? null,
-          packaging: ea.packaging ?? null,
-          description: ea.description ?? null,
-          species: speciesData,
-          keywords: kws,
+          title: ea.title ?? null, file_name: ea.file_name ?? null,
+          category: ea.category ?? null, product_form: ea.product_form ?? null,
+          packaging: ea.packaging ?? null, description: ea.description ?? null,
+          species: speciesData, keywords: kws,
         });
       }
 
-      // ── Build job rows with enriched confidence scores ──────────────────────
-      const jobRows = chunk.map((asset) => {
-        const enriched = enrichedMap.get(asset.id);
+      // Build job rows
+      const jobRows = chunkIds.map((assetId) => {
+        const enriched = enrichedMap.get(assetId);
+        const asset = assets.find((a) => a.id === assetId);
         const hasSpecies = !!(enriched?.species?.common_name);
         const hasKeywords = (enriched?.keywords?.length ?? 0) > 0;
         const hasProductForm = !!(enriched?.product_form);
         const baseConf = hasSpecies ? 88 : hasKeywords ? 74 : 65;
         return {
-          asset_id: asset.id,
-          public_asset_id: asset.public_asset_id ?? null,
-          current_name: enriched?.title ?? asset.title ?? asset.file_name ?? null,
-          current_category: enriched?.category ?? asset.category ?? null,
+          asset_id: assetId,
+          public_asset_id: asset?.public_asset_id ?? null,
+          current_name: enriched?.title ?? asset?.title ?? asset?.file_name ?? null,
+          current_category: enriched?.category ?? asset?.category ?? null,
           job_status: 'proposals_ready',
           progress_step: 'proposals_ready',
           progress_pct: 100,
@@ -344,6 +387,7 @@ export default function AIStudioIdentifyPage() {
           metadata_confidence: Math.round(baseConf * (hasKeywords ? 0.78 : 0.55)),
           documentation_confidence: Math.round(baseConf * 0.4),
           global_confidence: Math.round(baseConf * 0.7 + (baseConf * 0.85) * 0.3),
+          reviewer_id: profile?.id ?? null,
         };
       });
 
@@ -353,16 +397,18 @@ export default function AIStudioIdentifyPage() {
         .select('id, asset_id');
 
       if (jobErr) {
-        setError(`Erreur création jobs: ${jobErr.message}`);
-        setRunning(false);
-        return;
+        errorCount++;
+        setBatchJob((prev) => prev ? { ...prev, errors: [...prev.errors, `Job insert: ${jobErr.message}`] } : prev);
+        continue;
       }
 
-      // ── Generate enriched Top 5 candidates per job ──────────────────────────
+      // Generate Top 5 candidates per job
       const candidateRows: Record<string, unknown>[] = [];
+      const suggestionRows: Record<string, unknown>[] = [];
+
       for (const job of (insertedJobs ?? [])) {
-        const asset = chunk.find((a) => a.id === job.asset_id);
         const enriched = enrichedMap.get(job.asset_id);
+        const asset = assets.find((a) => a.id === job.asset_id);
         const speciesData = enriched?.species ?? null;
         const genus = speciesData?.scientific_name?.split(' ')[0] ?? null;
 
@@ -386,101 +432,75 @@ export default function AIStudioIdentifyPage() {
         const candidates = generateEnrichedMockCandidates(job.id, context);
         for (const c of candidates) {
           candidateRows.push({
-            job_id: job.id,
-            rank: c.rank,
-            common_name: c.common_name,
-            scientific_name: c.scientific_name,
-            family: c.family,
-            genus: c.genus,
-            ai_score: c.ai_score,
-            similarity_score: c.similarity_score,
-            main_reasons: c.main_reasons,
-            product_form: c.product_form,
-            source_provider: c.source_provider,
-            commercial_name: c.commercial_name,
-            description_candidate: c.description_candidate,
-            category_candidate: c.category_candidate,
-            packaging_candidate: c.packaging_candidate,
-            product_candidate: c.product_candidate,
+            job_id: job.id, rank: c.rank, common_name: c.common_name,
+            scientific_name: c.scientific_name, family: c.family, genus: c.genus,
+            ai_score: c.ai_score, similarity_score: c.similarity_score,
+            main_reasons: c.main_reasons, product_form: c.product_form,
+            source_provider: c.source_provider, commercial_name: c.commercial_name,
+            description_candidate: c.description_candidate, category_candidate: c.category_candidate,
+            packaging_candidate: c.packaging_candidate, product_candidate: c.product_candidate,
             keywords_candidate: c.keywords_candidate,
           });
         }
-      }
 
-      if (candidateRows.length > 0) {
-        await supabase.from('sie_species_candidates').insert(candidateRows);
-      }
-
-      // ── Push top candidate to metadata_suggestions as pending review ────────
-      const suggestionRows: Record<string, unknown>[] = [];
-      for (const job of (insertedJobs ?? [])) {
-        const asset = chunk.find((a) => a.id === job.asset_id);
-        const enriched = enrichedMap.get(job.asset_id);
-        const speciesData = enriched?.species ?? null;
-        const genus = speciesData?.scientific_name?.split(' ')[0] ?? null;
-
-        const context: MockAssetContext = {
-          assetId: job.asset_id,
-          title: enriched?.title ?? asset?.title ?? null,
-          fileName: enriched?.file_name ?? null,
-          category: enriched?.category ?? asset?.category ?? null,
-          productForm: enriched?.product_form ?? null,
-          packaging: enriched?.packaging ?? null,
-          description: enriched?.description ?? null,
-          existingSpeciesCommonName: speciesData?.common_name ?? null,
-          existingSpeciesScientificName: speciesData?.scientific_name ?? null,
-          existingSpeciesFamily: speciesData?.family ?? null,
-          existingSpeciesGenus: genus,
-          keywords: enriched?.keywords ?? [],
-          importBatch: asset?.import_batch_id ?? null,
-          folderPath: null,
-        };
-
-        const topCandidate = generateEnrichedMockCandidates(job.id, context)[0];
-        if (asset?.id && topCandidate) {
+        const topCandidate = candidates[0];
+        if (job.asset_id && topCandidate) {
           suggestionRows.push({
-            asset_id: asset.id,
+            asset_id: job.asset_id,
             field_name: 'species_candidate',
             suggested_value: topCandidate.scientific_name,
             source: 'ai_generated',
             confidence_score: Math.min(1, (topCandidate.ai_score ?? 0) / 100),
             status: 'under_review',
-            review_note: `AI Job: ${job.id} | Top candidate: ${topCandidate.common_name} (${topCandidate.scientific_name}) | Confidence: ${topCandidate.ai_score}% | Mock Engine v2 | Validation humaine requise`,
+            review_note: `AI Job: ${job.id} | Top: ${topCandidate.common_name} (${topCandidate.scientific_name}) | ${topCandidate.ai_score}% | Mock Engine v2 | Human validation required`,
           });
         }
+
+        allJobIds.push(job.id);
       }
 
-      if (suggestionRows.length > 0) {
-        await supabase.from('metadata_suggestions').insert(suggestionRows).select('id');
-      }
+      if (candidateRows.length > 0) await supabase.from('sie_species_candidates').insert(candidateRows);
+      if (suggestionRows.length > 0) await supabase.from('metadata_suggestions').insert(suggestionRows);
 
-      created += insertedJobs?.length ?? 0;
-      setProcessedCount(i + chunk.length);
-      setProgressPct(60 + Math.round(((i + chunk.length) / toProcess.length) * 35));
+      const newProcessed = Math.min(i + CHUNK, toProcessIds.length);
+      setBatchJob((prev) => prev ? {
+        ...prev,
+        processed: newProcessed,
+        jobIds: [...prev.jobIds, ...allJobIds.slice(prev.jobIds.length)],
+      } : prev);
+      setCurrentStepIdx(5);
     }
 
-    setCurrentStepIdx(PIPELINE_STEPS.length - 1);
-    setProgressPct(100);
-    setJobsCreated(created);
-    setSuccess(`${created} job(s) créés. ${created * 5} propositions Top 5 générées par Mock Engine v2 (métadonnées enrichies). Résultats disponibles dans Metadata Review Center.`);
-    setRunning(false);
+    setCurrentStepIdx(6);
+    const finalStatus = abortRef.current ? 'failed' : 'completed';
+    setBatchJob((prev) => prev ? {
+      ...prev,
+      status: finalStatus,
+      jobIds: allJobIds,
+      processed: abortRef.current ? prev.processed : toProcessIds.length,
+    } : prev);
+
+    if (!abortRef.current) {
+      setSuccess(`${allJobIds.length} jobs created · ${allJobIds.length * 5} Top 5 proposals generated · ${errorCount > 0 ? `${errorCount} errors` : 'No errors'}`);
+      fetchRecentJobs();
+      fetchIdentifiedIds();
+    }
   };
 
   // ── Filter helpers ───────────────────────────────────────────────────────────
-
-  const updateFilter = (key: keyof FilterState, value: string | boolean) => {
+  const updateFilter = (key: keyof FilterState, value: string) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
+    setCurrentPage(0);
   };
 
   const clearFilters = () => {
-    setFilters({ reviewStatus: '', metadataFilter: '', category: '', importBatch: '', textSearch: '', pilot: false, review100: false, review500: false });
+    setFilters({ reviewStatus: '', metadataFilter: '', category: '', importBatch: '', textSearch: '', aiStatus: '' });
     setSearchInput('');
+    setCurrentPage(0);
   };
 
-  const activeFilterCount = [
-    filters.reviewStatus, filters.metadataFilter, filters.category,
-    filters.importBatch, filters.textSearch, filters.pilot, filters.review100, filters.review500,
-  ].filter(Boolean).length;
+  const activeFilterCount = Object.values(filters).filter(Boolean).length;
+  const totalPages = Math.ceil(totalCount / PAGE_SIZE);
 
   if (loading || !user || !profile) {
     return (
@@ -490,6 +510,13 @@ export default function AIStudioIdentifyPage() {
     );
   }
   if (!['administrator', 'super_admin', 'reviewer'].includes(profile.role)) return null;
+
+  const isRunning = batchJob?.status === 'running';
+  const isPaused = batchJob?.status === 'paused';
+  const isCompleted = batchJob?.status === 'completed';
+  const progressPct = batchJob
+    ? Math.round((batchJob.processed / batchJob.assetCount) * 100)
+    : 0;
 
   return (
     <div className="min-h-screen bg-background">
@@ -504,13 +531,13 @@ export default function AIStudioIdentifyPage() {
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <h1 className="text-xl font-bold text-foreground">AI Studio — Identify with AI</h1>
+                <h1 className="text-xl font-bold text-foreground">AI Gallery — Identify with AI</h1>
                 <span className="text-xs bg-violet-100 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full font-medium">
-                  Mock Engine
+                  Mock Engine v2
                 </span>
               </div>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Galerie Assets · Sélection · Pipeline IA · Propositions → Metadata Review Center
+                Step 1: Select assets · Step 2: Launch AI · Step 3: Review proposals
               </p>
             </div>
           </div>
@@ -521,63 +548,52 @@ export default function AIStudioIdentifyPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
-          {/* ── Left panel: Controls ── */}
+          {/* ── Left panel ── */}
           <div className="space-y-4">
 
-            {/* Batch size */}
+            {/* Selection controls */}
             <div className="bg-card border border-border rounded-xl p-4">
               <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <Hash size={11} />Taille du lot
+                <CheckSquare size={11} />Selection
               </h3>
-              <div className="space-y-1.5">
-                {BATCH_OPTIONS.map((opt) => (
-                  <button key={String(opt.value)} onClick={() => setBatchSize(opt.value)}
-                    className={`w-full text-left px-3 py-2 rounded-lg border text-sm font-medium transition-all ${batchSize === opt.value
-                      ? 'bg-violet-50 border-violet-300 text-violet-700'
-                      : 'bg-muted/30 border-border text-foreground hover:border-violet-200'}`}>
-                    {opt.label}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Quick select */}
-            <div className="bg-card border border-border rounded-xl p-4">
-              <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                <CheckSquare size={11} />Sélection rapide
-              </h3>
-              <div className="grid grid-cols-2 gap-1.5">
+              <div className="grid grid-cols-2 gap-1.5 mb-2">
                 {[1, 50, 100, 500].map((n) => (
                   <button key={n} onClick={() => selectCount(n)}
                     className="px-2 py-1.5 text-xs font-medium bg-muted/40 border border-border rounded-lg hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 transition-all">
-                    {n}
+                    {n} assets
                   </button>
                 ))}
-                <button onClick={selectAll}
-                  className="col-span-2 px-2 py-1.5 text-xs font-medium bg-muted/40 border border-border rounded-lg hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 transition-all">
-                  Tout sélectionner
+              </div>
+              <div className="space-y-1.5">
+                <button onClick={selectPage}
+                  className="w-full px-2 py-1.5 text-xs font-medium bg-muted/40 border border-border rounded-lg hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 transition-all">
+                  Select page ({assets.length})
+                </button>
+                <button onClick={selectAllFiltered}
+                  className="w-full px-2 py-1.5 text-xs font-medium bg-muted/40 border border-border rounded-lg hover:border-violet-300 hover:bg-violet-50 hover:text-violet-700 transition-all">
+                  Select all filtered ({totalCount})
                 </button>
                 {selectedIds.size > 0 && (
                   <button onClick={clearSelection}
-                    className="col-span-2 px-2 py-1.5 text-xs font-medium bg-red-50 border border-red-200 text-red-600 rounded-lg hover:bg-red-100 transition-all">
-                    Tout désélectionner
+                    className="w-full px-2 py-1.5 text-xs font-medium bg-red-50 border border-red-200 text-red-600 rounded-lg hover:bg-red-100 transition-all">
+                    Clear selection
                   </button>
                 )}
               </div>
               {selectedIds.size > 0 && (
-                <p className="text-xs text-violet-600 font-semibold mt-2 text-center">
-                  {selectedIds.size} sélectionné(s)
+                <p className="text-xs text-violet-600 font-semibold mt-2 text-center bg-violet-50 rounded-lg py-1.5">
+                  {selectedIds.size} selected
                 </p>
               )}
             </div>
 
-            {/* Filters toggle */}
+            {/* Filters */}
             <div className="bg-card border border-border rounded-xl p-4">
               <button onClick={() => setShowFilters(!showFilters)}
                 className="w-full flex items-center justify-between text-xs font-semibold text-muted-foreground uppercase tracking-wide">
                 <span className="flex items-center gap-1.5">
-                  <SlidersHorizontal size={11} />
-                  Filtres
+                  <Filter size={11} />
+                  Filters
                   {activeFilterCount > 0 && (
                     <span className="bg-violet-500 text-white text-xs rounded-full w-4 h-4 flex items-center justify-center font-bold">
                       {activeFilterCount}
@@ -589,101 +605,118 @@ export default function AIStudioIdentifyPage() {
 
               {showFilters && (
                 <div className="mt-3 space-y-3">
-                  {/* Text search */}
                   <div className="relative">
                     <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
-                    <input
-                      type="text"
-                      placeholder="Recherche texte..."
+                    <input type="text" placeholder="Search assets..."
                       value={searchInput}
                       onChange={(e) => setSearchInput(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') updateFilter('textSearch', searchInput); }}
-                      className="w-full pl-7 pr-3 py-2 text-xs bg-muted/40 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300"
-                    />
+                      className="w-full pl-7 pr-3 py-2 text-xs bg-muted/40 border border-border rounded-lg focus:outline-none focus:ring-1 focus:ring-violet-300" />
                   </div>
 
-                  {/* Review status */}
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Statut</label>
-                    <select value={filters.reviewStatus} onChange={(e) => updateFilter('reviewStatus', e.target.value)}
-                      className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
-                      {REVIEW_STATUS_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
+                  {[
+                    { label: 'Review Status', key: 'reviewStatus' as keyof FilterState, options: REVIEW_STATUS_OPTIONS },
+                    { label: 'Metadata', key: 'metadataFilter' as keyof FilterState, options: METADATA_FILTER_OPTIONS },
+                    { label: 'AI Status', key: 'aiStatus' as keyof FilterState, options: AI_STATUS_OPTIONS },
+                  ].map(({ label, key, options }) => (
+                    <div key={key}>
+                      <label className="text-xs text-muted-foreground mb-1 block">{label}</label>
+                      <select value={filters[key] as string} onChange={(e) => updateFilter(key, e.target.value)}
+                        className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
+                        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </select>
+                    </div>
+                  ))}
 
-                  {/* Metadata completeness */}
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Métadonnées</label>
-                    <select value={filters.metadataFilter} onChange={(e) => updateFilter('metadataFilter', e.target.value)}
-                      className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
-                      {METADATA_FILTER_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                    </select>
-                  </div>
+                  {categories.length > 0 && (
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Category</label>
+                      <select value={filters.category} onChange={(e) => updateFilter('category', e.target.value)}
+                        className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
+                        <option value="">All categories</option>
+                        {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </div>
+                  )}
 
-                  {/* Category */}
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Catégorie</label>
-                    <select value={filters.category} onChange={(e) => updateFilter('category', e.target.value)}
-                      className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
-                      <option value="">Toutes</option>
-                      {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                    </select>
-                  </div>
-
-                  {/* Import batch */}
                   {importBatches.length > 0 && (
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Import Batch</label>
                       <select value={filters.importBatch} onChange={(e) => updateFilter('importBatch', e.target.value)}
                         className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
-                        <option value="">Tous les lots</option>
+                        <option value="">All batches</option>
                         {importBatches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                     </div>
                   )}
 
-                  {/* Toggle filters */}
-                  <div className="space-y-1.5">
-                    {[
-                      { key: 'pilot', label: 'Pilot (non-demo)' },
-                      { key: 'review100', label: 'Review 100' },
-                      { key: 'review500', label: 'Review 500' },
-                    ].map(({ key, label }) => (
-                      <label key={key} className="flex items-center gap-2 cursor-pointer">
-                        <input type="checkbox"
-                          checked={filters[key as keyof FilterState] as boolean}
-                          onChange={(e) => updateFilter(key as keyof FilterState, e.target.checked)}
-                          className="rounded border-border text-violet-600 focus:ring-violet-300" />
-                        <span className="text-xs text-foreground">{label}</span>
-                      </label>
-                    ))}
-                  </div>
-
                   {activeFilterCount > 0 && (
                     <button onClick={clearFilters}
                       className="w-full text-xs text-red-500 hover:text-red-700 flex items-center justify-center gap-1 py-1">
-                      <X size={10} />Effacer les filtres
+                      <X size={10} />Clear filters
                     </button>
                   )}
                 </div>
               )}
             </div>
 
-            {/* Pipeline */}
-            {(running || success) && (
+            {/* Batch Job Panel */}
+            {batchJob && (
               <div className="bg-card border border-border rounded-xl p-4">
-                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
-                  <Zap size={11} className="text-violet-500" />Pipeline SIE
-                </h3>
-                <div className="space-y-1.5 mb-3">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                    <Zap size={11} className="text-violet-500" />AI Job
+                  </h3>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${
+                    batchJob.status === 'completed' ? 'bg-emerald-100 text-emerald-700' :
+                    batchJob.status === 'running' ? 'bg-blue-100 text-blue-700' :
+                    batchJob.status === 'paused' ? 'bg-amber-100 text-amber-700' :
+                    batchJob.status === 'failed'? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
+                  }`}>{batchJob.status}</span>
+                </div>
+
+                {/* Job metadata */}
+                <div className="space-y-1 mb-3 text-xs">
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Job ID</span>
+                    <span className="font-mono text-foreground truncate max-w-[100px]">{batchJob.id.slice(-8)}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Reviewer</span>
+                    <span className="text-foreground truncate max-w-[100px]">{batchJob.reviewer}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Assets</span>
+                    <span className="text-foreground font-semibold">{batchJob.assetCount}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-muted-foreground">Processed</span>
+                    <span className="text-foreground">{batchJob.processed}/{batchJob.assetCount}</span>
+                  </div>
+                  {isRunning && batchJob.startedAt && (
+                    <div className="flex justify-between">
+                      <span className="text-muted-foreground">ETA</span>
+                      <span className="text-foreground">{calcETA(batchJob.processed, batchJob.assetCount, batchJob.startedAt)}</span>
+                    </div>
+                  )}
+                  {batchJob.errors.length > 0 && (
+                    <div className="flex justify-between">
+                      <span className="text-red-500">Errors</span>
+                      <span className="text-red-600 font-semibold">{batchJob.errors.length}</span>
+                    </div>
+                  )}
+                </div>
+
+                {/* Pipeline steps */}
+                <div className="space-y-1 mb-3">
                   {PIPELINE_STEPS.map((step, i) => {
                     const StepIcon = step.icon;
-                    const isActive = i === currentStepIdx && running;
-                    const isDone = i < currentStepIdx || (!running && success);
+                    const isActive = i === currentStepIdx && isRunning;
+                    const isDone = i < currentStepIdx || isCompleted;
                     return (
                       <div key={step.key}
-                        className={`flex items-center gap-2 px-2 py-1.5 rounded-lg transition-all ${isActive ? 'bg-violet-50 border border-violet-200' : isDone ? 'opacity-70' : 'opacity-20'}`}>
-                        <StepIcon size={11} className={isActive ? 'text-violet-600' : isDone ? 'text-emerald-500' : 'text-muted-foreground'} />
+                        className={`flex items-center gap-2 px-2 py-1 rounded-lg transition-all ${isActive ? 'bg-violet-50 border border-violet-200' : isDone ? 'opacity-60' : 'opacity-20'}`}>
+                        <StepIcon size={10} className={isActive ? 'text-violet-600' : isDone ? 'text-emerald-500' : 'text-muted-foreground'} />
                         <span className={`text-xs flex-1 ${isActive ? 'text-violet-700 font-medium' : 'text-muted-foreground'}`}>{step.label}</span>
                         {isActive && <Loader2 size={9} className="text-violet-500 animate-spin" />}
                         {isDone && !isActive && <CheckCircle2 size={9} className="text-emerald-500" />}
@@ -691,24 +724,63 @@ export default function AIStudioIdentifyPage() {
                     );
                   })}
                 </div>
-                <div className="w-full bg-muted rounded-full h-1.5 mb-1">
-                  <div className="bg-gradient-to-r from-violet-500 to-blue-500 h-1.5 rounded-full transition-all duration-500"
+
+                {/* Progress bar */}
+                <div className="w-full bg-muted rounded-full h-2 mb-1">
+                  <div className="bg-gradient-to-r from-violet-500 to-blue-500 h-2 rounded-full transition-all duration-500"
                     style={{ width: `${progressPct}%` }} />
                 </div>
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <span>{processedCount}/{totalToProcess} actifs</span>
+                <div className="flex items-center justify-between text-xs text-muted-foreground mb-3">
+                  <span>{batchJob.processed}/{batchJob.assetCount}</span>
                   <span>{progressPct}%</span>
                 </div>
+
+                {/* Controls */}
+                <div className="flex gap-2">
+                  {isRunning && (
+                    <button onClick={() => { pauseRef.current = true; }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium bg-amber-50 border border-amber-200 text-amber-700 rounded-lg hover:bg-amber-100 transition-all">
+                      <Pause size={11} />Pause
+                    </button>
+                  )}
+                  {isPaused && (
+                    <button onClick={() => { pauseRef.current = false; }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg hover:bg-emerald-100 transition-all">
+                      <Play size={11} />Resume
+                    </button>
+                  )}
+                  {(isRunning || isPaused) && (
+                    <button onClick={() => { abortRef.current = true; pauseRef.current = false; }}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium bg-red-50 border border-red-200 text-red-600 rounded-lg hover:bg-red-100 transition-all">
+                      <X size={11} />Stop
+                    </button>
+                  )}
+                  {(isCompleted || batchJob.status === 'failed') && batchJob.errors.length > 0 && (
+                    <button onClick={runIdentification}
+                      className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-medium bg-blue-50 border border-blue-200 text-blue-700 rounded-lg hover:bg-blue-100 transition-all">
+                      <RotateCcw size={11} />Retry
+                    </button>
+                  )}
+                </div>
+
+                {/* Errors */}
+                {batchJob.errors.length > 0 && (
+                  <div className="mt-2 max-h-20 overflow-y-auto space-y-1">
+                    {batchJob.errors.map((e, i) => (
+                      <p key={i} className="text-xs text-red-600 bg-red-50 rounded px-2 py-1 truncate">{e}</p>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
             {/* IDENTIFY WITH AI button */}
             <button
               onClick={runIdentification}
-              disabled={running || assets.length === 0}
+              disabled={isRunning || isPaused || assets.length === 0}
               className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white font-bold px-6 py-4 rounded-xl hover:from-violet-700 hover:to-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all duration-150 shadow-sm text-sm">
-              {running ? (
-                <><Loader2 size={16} className="animate-spin" />Identification en cours...</>
+              {isRunning ? (
+                <><Loader2 size={16} className="animate-spin" />Processing...</>
               ) : (
                 <><Brain size={16} />IDENTIFY WITH AI</>
               )}
@@ -722,16 +794,16 @@ export default function AIStudioIdentifyPage() {
               </div>
             )}
             {success && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-1.5">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-2">
                 <p className="text-xs text-emerald-700 font-semibold">✓ {success}</p>
                 <div className="flex flex-col gap-1">
                   <Link href="/admin/ai-studio/validation"
-                    className="text-xs text-violet-600 underline hover:no-underline">
-                    → Validation AI Studio
+                    className="text-xs text-violet-600 underline hover:no-underline flex items-center gap-1">
+                    <ArrowRight size={10} />Human Validation Workspace
                   </Link>
                   <Link href="/admin/metadata-review/assets"
-                    className="text-xs text-blue-600 underline hover:no-underline">
-                    → Metadata Review Center
+                    className="text-xs text-blue-600 underline hover:no-underline flex items-center gap-1">
+                    <ArrowRight size={10} />Metadata Review Center
                   </Link>
                 </div>
               </div>
@@ -741,9 +813,35 @@ export default function AIStudioIdentifyPage() {
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 flex items-start gap-2">
               <AlertTriangle size={12} className="text-amber-600 shrink-0 mt-0.5" />
               <p className="text-xs text-amber-700">
-                Aucune identification publiée automatiquement. Toutes les propositions restent <strong>Draft / Pending Review</strong>.
+                No automatic publishing. All proposals remain <strong>Draft / Pending Review</strong>.
               </p>
             </div>
+
+            {/* Recent jobs */}
+            {recentJobs.length > 0 && (
+              <div className="bg-card border border-border rounded-xl p-4">
+                <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
+                  <Clock size={11} />Recent Jobs
+                </h3>
+                <div className="space-y-2">
+                  {recentJobs.map((job) => (
+                    <div key={job.id} className="flex items-center justify-between text-xs">
+                      <span className="text-foreground truncate max-w-[120px]">
+                        {job.current_name ?? job.public_asset_id ?? job.id.slice(0, 8)}
+                      </span>
+                      <span className={`px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
+                        job.job_status === 'proposals_ready' ? 'bg-blue-100 text-blue-700' :
+                        job.job_status === 'validated'? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
+                      }`}>{job.job_status}</span>
+                    </div>
+                  ))}
+                </div>
+                <Link href="/admin/ai-studio/validation"
+                  className="text-xs text-violet-600 hover:underline mt-2 block text-center">
+                  View all →
+                </Link>
+              </div>
+            )}
           </div>
 
           {/* ── Right panel: Asset gallery ── */}
@@ -754,30 +852,27 @@ export default function AIStudioIdentifyPage() {
               <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/20">
                 <div className="flex items-center gap-3">
                   <span className="text-sm font-semibold text-foreground">
-                    {assetsLoading ? 'Chargement...' : `${assets.length} actifs affichés`}
-                    {totalCount > assets.length && (
-                      <span className="text-xs text-muted-foreground ml-1">/ {totalCount} total</span>
-                    )}
+                    {assetsLoading ? 'Loading...' : `${totalCount} assets`}
                   </span>
                   {selectedIds.size > 0 && (
                     <span className="text-xs bg-violet-100 text-violet-700 border border-violet-200 px-2 py-0.5 rounded-full font-semibold">
-                      {selectedIds.size} sélectionné(s)
+                      {selectedIds.size} selected
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => fetchAssets()}
+                  <button onClick={() => fetchAssets(currentPage)}
                     className="p-1.5 rounded-lg hover:bg-muted transition-colors text-muted-foreground hover:text-foreground">
                     <RefreshCw size={13} />
                   </button>
-                  <button onClick={selectAll}
+                  <button onClick={selectPage}
                     className="text-xs text-muted-foreground hover:text-violet-600 transition-colors px-2 py-1 rounded hover:bg-violet-50">
-                    Tout sélectionner
+                    Select page
                   </button>
                   {selectedIds.size > 0 && (
                     <button onClick={clearSelection}
                       className="text-xs text-muted-foreground hover:text-red-500 transition-colors px-2 py-1 rounded hover:bg-red-50">
-                      Désélectionner
+                      Clear
                     </button>
                   )}
                 </div>
@@ -790,15 +885,21 @@ export default function AIStudioIdentifyPage() {
                 </div>
               ) : assets.length === 0 ? (
                 <div className="flex flex-col items-center justify-center py-20 text-center px-4">
-                  <Upload size={36} className="text-muted-foreground mb-3" />
-                  <p className="text-sm font-medium text-foreground">Aucun actif trouvé</p>
-                  <p className="text-xs text-muted-foreground mt-1">Modifiez les filtres ou importez des assets</p>
+                  <Fish size={36} className="text-muted-foreground mb-3" />
+                  <p className="text-sm font-medium text-foreground">No assets found</p>
+                  <p className="text-xs text-muted-foreground mt-1">Adjust filters or import assets</p>
+                  {activeFilterCount > 0 && (
+                    <button onClick={clearFilters} className="mt-3 text-xs text-violet-600 underline">
+                      Clear all filters
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3 p-4 max-h-[680px] overflow-y-auto">
                   {assets.map((asset) => {
                     const isSelected = selectedIds.has(asset.id);
                     const statusColor = STATUS_COLORS[asset.review_status ?? 'draft'] ?? 'bg-gray-100 text-gray-600';
+                    const isIdentified = identifiedAssetIds.has(asset.id);
                     return (
                       <div key={asset.id}
                         onClick={() => toggleSelect(asset.id)}
@@ -809,11 +910,8 @@ export default function AIStudioIdentifyPage() {
                         {/* Thumbnail */}
                         <div className="aspect-square bg-muted relative">
                           {asset.thumbnail_url ? (
-                            <img
-                              src={asset.thumbnail_url}
-                              alt={asset.title ?? asset.file_name ?? 'Asset'}
-                              className="w-full h-full object-cover"
-                            />
+                            <img src={asset.thumbnail_url} alt={asset.title ?? asset.file_name ?? 'Asset'}
+                              className="w-full h-full object-cover" />
                           ) : (
                             <div className="w-full h-full flex items-center justify-center">
                               <Fish size={24} className="text-muted-foreground" />
@@ -833,6 +931,15 @@ export default function AIStudioIdentifyPage() {
                               <div className="w-5 h-5 rounded-full bg-white/80 border border-border flex items-center justify-center shadow">
                                 <Square size={10} className="text-muted-foreground" />
                               </div>
+                            </div>
+                          )}
+
+                          {/* AI identified badge */}
+                          {isIdentified && (
+                            <div className="absolute top-1 left-1">
+                              <span className="text-[9px] font-semibold px-1.5 py-0.5 rounded-full bg-violet-100 text-violet-700 flex items-center gap-0.5">
+                                <Brain size={7} />AI
+                              </span>
                             </div>
                           )}
 
@@ -880,16 +987,37 @@ export default function AIStudioIdentifyPage() {
                   })}
                 </div>
               )}
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className="flex items-center justify-between px-5 py-3 border-t border-border bg-muted/10">
+                  <span className="text-xs text-muted-foreground">
+                    Page {currentPage + 1} of {totalPages} · {totalCount} total
+                  </span>
+                  <div className="flex items-center gap-2">
+                    <button onClick={() => fetchAssets(currentPage - 1)} disabled={currentPage === 0}
+                      className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors">
+                      <ChevronLeft size={14} />
+                    </button>
+                    <span className="text-xs text-foreground font-medium">{currentPage + 1}</span>
+                    <button onClick={() => fetchAssets(currentPage + 1)} disabled={currentPage >= totalPages - 1}
+                      className="p-1.5 rounded-lg hover:bg-muted disabled:opacity-30 transition-colors">
+                      <ChevronRight size={14} />
+                    </button>
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Stats bar */}
             {!assetsLoading && assets.length > 0 && (
-              <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground px-1">
-                <span>{assets.filter((a) => a.review_status === 'approved').length} approved</span>
-                <span>{assets.filter((a) => a.review_status === 'under_review').length} under review</span>
-                <span>{assets.filter((a) => !a.species_id).length} without species</span>
+              <div className="mt-3 flex items-center gap-4 text-xs text-muted-foreground px-1 flex-wrap">
+                <span className="flex items-center gap-1"><Tag size={10} />{assets.filter((a) => a.review_status === 'approved').length} approved</span>
+                <span className="flex items-center gap-1"><Clock size={10} />{assets.filter((a) => a.review_status === 'under_review').length} under review</span>
+                <span className="flex items-center gap-1"><Fish size={10} />{assets.filter((a) => !a.species_id).length} without species</span>
+                <span className="flex items-center gap-1"><Brain size={10} />{assets.filter((a) => identifiedAssetIds.has(a.id)).length} AI identified</span>
                 <span className="ml-auto text-violet-600 font-medium">
-                  {selectedIds.size > 0 ? `${selectedIds.size} sélectionné(s) — prêt pour identification` : 'Sélectionnez des actifs pour identifier'}
+                  {selectedIds.size > 0 ? `${selectedIds.size} selected — ready for AI` : 'Select assets to identify'}
                 </span>
               </div>
             )}
