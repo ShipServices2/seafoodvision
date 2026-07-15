@@ -33,6 +33,12 @@ export const ADMIN_ONLY_ROUTES = [
   '/admin/reconcile-storage',
   '/admin/pricing',
   '/admin/catalog-visibility',
+  '/admin/commerce',
+  '/admin/commerce/products',
+  '/admin/commerce/plans',
+  '/admin/commerce/mappings',
+  '/admin/commerce/webhooks',
+  '/admin/commerce/settings',
 ];
 
 /**

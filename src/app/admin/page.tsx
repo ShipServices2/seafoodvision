@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck, HardDrive } from 'lucide-react';
+import { Shield, FileImage, Fish, Tag, ClipboardList, Upload, ChevronRight, Award, TrendingUp, BarChart2, AlertCircle, Database, ClipboardCheck, HardDrive, ShoppingCart } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
@@ -183,6 +183,15 @@ export default function AdminPage() {
       stat: null,
       statLabel: null,
       badge: 'Storage',
+    },
+    {
+      href: '/admin/commerce',
+      icon: ShoppingCart,
+      label: 'Commerce',
+      description: 'Dodo Payments infrastructure — orders, subscriptions, credits, webhooks',
+      stat: null,
+      statLabel: null,
+      badge: 'Phase 7.2',
     },
     {
       href: '/licensing-center',

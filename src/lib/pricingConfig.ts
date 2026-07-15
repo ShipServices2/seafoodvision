@@ -37,8 +37,8 @@ export interface SubscriptionPlan {
   videoAccess: boolean;
   view360Access: boolean;
   features: PlanFeature[];
-  stripeMonthlyPriceId?: string; // future Stripe integration
-  stripeAnnualPriceId?: string;
+  dodoMonthlyPriceId?: string; // future Dodo Payments integration
+  dodoAnnualPriceId?: string;
 }
 
 export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
@@ -188,7 +188,7 @@ export interface UnitProduct {
   description: string;
   price: number;
   currency: string;
-  stripePriceId?: string;
+  dodoProductId?: string; // Dodo Payments product ID (set via admin/commerce/mappings)
 }
 
 export const UNIT_PRODUCTS: UnitProduct[] = [
@@ -346,7 +346,7 @@ export interface CreditPack {
   currency: string;
   pricePerCredit: number;
   popular?: boolean;
-  stripePriceId?: string;
+  dodoProductId?: string; // Dodo Payments product ID (set via admin/commerce/mappings)
 }
 
 export const CREDIT_PACKS: CreditPack[] = [
