@@ -61,6 +61,11 @@ export const ADMIN_ONLY_ROUTES = [
   '/admin/ai-identification/review',
   '/admin/ai-identification/bulk',
   '/admin/ai-identification/analytics',
+  '/admin/ai-studio',
+  '/admin/ai-studio/identify',
+  '/admin/ai-studio/validation',
+  '/admin/ai-studio/candidates',
+  '/admin/ai-studio/analytics',
 ];
 
 /**
