@@ -42,6 +42,11 @@ const BULK_ACTIONS = [
   { value: 'merge_synonyms', label: 'Merge Synonyms' },
   { value: 'replace_scientific_name', label: 'Replace Scientific Name' },
   { value: 'replace_common_name', label: 'Replace Common Name' },
+  // Phase 7.16 additional bulk actions
+  { value: 'approve_enrichment', label: 'Approve Enrichment (7.16)' },
+  { value: 'reject_enrichment', label: 'Reject Enrichment (7.16)' },
+  { value: 'assign_commercial_category', label: 'Assign Commercial Category' },
+  { value: 'undo_enrichment', label: 'Undo Enrichment Import' },
 ];
 
 const BATCH_SIZES = [50, 100, 250, 500];
@@ -217,6 +222,56 @@ export default function AssetReviewPage() {
             reviewer_id: user?.id,
           }, { onConflict: 'asset_id' });
         }
+      } else if (bulkAction === 'approve_enrichment') {
+        // Phase 7.16: approve enrichment records
+        await supabase
+          .from('metadata_enrichment_records')
+          .update({ review_status: 'approved', validation_status: 'approved' })
+          .in('asset_id', ids)
+          .eq('review_status', 'under_review');
+        await supabase
+          .from('metadata_suggestions')
+          .update({ status: 'approved', reviewer_id: user?.id, reviewed_at: new Date().toISOString() })
+          .in('asset_id', ids)
+          .eq('status', 'under_review');
+        for (const assetId of ids) {
+          await supabase.from('asset_metadata_reviews').upsert({
+            asset_id: assetId,
+            review_status: 'approved',
+            reviewer_id: user?.id,
+            reviewed_at: new Date().toISOString(),
+          }, { onConflict: 'asset_id' });
+        }
+      } else if (bulkAction === 'reject_enrichment') {
+        // Phase 7.16: reject enrichment records
+        await supabase
+          .from('metadata_enrichment_records')
+          .update({ review_status: 'rejected', validation_status: 'rejected' })
+          .in('asset_id', ids)
+          .eq('review_status', 'under_review');
+        await supabase
+          .from('metadata_suggestions')
+          .update({ status: 'rejected', reviewer_id: user?.id, reviewed_at: new Date().toISOString() })
+          .in('asset_id', ids)
+          .eq('status', 'under_review');
+      } else if (bulkAction === 'assign_commercial_category') {
+        // Phase 7.16: assign commercial category candidate
+        if (bulkParam) {
+          await supabase
+            .from('metadata_enrichment_records')
+            .update({ commercial_category_candidate: bulkParam })
+            .in('asset_id', ids);
+        }
+      } else if (bulkAction === 'undo_enrichment') {
+        // Phase 7.16: revert enrichment records back to under_review
+        await supabase
+          .from('metadata_enrichment_records')
+          .update({ review_status: 'under_review', validation_status: 'suggested' })
+          .in('asset_id', ids);
+        await supabase
+          .from('metadata_suggestions')
+          .update({ status: 'under_review', reviewer_id: null, reviewed_at: null })
+          .in('asset_id', ids);
       }
 
       // Log to history

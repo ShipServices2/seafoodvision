@@ -6,35 +6,81 @@ import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
-import { createClient } from '@/lib/supabase/client';
 import {
   Upload, FileText, CheckCircle2, XCircle, AlertTriangle,
-  ArrowLeft, Play, Eye, Loader2, Info, Tag, Fish, GitMerge, Package
+  ArrowLeft, Play, Eye, Loader2, Info, Tag, Fish, GitMerge, Package,
+  ShieldCheck, Database, Lock, BarChart2
 } from 'lucide-react';
 
-const ACCEPTED_FILES = [
-  { name: 'metadata_assets.csv', desc: 'Asset metadata (species, category, form, packaging, keywords…)' },
-  { name: 'species.csv', desc: 'Species definitions (scientific name, family, genus…)' },
-  { name: 'families.csv', desc: 'Taxonomic families' },
-  { name: 'synonyms.csv', desc: 'Common name synonyms by language' },
-  { name: 'keywords.csv', desc: 'Keyword terms and variants' },
-  { name: 'packaging.csv', desc: 'Packaging types and configurations' },
-  { name: 'search_aliases.csv', desc: 'Search alias mappings' },
-  { name: 'commercial_categories.csv', desc: 'Commercial category definitions' },
+// Phase 7.16 — Metadata Enrichment Pack (608 assets)
+const PHASE_716_FILES = [
+  { name: 'metadata_assets_608.csv', desc: 'Main enrichment file — 608 assets matched by public_asset_id', required: true },
+  { name: 'species.csv', desc: 'Species candidates (scientific name, family, genus)', required: false },
+  { name: 'families.csv', desc: 'Taxonomic families', required: false },
+  { name: 'synonyms.csv', desc: 'Common name synonyms by language', required: false },
+  { name: 'keywords.csv', desc: 'Keyword terms and variants', required: false },
+  { name: 'packaging.csv', desc: 'Packaging types and configurations', required: false },
+  { name: 'search_aliases.csv', desc: 'Search alias mappings', required: false },
+  { name: 'commercial_categories.csv', desc: 'Commercial category definitions', required: false },
+  { name: 'rocket_import_manifest.csv', desc: 'Import manifest (Codex-generated)', required: false },
 ];
 
+// Phase 7.15 — Standard Metadata Pack
+const STANDARD_FILES = [
+  { name: 'metadata_assets.csv', desc: 'Asset metadata (species, category, form, packaging, keywords…)', required: true },
+  { name: 'species.csv', desc: 'Species definitions (scientific name, family, genus…)', required: false },
+  { name: 'families.csv', desc: 'Taxonomic families', required: false },
+  { name: 'synonyms.csv', desc: 'Common name synonyms by language', required: false },
+  { name: 'keywords.csv', desc: 'Keyword terms and variants', required: false },
+  { name: 'packaging.csv', desc: 'Packaging types and configurations', required: false },
+  { name: 'search_aliases.csv', desc: 'Search alias mappings', required: false },
+  { name: 'commercial_categories.csv', desc: 'Commercial category definitions', required: false },
+];
+
+type ImportMode = 'standard' | 'enrichment_716';
+
 interface DryRunReport {
+  mode: string;
   totalRows: number;
-  validRows: number;
-  rejectedRows: number;
-  conflictRows: number;
+  assetsFound?: number;
+  assetsMissing?: number;
+  validRows?: number;
+  rejectedRows?: number;
+  conflictRows?: number;
   newKeywords: number;
   newSpecies: number;
   newFamilies: number;
   newSynonyms: number;
+  newAliases?: number;
+  newPackaging?: number;
+  newCommercialCategories?: number;
+  conflicts?: number;
+  duplicates?: number;
+  skippedApproved?: number;
+  unknownPreserved?: number;
+  noMediaModified?: boolean;
   files: string[];
   errors: { row: number; file: string; message: string }[];
   warnings: { row: number; file: string; message: string }[];
+}
+
+interface FinalReport {
+  mode: string;
+  batchId: string;
+  batchName: string;
+  importedRows: number;
+  rejectedRows: number;
+  conflicts: number;
+  speciesCandidates: number;
+  families: number;
+  synonyms: number;
+  keywords: number;
+  assetsUnderReview: number;
+  skippedApproved: number;
+  noMediaModified: boolean;
+  build: string;
+  tests: string;
+  confirmation: string;
 }
 
 export default function MetadataImportPage() {
@@ -42,11 +88,13 @@ export default function MetadataImportPage() {
   const router = useRouter();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  const [importMode, setImportMode] = useState<ImportMode>('enrichment_716');
   const [files, setFiles] = useState<File[]>([]);
-  const [batchName, setBatchName] = useState('');
-  const [dryRun, setDryRun] = useState(true);
+  const [batchName, setBatchName] = useState('Codex Pack 608 — 2026-07-15');
   const [running, setRunning] = useState(false);
-  const [report, setReport] = useState<DryRunReport | null>(null);
+  const [dryRunReport, setDryRunReport] = useState<DryRunReport | null>(null);
+  const [finalReport, setFinalReport] = useState<FinalReport | null>(null);
+  const [batchId, setBatchId] = useState<string | null>(null);
   const [importStatus, setImportStatus] = useState<'idle' | 'dry_run' | 'ready' | 'importing' | 'done' | 'error'>('idle');
   const [errorMsg, setErrorMsg] = useState('');
 
@@ -57,24 +105,15 @@ export default function MetadataImportPage() {
     }
   }, [loading, user, profile, router]);
 
+  const acceptedFiles = importMode === 'enrichment_716' ? PHASE_716_FILES : STANDARD_FILES;
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selected = Array.from(e.target.files ?? []).filter((f) => f.name.endsWith('.csv'));
     setFiles(selected);
-    setReport(null);
+    setDryRunReport(null);
+    setFinalReport(null);
+    setBatchId(null);
     setImportStatus('idle');
-  };
-
-  const parseCsvPreview = async (file: File): Promise<{ rows: number; headers: string[] }> => {
-    return new Promise((resolve) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const text = e.target?.result as string;
-        const lines = text.split('\n').filter(Boolean);
-        const headers = lines[0]?.split(',').map((h) => h.trim().replace(/"/g, '')) ?? [];
-        resolve({ rows: lines.length - 1, headers });
-      };
-      reader.readAsText(file);
-    });
   };
 
   const runDryRun = async () => {
@@ -84,108 +123,26 @@ export default function MetadataImportPage() {
     setErrorMsg('');
 
     try {
-      // Parse all files to build a dry-run report
-      let totalRows = 0;
-      let validRows = 0;
-      let rejectedRows = 0;
-      let conflictRows = 0;
-      let newKeywords = 0;
-      let newSpecies = 0;
-      let newFamilies = 0;
-      let newSynonyms = 0;
-      const fileNames: string[] = [];
-      const errors: DryRunReport['errors'] = [];
-      const warnings: DryRunReport['warnings'] = [];
+      if (importMode === 'enrichment_716') {
+        // Use Phase 7.16 API
+        const fd = new FormData();
+        fd.append('batch_name', batchName);
+        fd.append('dry_run', 'true');
+        files.forEach((f, i) => fd.append(`file_${i}`, f));
 
-      const supabase = createClient();
+        const res = await fetch('/api/admin/metadata-enrichment-import', {
+          method: 'POST',
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Dry run failed');
 
-      for (const file of files) {
-        const { rows, headers } = await parseCsvPreview(file);
-        fileNames.push(file.name);
-        totalRows += rows;
-
-        // Validate headers per file type
-        if (file.name === 'metadata_assets.csv') {
-          const required = ['asset_id', 'title'];
-          const missing = required.filter((h) => !headers.includes(h));
-          if (missing.length > 0) {
-            errors.push({ row: 0, file: file.name, message: `Missing required columns: ${missing.join(', ')}` });
-            rejectedRows += rows;
-          } else {
-            validRows += rows;
-          }
-        } else if (file.name === 'species.csv') {
-          const required = ['scientific_name'];
-          const missing = required.filter((h) => !headers.includes(h));
-          if (missing.length > 0) {
-            errors.push({ row: 0, file: file.name, message: `Missing required columns: ${missing.join(', ')}` });
-            rejectedRows += rows;
-          } else {
-            newSpecies += rows;
-            validRows += rows;
-          }
-        } else if (file.name === 'families.csv') {
-          newFamilies += rows;
-          validRows += rows;
-        } else if (file.name === 'synonyms.csv') {
-          newSynonyms += rows;
-          validRows += rows;
-        } else if (file.name === 'keywords.csv') {
-          newKeywords += rows;
-          validRows += rows;
-        } else {
-          validRows += rows;
-        }
-
-        // Check for potential conflicts with existing data
-        if (file.name === 'species.csv' && rows > 0) {
-          const { count } = await supabase.from('species').select('*', { count: 'exact', head: true });
-          if ((count ?? 0) > 0) {
-            warnings.push({ row: 0, file: file.name, message: `${count} existing species found — check for duplicates before import` });
-            conflictRows += Math.min(rows, 5);
-          }
-        }
-      }
-
-      const dryReport: DryRunReport = {
-        totalRows,
-        validRows: validRows - rejectedRows,
-        rejectedRows,
-        conflictRows,
-        newKeywords,
-        newSpecies,
-        newFamilies,
-        newSynonyms,
-        files: fileNames,
-        errors,
-        warnings,
-      };
-
-      // Save batch record as dry_run
-      const { error: batchError } = await supabase.from('metadata_import_batches').insert({
-        batch_name: batchName,
-        source: 'codex',
-        status: 'dry_run',
-        dry_run: true,
-        total_rows: totalRows,
-        valid_rows: dryReport.validRows,
-        rejected_rows: rejectedRows,
-        conflict_rows: conflictRows,
-        new_keywords: newKeywords,
-        new_species: newSpecies,
-        new_families: newFamilies,
-        new_synonyms: newSynonyms,
-        files_included: fileNames,
-        report: dryReport as unknown as Record<string, unknown>,
-        created_by: user?.id,
-      });
-
-      if (batchError) {
-        setErrorMsg('Failed to save dry-run batch: ' + batchError.message);
-        setImportStatus('error');
-      } else {
-        setReport(dryReport);
+        setDryRunReport(data.report);
+        setBatchId(data.batch_id);
         setImportStatus('ready');
+      } else {
+        // Standard mode — legacy client-side dry run
+        await runStandardDryRun();
       }
     } catch (err: unknown) {
       setErrorMsg(err instanceof Error ? err.message : 'Unexpected error during dry run');
@@ -195,19 +152,124 @@ export default function MetadataImportPage() {
     }
   };
 
+  const runStandardDryRun = async () => {
+    // Simplified client-side dry run for standard mode
+    const { createClient } = await import('@/lib/supabase/client');
+    const supabase = createClient();
+    let totalRows = 0;
+    let validRows = 0;
+    let rejectedRows = 0;
+    const errors: DryRunReport['errors'] = [];
+    const warnings: DryRunReport['warnings'] = [];
+    let newSpecies = 0, newFamilies = 0, newSynonyms = 0, newKeywords = 0;
+
+    for (const file of files) {
+      const text = await file.text();
+      const lines = text.split('\n').filter(Boolean);
+      const headers = lines[0]?.split(',').map((h) => h.trim().replace(/"/g, '')) ?? [];
+      const rows = lines.length - 1;
+      totalRows += rows;
+
+      if (file.name === 'metadata_assets.csv') {
+        if (!headers.includes('asset_id')) {
+          errors.push({ row: 0, file: file.name, message: 'Missing required column: asset_id' });
+          rejectedRows += rows;
+        } else { validRows += rows; }
+      } else if (file.name === 'species.csv') {
+        if (!headers.includes('scientific_name')) {
+          errors.push({ row: 0, file: file.name, message: 'Missing required column: scientific_name' });
+          rejectedRows += rows;
+        } else { newSpecies += rows; validRows += rows; }
+      } else if (file.name === 'families.csv') { newFamilies += rows; validRows += rows; }
+      else if (file.name === 'synonyms.csv') { newSynonyms += rows; validRows += rows; }
+      else if (file.name === 'keywords.csv') { newKeywords += rows; validRows += rows; }
+      else { validRows += rows; }
+
+      if (file.name === 'species.csv' && rows > 0) {
+        const { count } = await supabase.from('species').select('*', { count: 'exact', head: true });
+        if ((count ?? 0) > 0) {
+          warnings.push({ row: 0, file: file.name, message: `${count} existing species found — check for duplicates` });
+        }
+      }
+    }
+
+    const report: DryRunReport = {
+      mode: 'STANDARD',
+      totalRows,
+      validRows: validRows - rejectedRows,
+      rejectedRows,
+      conflictRows: 0,
+      newKeywords,
+      newSpecies,
+      newFamilies,
+      newSynonyms,
+      files: files.map((f) => f.name),
+      errors,
+      warnings,
+    };
+
+    const { createClient: cc } = await import('@/lib/supabase/client');
+    const sb = cc();
+    const { data: batchRow } = await sb.from('metadata_import_batches').insert({
+      batch_name: batchName,
+      source: 'codex',
+      status: 'dry_run',
+      dry_run: true,
+      import_mode: 'STANDARD',
+      total_rows: totalRows,
+      valid_rows: report.validRows ?? 0,
+      rejected_rows: rejectedRows,
+      new_keywords: newKeywords,
+      new_species: newSpecies,
+      new_families: newFamilies,
+      new_synonyms: newSynonyms,
+      files_included: files.map((f) => f.name),
+      report: report as unknown as Record<string, unknown>,
+      created_by: user?.id,
+    }).select('id').single();
+
+    setBatchId(batchRow?.id ?? null);
+    setDryRunReport(report);
+    setImportStatus('ready');
+  };
+
   const confirmImport = async () => {
-    if (!report || importStatus !== 'ready') return;
+    if (!dryRunReport || importStatus !== 'ready') return;
     setImportStatus('importing');
     setRunning(true);
-    // In production this would process the CSV rows and create metadata_suggestions
-    // For now we mark the batch as validated
-    const supabase = createClient();
-    await supabase
-      .from('metadata_import_batches')
-      .update({ status: 'validated', dry_run: false })
-      .eq('batch_name', batchName);
-    setImportStatus('done');
-    setRunning(false);
+
+    try {
+      if (importMode === 'enrichment_716' && batchId) {
+        const fd = new FormData();
+        fd.append('batch_name', batchName);
+        fd.append('dry_run', 'false');
+        fd.append('batch_id', batchId);
+        files.forEach((f, i) => fd.append(`file_${i}`, f));
+
+        const res = await fetch('/api/admin/metadata-enrichment-import', {
+          method: 'POST',
+          body: fd,
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error ?? 'Import failed');
+        setFinalReport(data.report);
+        setImportStatus('done');
+      } else {
+        // Standard mode — mark batch as validated
+        const { createClient } = await import('@/lib/supabase/client');
+        const supabase = createClient();
+        await supabase
+          .from('metadata_import_batches')
+          .update({ status: 'validated', dry_run: false })
+          .eq('batch_name', batchName);
+        setImportStatus('done');
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : 'Import failed');
+      setImportStatus('error');
+    } finally {
+      setRunning(false);
+    }
   };
 
   return (
@@ -235,23 +297,89 @@ export default function MetadataImportPage() {
             </div>
           </div>
 
+          {/* Import Mode Selector */}
+          <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
+            <h2 className="text-sm font-semibold text-gray-800 mb-3">Import Mode</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <button
+                onClick={() => { setImportMode('enrichment_716'); setFiles([]); setDryRunReport(null); setFinalReport(null); setImportStatus('idle'); setBatchName('Codex Pack 608 — 2026-07-15'); }}
+                className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${importMode === 'enrichment_716' ? 'border-violet-500 bg-violet-50' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <Database className={`w-5 h-5 mt-0.5 flex-shrink-0 ${importMode === 'enrichment_716' ? 'text-violet-600' : 'text-gray-400'}`} />
+                <div>
+                  <div className={`text-sm font-semibold ${importMode === 'enrichment_716' ? 'text-violet-800' : 'text-gray-700'}`}>
+                    Metadata Import — Phase 7.16
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    <span className="font-medium text-violet-600">UPDATE EXISTING ASSETS ONLY</span>
+                    <br />Matches by <code className="bg-gray-100 px-1 rounded">public_asset_id</code> · 608 assets · No new assets
+                  </div>
+                </div>
+              </button>
+
+              <button
+                onClick={() => { setImportMode('standard'); setFiles([]); setDryRunReport(null); setFinalReport(null); setImportStatus('idle'); setBatchName(''); }}
+                className={`flex items-start gap-3 p-4 rounded-xl border-2 text-left transition-all ${importMode === 'standard' ? 'border-blue-500 bg-blue-50' : 'border-gray-200 hover:border-gray-300'}`}
+              >
+                <Upload className={`w-5 h-5 mt-0.5 flex-shrink-0 ${importMode === 'standard' ? 'text-blue-600' : 'text-gray-400'}`} />
+                <div>
+                  <div className={`text-sm font-semibold ${importMode === 'standard' ? 'text-blue-800' : 'text-gray-700'}`}>
+                    Standard Metadata Import
+                  </div>
+                  <div className="text-xs text-gray-500 mt-0.5">
+                    Phase 7.15 standard import mode
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Phase 7.16 Safety Notice */}
+          {importMode === 'enrichment_716' && (
+            <div className="bg-violet-50 border border-violet-200 rounded-xl p-4 mb-6">
+              <div className="flex items-start gap-3">
+                <ShieldCheck className="w-5 h-5 text-violet-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-violet-800 mb-1">Phase 7.16 — Enrichment Pack Safety Rules</p>
+                  <ul className="text-xs text-violet-700 space-y-1">
+                    <li>✓ <strong>UPDATE EXISTING ASSETS ONLY</strong> — no new assets will be created</li>
+                    <li>✓ Matching by <code className="bg-violet-100 px-1 rounded">public_asset_id</code> — unmatched rows are rejected</li>
+                    <li>✓ Human-approved values are <strong>never overwritten</strong></li>
+                    <li>✓ All new data: <code className="bg-violet-100 px-1 rounded">under_review / suggested / private</code></li>
+                    <li>✓ Every change logged with <code className="bg-violet-100 px-1 rounded">source=Codex</code></li>
+                    <li>✓ <strong>No media files modified</strong> — Storage untouched</li>
+                    <li>✓ Unknown assets remain unknown — no forced identification</li>
+                    <li>✓ Species candidates remain <code className="bg-violet-100 px-1 rounded">candidate_unverified</code></li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Accepted file types */}
           <div className="bg-white rounded-xl border border-gray-200 p-5 mb-6">
             <h2 className="text-sm font-semibold text-gray-800 mb-3 flex items-center gap-2">
               <Info className="w-4 h-4 text-blue-500" />
-              Accepted Files
+              Accepted Files {importMode === 'enrichment_716' && <span className="text-xs text-violet-600 font-normal">(Phase 7.16 Pack)</span>}
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {ACCEPTED_FILES.map((f) => (
-                <div key={f.name} className="flex items-start gap-2 p-2 rounded-lg bg-gray-50">
-                  <FileText className="w-3.5 h-3.5 text-gray-400 mt-0.5 flex-shrink-0" />
+              {acceptedFiles.map((f) => (
+                <div key={f.name} className={`flex items-start gap-2 p-2 rounded-lg ${f.required ? 'bg-violet-50 border border-violet-100' : 'bg-gray-50'}`}>
+                  <FileText className={`w-3.5 h-3.5 mt-0.5 flex-shrink-0 ${f.required ? 'text-violet-500' : 'text-gray-400'}`} />
                   <div>
                     <span className="text-xs font-mono font-medium text-gray-700">{f.name}</span>
+                    {f.required && <span className="ml-1 text-xs text-violet-600 font-medium">*required</span>}
                     <p className="text-xs text-gray-400">{f.desc}</p>
                   </div>
                 </div>
               ))}
             </div>
+            {importMode === 'enrichment_716' && (
+              <p className="text-xs text-gray-400 mt-3 flex items-center gap-1">
+                <Lock className="w-3 h-3" />
+                Markdown reports are never imported. Only the CSV files listed above are accepted.
+              </p>
+            )}
           </div>
 
           {/* Upload Form */}
@@ -264,18 +392,18 @@ export default function MetadataImportPage() {
                 type="text"
                 value={batchName}
                 onChange={(e) => setBatchName(e.target.value)}
-                placeholder="e.g. Codex Pack 2026-07-15"
+                placeholder="e.g. Codex Pack 608 — 2026-07-15"
                 className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>
 
             <div
-              className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-blue-400 hover:bg-blue-50 transition-all"
+              className="border-2 border-dashed border-gray-200 rounded-xl p-8 text-center cursor-pointer hover:border-violet-400 hover:bg-violet-50 transition-all"
               onClick={() => fileInputRef.current?.click()}
             >
               <Upload className="w-8 h-8 text-gray-300 mx-auto mb-2" />
               <p className="text-sm text-gray-600 font-medium">Click to select CSV files</p>
-              <p className="text-xs text-gray-400 mt-1">Only .csv files accepted</p>
+              <p className="text-xs text-gray-400 mt-1">Only .csv files accepted — no Markdown reports</p>
               <input
                 ref={fileInputRef}
                 type="file"
@@ -288,27 +416,19 @@ export default function MetadataImportPage() {
 
             {files.length > 0 && (
               <div className="mt-3 space-y-1">
-                {files.map((f) => (
-                  <div key={f.name} className="flex items-center gap-2 text-xs text-gray-600 bg-gray-50 rounded-lg px-3 py-2">
-                    <FileText className="w-3.5 h-3.5 text-gray-400" />
-                    <span className="font-mono">{f.name}</span>
-                    <span className="text-gray-400 ml-auto">{(f.size / 1024).toFixed(1)} KB</span>
-                  </div>
-                ))}
+                {files.map((f) => {
+                  const isAccepted = acceptedFiles.some((af) => af.name === f.name);
+                  return (
+                    <div key={f.name} className={`flex items-center gap-2 text-xs rounded-lg px-3 py-2 ${isAccepted ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-600'}`}>
+                      {isAccepted ? <CheckCircle2 className="w-3.5 h-3.5" /> : <XCircle className="w-3.5 h-3.5" />}
+                      <span className="font-mono">{f.name}</span>
+                      <span className="text-gray-400 ml-auto">{(f.size / 1024).toFixed(1)} KB</span>
+                      {!isAccepted && <span className="text-red-500 text-xs">Not accepted</span>}
+                    </div>
+                  );
+                })}
               </div>
             )}
-
-            <div className="mt-4 flex items-center gap-3">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={dryRun}
-                  onChange={(e) => setDryRun(e.target.checked)}
-                  className="rounded"
-                />
-                <span className="text-sm text-gray-700 font-medium">Dry Run (required before import)</span>
-              </label>
-            </div>
 
             <div className="mt-4 flex gap-3">
               <button
@@ -345,8 +465,55 @@ export default function MetadataImportPage() {
             </div>
           )}
 
-          {/* Done */}
-          {importStatus === 'done' && (
+          {/* Final Report (Phase 7.16) */}
+          {importStatus === 'done' && finalReport && (
+            <div className="bg-green-50 border border-green-200 rounded-xl p-5 mb-6">
+              <div className="flex items-center gap-2 mb-4">
+                <CheckCircle2 className="w-5 h-5 text-green-600" />
+                <h2 className="text-sm font-semibold text-green-800">Phase 7.16 Import Complete — Final Report</h2>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-4">
+                {[
+                  { label: 'Imported Rows', value: finalReport.importedRows, color: 'text-green-700' },
+                  { label: 'Rejected Rows', value: finalReport.rejectedRows, color: 'text-red-600' },
+                  { label: 'Conflicts', value: finalReport.conflicts, color: 'text-amber-600' },
+                  { label: 'Species Candidates', value: finalReport.speciesCandidates, color: 'text-teal-600' },
+                  { label: 'Families', value: finalReport.families, color: 'text-blue-600' },
+                  { label: 'Synonyms', value: finalReport.synonyms, color: 'text-violet-600' },
+                  { label: 'Keywords', value: finalReport.keywords, color: 'text-indigo-600' },
+                  { label: 'Assets Under Review', value: finalReport.assetsUnderReview, color: 'text-amber-700' },
+                  { label: 'Skipped (Approved)', value: finalReport.skippedApproved, color: 'text-gray-600' },
+                ].map((s) => (
+                  <div key={s.label} className="bg-white rounded-lg p-3 border border-green-100">
+                    <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
+                    <div className="text-xs text-gray-500">{s.label}</div>
+                  </div>
+                ))}
+              </div>
+              <div className="space-y-2 text-xs">
+                <div className="flex items-center gap-2 text-green-700">
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  <span>{finalReport.confirmation}</span>
+                </div>
+                <div className="flex items-center gap-2 text-green-700">
+                  <BarChart2 className="w-3.5 h-3.5" />
+                  <span>Build: <strong>{finalReport.build}</strong> · Tests: <strong>{finalReport.tests}</strong></span>
+                </div>
+              </div>
+              <div className="mt-4">
+                <Link
+                  href="/admin/metadata-review/assets"
+                  className="inline-flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg text-sm font-medium hover:bg-green-700 transition-colors"
+                >
+                  <Eye className="w-4 h-4" />
+                  Review 608 Assets in Metadata Review Center
+                </Link>
+              </div>
+            </div>
+          )}
+
+          {/* Done (standard mode) */}
+          {importStatus === 'done' && !finalReport && (
             <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-start gap-3">
               <CheckCircle2 className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
               <div>
@@ -359,33 +526,61 @@ export default function MetadataImportPage() {
           )}
 
           {/* Dry Run Report */}
-          {report && (
+          {dryRunReport && importStatus !== 'done' && (
             <div className="bg-white rounded-xl border border-gray-200 p-5">
               <h2 className="text-sm font-semibold text-gray-800 mb-4 flex items-center gap-2">
                 <Eye className="w-4 h-4 text-amber-500" />
                 Dry Run Report
+                {importMode === 'enrichment_716' && (
+                  <span className="text-xs bg-violet-100 text-violet-700 px-2 py-0.5 rounded-full font-medium">
+                    UPDATE EXISTING ONLY
+                  </span>
+                )}
               </h2>
 
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
-                {[
-                  { label: 'Total Rows', value: report.totalRows, color: 'text-gray-700', bg: 'bg-gray-50' },
-                  { label: 'Valid Rows', value: report.validRows, color: 'text-green-700', bg: 'bg-green-50' },
-                  { label: 'Rejected', value: report.rejectedRows, color: 'text-red-600', bg: 'bg-red-50' },
-                  { label: 'Conflicts', value: report.conflictRows, color: 'text-amber-600', bg: 'bg-amber-50' },
-                ].map((s) => (
-                  <div key={s.label} className={`${s.bg} rounded-lg p-3 text-center`}>
-                    <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
-                    <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+              {/* Phase 7.16 specific stats */}
+              {importMode === 'enrichment_716' ? (
+                <>
+                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                    {[
+                      { label: 'Total Rows', value: dryRunReport.totalRows, color: 'text-gray-700', bg: 'bg-gray-50' },
+                      { label: 'Assets Found', value: dryRunReport.assetsFound ?? 0, color: 'text-green-700', bg: 'bg-green-50' },
+                      { label: 'Assets Missing', value: dryRunReport.assetsMissing ?? 0, color: 'text-red-600', bg: 'bg-red-50' },
+                      { label: 'Conflicts', value: dryRunReport.conflicts ?? 0, color: 'text-amber-600', bg: 'bg-amber-50' },
+                      { label: 'Duplicates', value: dryRunReport.duplicates ?? 0, color: 'text-orange-600', bg: 'bg-orange-50' },
+                      { label: 'Skipped (Approved)', value: dryRunReport.skippedApproved ?? 0, color: 'text-gray-600', bg: 'bg-gray-50' },
+                      { label: 'Unknown Preserved', value: dryRunReport.unknownPreserved ?? 0, color: 'text-blue-600', bg: 'bg-blue-50' },
+                      { label: 'No Media Modified', value: dryRunReport.noMediaModified ? '✓' : '✗', color: dryRunReport.noMediaModified ? 'text-green-700' : 'text-red-600', bg: dryRunReport.noMediaModified ? 'bg-green-50' : 'bg-red-50' },
+                    ].map((s) => (
+                      <div key={s.label} className={`${s.bg} rounded-lg p-3 text-center`}>
+                        <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
+                        <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
+                  {[
+                    { label: 'Total Rows', value: dryRunReport.totalRows, color: 'text-gray-700', bg: 'bg-gray-50' },
+                    { label: 'Valid Rows', value: dryRunReport.validRows ?? 0, color: 'text-green-700', bg: 'bg-green-50' },
+                    { label: 'Rejected', value: dryRunReport.rejectedRows ?? 0, color: 'text-red-600', bg: 'bg-red-50' },
+                    { label: 'Conflicts', value: dryRunReport.conflictRows ?? 0, color: 'text-amber-600', bg: 'bg-amber-50' },
+                  ].map((s) => (
+                    <div key={s.label} className={`${s.bg} rounded-lg p-3 text-center`}>
+                      <div className={`text-xl font-bold ${s.color}`}>{s.value}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">{s.label}</div>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
                 {[
-                  { label: 'New Keywords', value: report.newKeywords, icon: Tag },
-                  { label: 'New Species', value: report.newSpecies, icon: Fish },
-                  { label: 'New Families', value: report.newFamilies, icon: Package },
-                  { label: 'New Synonyms', value: report.newSynonyms, icon: GitMerge },
+                  { label: 'New Keywords', value: dryRunReport.newKeywords, icon: Tag },
+                  { label: 'New Species', value: dryRunReport.newSpecies, icon: Fish },
+                  { label: 'New Families', value: dryRunReport.newFamilies, icon: Package },
+                  { label: 'New Synonyms', value: dryRunReport.newSynonyms, icon: GitMerge },
                 ].map((s) => (
                   <div key={s.label} className="bg-blue-50 rounded-lg p-3 flex items-center gap-2">
                     <s.icon className="w-4 h-4 text-blue-500" />
@@ -401,20 +596,20 @@ export default function MetadataImportPage() {
               <div className="mb-4">
                 <h3 className="text-xs font-semibold text-gray-600 mb-2">Files Included</h3>
                 <div className="flex flex-wrap gap-2">
-                  {report.files.map((f) => (
+                  {dryRunReport.files.map((f) => (
                     <span key={f} className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded font-mono">{f}</span>
                   ))}
                 </div>
               </div>
 
               {/* Errors */}
-              {report.errors.length > 0 && (
+              {dryRunReport.errors.length > 0 && (
                 <div className="mb-4">
                   <h3 className="text-xs font-semibold text-red-600 mb-2 flex items-center gap-1">
-                    <XCircle className="w-3.5 h-3.5" /> Errors ({report.errors.length})
+                    <XCircle className="w-3.5 h-3.5" /> Errors ({dryRunReport.errors.length})
                   </h3>
-                  <div className="space-y-1">
-                    {report.errors.map((e, i) => (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {dryRunReport.errors.map((e, i) => (
                       <div key={i} className="text-xs bg-red-50 text-red-700 px-3 py-2 rounded-lg">
                         <span className="font-mono font-medium">{e.file}</span>
                         {e.row > 0 && <span className="text-red-400"> row {e.row}</span>}
@@ -426,13 +621,13 @@ export default function MetadataImportPage() {
               )}
 
               {/* Warnings */}
-              {report.warnings.length > 0 && (
-                <div>
+              {dryRunReport.warnings.length > 0 && (
+                <div className="mb-4">
                   <h3 className="text-xs font-semibold text-amber-600 mb-2 flex items-center gap-1">
-                    <AlertTriangle className="w-3.5 h-3.5" /> Warnings ({report.warnings.length})
+                    <AlertTriangle className="w-3.5 h-3.5" /> Warnings ({dryRunReport.warnings.length})
                   </h3>
-                  <div className="space-y-1">
-                    {report.warnings.map((w, i) => (
+                  <div className="space-y-1 max-h-48 overflow-y-auto">
+                    {dryRunReport.warnings.map((w, i) => (
                       <div key={i} className="text-xs bg-amber-50 text-amber-700 px-3 py-2 rounded-lg">
                         <span className="font-mono font-medium">{w.file}</span>
                         {w.row > 0 && <span className="text-amber-400"> row {w.row}</span>}
@@ -443,10 +638,23 @@ export default function MetadataImportPage() {
                 </div>
               )}
 
-              {report.errors.length === 0 && report.warnings.length === 0 && (
+              {dryRunReport.errors.length === 0 && dryRunReport.warnings.length === 0 && (
                 <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
                   <CheckCircle2 className="w-4 h-4" />
                   No errors or warnings detected. Ready to import.
+                </div>
+              )}
+
+              {importMode === 'enrichment_716' && importStatus === 'ready' && (
+                <div className="mt-4 p-3 bg-violet-50 border border-violet-200 rounded-lg text-xs text-violet-700">
+                  <strong>Ready to confirm.</strong> The import will:
+                  <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                    <li>Update only the {dryRunReport.assetsFound ?? 0} matched assets</li>
+                    <li>Set all data to <code>under_review / suggested / private</code></li>
+                    <li>Log every change with <code>source=Codex</code></li>
+                    <li>Never modify any media file or Storage bucket</li>
+                    <li>Never overwrite human-approved values</li>
+                  </ul>
                 </div>
               )}
             </div>
