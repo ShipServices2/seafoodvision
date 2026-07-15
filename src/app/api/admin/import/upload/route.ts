@@ -89,9 +89,23 @@ export async function POST(request: NextRequest) {
     const bucket = fileLevel === 'thumbnail' ? 'asset-thumbnails' : 'asset-previews';
 
     // ---- STABLE STORAGE PATH ----
-    // Use pilot/{publicAssetId}/{fileLevel}.{ext} when publicAssetId is available,
-    // otherwise fall back to {assetId}/{fileLevel}.{ext}
-    const pathPrefix = publicAssetId ? `pilot/${publicAssetId}` : assetId;
+    // Use pilot/{publicAssetId}/{fileLevel}.{ext} when publicAssetId is available.
+    // If publicAssetId not passed in FormData, look it up from the assets table.
+    // Fall back to {assetId}/{fileLevel}.{ext} only if no publicAssetId found.
+    let resolvedPublicAssetId = publicAssetId || null;
+
+    if (!resolvedPublicAssetId && assetId) {
+      const { data: assetRow } = await supabase
+        .from('assets')
+        .select('public_asset_id')
+        .eq('id', assetId)
+        .maybeSingle();
+      if (assetRow?.public_asset_id) {
+        resolvedPublicAssetId = assetRow.public_asset_id;
+      }
+    }
+
+    const pathPrefix = resolvedPublicAssetId ? `pilot/${resolvedPublicAssetId}` : assetId;
     const storagePath = `${pathPrefix}/${fileLevel}.${ext}`;
 
     const arrayBuffer = await file.arrayBuffer();
@@ -162,7 +176,7 @@ export async function POST(request: NextRequest) {
       storagePath,
       fileLevel,
       assetId,
-      publicAssetId: publicAssetId || null,
+            publicAssetId: resolvedPublicAssetId || null,
       mimeType: declaredMime,
       fileSizeBytes: file.size,
     });

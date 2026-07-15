@@ -23,12 +23,15 @@ interface ReconcileMatch {
   mimeType: string | null;
   fileSizeBytes: number | null;
   existingFileId: string | null;
+  strategy?: string;
 }
 
 interface ReconcileResult {
   mode: 'dry_run' | 'execute';
   totalStorageFiles: number;
   matched: number;
+  matchedByPublicAssetId?: number;
+  matchedByUuidAssetId?: number;
   unmatched: number;
   alreadyLinked: number;
   toInsert: number;
@@ -158,9 +161,9 @@ export default function ReconcileStoragePage() {
             <p className="font-medium">How this works</p>
             <ul className="text-blue-300 space-y-0.5 list-disc list-inside">
               <li>Scans <code className="bg-blue-900/40 px-1 rounded">asset-thumbnails</code> and <code className="bg-blue-900/40 px-1 rounded">asset-previews</code> buckets</li>
-              <li>Matches files to assets using <code className="bg-blue-900/40 px-1 rounded">public_asset_id</code> — detects all path formats automatically</li>
-              <li>Supported formats: flat (<code className="bg-blue-900/40 px-1 rounded">SV-B500-0500.jpg</code>), subfolder (<code className="bg-blue-900/40 px-1 rounded">thumbnails/SV-B500-0500.jpg</code>), folder-based (<code className="bg-blue-900/40 px-1 rounded">pilot/SV-B500-0500/thumbnail.jpg</code>)</li>
-              <li>Creates or updates <code className="bg-blue-900/40 px-1 rounded">asset_files</code> rows — no files are moved or deleted</li>
+              <li>Matches files to assets using <code className="bg-blue-900/40 px-1 rounded">public_asset_id</code> <strong>or</strong> <code className="bg-blue-900/40 px-1 rounded">assets.id UUID</code> — detects all path formats automatically</li>
+              <li>Supported formats: flat (<code className="bg-blue-900/40 px-1 rounded">SV-B500-0500.jpg</code>), subfolder (<code className="bg-blue-900/40 px-1 rounded">thumbnails/SV-B500-0500.jpg</code>), folder-based (<code className="bg-blue-900/40 px-1 rounded">pilot/SV-B500-0500/thumbnail.jpg</code>), UUID (<code className="bg-blue-900/40 px-1 rounded">{'{uuid}'}/thumbnail.jpg</code>)</li>
+              <li>Creates or updates <code className="bg-blue-900/40 px-1 rounded">asset_files</code> and <code className="bg-blue-900/40 px-1 rounded">asset_previews</code> rows — no files are moved or deleted</li>
             </ul>
           </div>
         </div>
@@ -331,18 +334,38 @@ export default function ReconcileStoragePage() {
               </div>
             )}
 
-            {/* Detected Formats */}
-            {result.detectedFormats && result.detectedFormats.length > 0 && (
+            {/* Match Strategy Breakdown */}
+            {result.matched > 0 && (
               <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                <p className="text-gray-400 text-xs font-medium mb-2 flex items-center gap-2">
+                <p className="text-gray-400 text-xs font-medium mb-3 flex items-center gap-2">
                   <Database className="w-3.5 h-3.5" />
-                  Detected path strategies
+                  Match strategy breakdown
                 </p>
-                <div className="flex flex-wrap gap-2">
-                  {result.detectedFormats.map((f) => (
-                    <span key={f} className="px-2 py-1 bg-gray-800 text-gray-300 text-xs rounded font-mono">{f}</span>
-                  ))}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-3">
+                  <div className="bg-gray-800/60 rounded-lg p-3 text-center">
+                    <p className="text-lg font-bold text-green-400">{result.matchedByPublicAssetId ?? 0}</p>
+                    <p className="text-gray-400 text-xs mt-0.5">by public_asset_id</p>
+                  </div>
+                  <div className="bg-gray-800/60 rounded-lg p-3 text-center">
+                    <p className="text-lg font-bold text-purple-400">{result.matchedByUuidAssetId ?? 0}</p>
+                    <p className="text-gray-400 text-xs mt-0.5">by UUID assets.id</p>
+                  </div>
+                  <div className="bg-gray-800/60 rounded-lg p-3 text-center">
+                    <p className="text-lg font-bold text-blue-400">{result.matches.filter(m => m.fileLevel === 'thumbnail').length}</p>
+                    <p className="text-gray-400 text-xs mt-0.5">thumbnails (preview)</p>
+                  </div>
+                  <div className="bg-gray-800/60 rounded-lg p-3 text-center">
+                    <p className="text-lg font-bold text-cyan-400">{result.matches.filter(m => m.fileLevel === 'preview').length}</p>
+                    <p className="text-gray-400 text-xs mt-0.5">previews (preview)</p>
+                  </div>
                 </div>
+                {result.detectedFormats && result.detectedFormats.length > 0 && (
+                  <div className="flex flex-wrap gap-2">
+                    {result.detectedFormats.map((f) => (
+                      <span key={f} className={`px-2 py-1 text-xs rounded font-mono ${f === 'uuid-asset-id' ? 'bg-purple-900/40 text-purple-300 border border-purple-700/40' : 'bg-gray-800 text-gray-300'}`}>{f}</span>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
@@ -390,6 +413,7 @@ export default function ReconcileStoragePage() {
                           <th className="text-left px-4 py-2 text-gray-400 font-medium">Public Asset ID</th>
                           <th className="text-left px-4 py-2 text-gray-400 font-medium">Asset Title</th>
                           <th className="text-left px-4 py-2 text-gray-400 font-medium">Level</th>
+                          <th className="text-left px-4 py-2 text-gray-400 font-medium">Strategy</th>
                           <th className="text-left px-4 py-2 text-gray-400 font-medium">Bucket</th>
                           <th className="text-left px-4 py-2 text-gray-400 font-medium">Path</th>
                           <th className="text-left px-4 py-2 text-gray-400 font-medium">Size</th>
@@ -399,13 +423,18 @@ export default function ReconcileStoragePage() {
                       <tbody>
                         {result.matches.map((m, i) => (
                           <tr key={i} className="border-b border-gray-800/50 hover:bg-gray-800/30">
-                            <td className="px-4 py-2 font-mono text-gray-300">{m.publicAssetId}</td>
+                            <td className="px-4 py-2 font-mono text-gray-300">{m.publicAssetId || <span className="text-gray-500 italic">via UUID</span>}</td>
                             <td className="px-4 py-2 text-gray-300 max-w-[180px] truncate" title={m.assetTitle}>{m.assetTitle}</td>
                             <td className="px-4 py-2">
                               <span className={`px-2 py-0.5 rounded text-xs font-medium ${
                                 m.fileLevel === 'thumbnail' ?'bg-purple-900/40 text-purple-300' :'bg-blue-900/40 text-blue-300'
                               }`}>
                                 {m.fileLevel}
+                              </span>
+                            </td>
+                            <td className="px-4 py-2">
+                              <span className={`px-1.5 py-0.5 rounded text-xs font-mono ${m.strategy === 'uuid-asset-id' ? 'bg-purple-900/40 text-purple-300' : 'bg-gray-800 text-gray-400'}`}>
+                                {m.strategy ?? '—'}
                               </span>
                             </td>
                             <td className="px-4 py-2 text-gray-400 font-mono">{m.bucket.replace('asset-', '')}</td>
