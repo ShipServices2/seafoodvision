@@ -33,7 +33,10 @@ export async function POST(request: NextRequest) {
     'webhook-timestamp': request.headers.get('webhook-timestamp') ?? '',
   };
 
-  const config = provider.getConfig();
+  const webhookSecretConfigured = !!(
+    process.env.DODO_PAYMENTS_WEBHOOK_SECRET &&
+    process.env.DODO_PAYMENTS_WEBHOOK_SECRET.length > 0
+  );
 
   // 1. Verify webhook signature
   let verificationResult;
@@ -43,25 +46,39 @@ export async function POST(request: NextRequest) {
     const msg = err instanceof Error ? err.message : 'Verification error';
     console.error('[webhook/dodo] Signature verification threw:', msg);
 
-    // In test mode with no secret configured, accept unsigned events for development
-    if (config.environment === 'test' && !config.isConfigured) {
+    // STRICT: if webhook secret is configured, ALWAYS reject invalid signatures
+    if (webhookSecretConfigured) {
+      return NextResponse.json(
+        { error: 'Webhook signature verification failed' },
+        { status: 401 }
+      );
+    }
+
+    // Only allow unsigned events in test mode WITHOUT a secret configured (local dev only)
+    const environment = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
+    if (environment === 'test' && !webhookSecretConfigured) {
       try {
         const parsed = JSON.parse(rawBody);
         verificationResult = {
           isValid: true,
           payload: parsed as Record<string, unknown>,
           eventType: String(parsed.type ?? parsed.event_type ?? 'unknown'),
-          externalEventId: webhookHeaders['webhook-id'] || String(parsed.id ?? `test-${Date.now()}`),
+          externalEventId:
+            webhookHeaders['webhook-id'] ||
+            String(parsed.id ?? `test-${Date.now()}`),
         };
       } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
       }
     } else {
-      return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 401 });
+      return NextResponse.json(
+        { error: 'Webhook signature verification failed' },
+        { status: 401 }
+      );
     }
   }
 
-  if (!verificationResult.isValid) {
+  if (!verificationResult || !verificationResult.isValid) {
     console.error('[webhook/dodo] Invalid signature');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
@@ -117,7 +134,7 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      // Subscription events
+      // Subscription events — status active means subscription is live
       case 'subscription.active': case'subscription.renewed': {
         const result = await handleSubscriptionActivated(payload);
         relatedSubscriptionId = result.subscriptionId;
@@ -136,7 +153,7 @@ export async function POST(request: NextRequest) {
         break;
       }
 
-      // Subscription lifecycle events (log only for now)
+      // Subscription lifecycle events (log only)
       case 'subscription.cancelled': case'subscription.expired': case'subscription.on_hold': case'subscription.plan_changed': case'subscription.updated': case'subscription.failed':
         console.log(`[webhook/dodo] Subscription lifecycle event: ${eventType}`, payload);
         break;

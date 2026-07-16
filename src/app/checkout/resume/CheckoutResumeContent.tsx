@@ -8,7 +8,9 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { ArrowRight, RefreshCw, AlertCircle, ShoppingCart, CheckCircle2, Settings } from 'lucide-react';
 
-type ResumeState = 'loading' | 'creating_checkout' | 'redirecting' | 'error' | 'no_intent' | 'not_configured';
+type ResumeState =
+  | 'loading' |'creating_checkout' |'redirecting' |'error' |'no_intent' |'not_configured';
+
 type CheckoutType = 'subscription' | 'asset_license' | 'unknown';
 
 export default function CheckoutResumeContent() {
@@ -32,6 +34,7 @@ export default function CheckoutResumeContent() {
 
   const [state, setState] = useState<ResumeState>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  // Prevent double-execution (StrictMode + refresh guard)
   const startedRef = useRef(false);
 
   useEffect(() => {
@@ -51,13 +54,13 @@ export default function CheckoutResumeContent() {
       return;
     }
 
-    // No intent
+    // No intent — show clear message, never redirect to home
     if (checkoutType === 'unknown') {
       setState('no_intent');
       return;
     }
 
-    // Prevent double-execution in StrictMode
+    // Prevent double-execution in StrictMode / page refresh
     if (startedRef.current) return;
     startedRef.current = true;
 
@@ -71,10 +74,15 @@ export default function CheckoutResumeContent() {
       let res: Response;
 
       if (checkoutType === 'subscription') {
-        res = await fetch('/api/payments/dodo/subscription-checkout', {
+        // Use unified checkout route with type=subscription
+        res = await fetch('/api/payments/dodo/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ planCode: plan, billingCycle: cycle }),
+          body: JSON.stringify({
+            type: 'subscription',
+            planCode: plan,
+            billingCycle: cycle,
+          }),
         });
       } else {
         // asset_license
@@ -88,8 +96,8 @@ export default function CheckoutResumeContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        const errMsg = data.error ?? 'Checkout failed';
-        // Detect Dodo not configured
+        const errMsg = (data as { error?: string }).error ?? 'Checkout failed';
+        // Detect Dodo not configured — show informative state, preserve intent
         if (
           errMsg.toLowerCase().includes('not configured') ||
           errMsg.toLowerCase().includes('disabled') ||
@@ -104,11 +112,8 @@ export default function CheckoutResumeContent() {
 
       const { checkoutUrl } = data as { checkoutUrl: string; orderId: string };
 
-      // If redirected to /checkout/pending, show not_configured state instead
-      if (checkoutUrl.startsWith('/checkout/pending')) {
-        setState('not_configured');
-        setErrorMessage('Dodo Payments is not configured. Set DODO_PAYMENTS_API_KEY and DODO_PAYMENTS_WEBHOOK_SECRET to enable live checkout.');
-        return;
+      if (!checkoutUrl) {
+        throw new Error('No checkout URL returned from server');
       }
 
       setState('redirecting');
@@ -133,12 +138,16 @@ export default function CheckoutResumeContent() {
       ? `Image license (${licenseTypeCode ?? ''})`
       : '';
 
-  // Intent summary for display
-  const intentSummary = checkoutType === 'subscription'
-    ? { label: 'Plan', value: productLabel }
-    : checkoutType === 'asset_license'
-    ? { label: 'License', value: `${licenseTypeCode ?? ''} — asset ${assetId?.slice(0, 8) ?? ''}` }
-    : null;
+  // Intent summary for display (never lost — shown in all non-loading states)
+  const intentSummary =
+    checkoutType === 'subscription'
+      ? { label: 'Plan', value: productLabel }
+      : checkoutType === 'asset_license'
+      ? {
+          label: 'License',
+          value: `${licenseTypeCode ?? ''} — asset ${assetId?.slice(0, 8) ?? ''}`,
+        }
+      : null;
 
   return (
     <div className="min-h-screen bg-background">
@@ -146,58 +155,84 @@ export default function CheckoutResumeContent() {
       <main className="max-w-lg mx-auto px-4 pt-28 pb-20">
         <div className="bg-card border border-border rounded-2xl p-8 text-center shadow-sm">
 
+          {/* Loading / Creating checkout */}
           {(state === 'loading' || state === 'creating_checkout') && (
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-secondary/10 flex items-center justify-center">
                 <ShoppingCart className="w-8 h-8 text-secondary" />
               </div>
               <h1 className="text-xl font-bold text-foreground">
-                {state === 'loading' ? 'Preparing your checkout…' : `Setting up ${productLabel}`}
+                {state === 'loading' ?'Preparing your checkout…'
+                  : `Setting up ${productLabel}`}
               </h1>
               {state === 'creating_checkout' && (
                 <p className="text-sm text-muted-foreground">
-                  Creating your order and opening the checkout…
+                  Creating your order and opening the secure checkout…
                 </p>
               )}
               <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin mt-2" />
             </div>
           )}
 
+          {/* Redirecting to Dodo */}
           {state === 'redirecting' && (
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-green-100 flex items-center justify-center">
                 <CheckCircle2 className="w-8 h-8 text-green-600" />
               </div>
-              <h1 className="text-xl font-bold text-foreground">Redirecting to checkout…</h1>
-              <p className="text-sm text-muted-foreground">You are being redirected to the secure payment page.</p>
+              <h1 className="text-xl font-bold text-foreground">
+                Redirecting to checkout…
+              </h1>
+              <p className="text-sm text-muted-foreground">
+                You are being redirected to the secure Dodo Payments page.
+              </p>
               <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin mt-2" />
             </div>
           )}
 
+          {/* Dodo not configured — preserve intent, show clear message */}
           {state === 'not_configured' && (
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center">
                 <Settings className="w-8 h-8 text-amber-600" />
               </div>
-              <h1 className="text-xl font-bold text-foreground">Dodo Payments is not configured</h1>
+              <h1 className="text-xl font-bold text-foreground">
+                Dodo Payments is not configured
+              </h1>
               <p className="text-sm text-muted-foreground max-w-sm">
                 The payment provider is not yet configured. Please set{' '}
-                <code className="bg-muted px-1 rounded text-xs">DODO_PAYMENTS_API_KEY</code> and{' '}
-                <code className="bg-muted px-1 rounded text-xs">DODO_PAYMENTS_WEBHOOK_SECRET</code> to enable checkout.
+                <code className="bg-muted px-1 rounded text-xs">
+                  DODO_PAYMENTS_API_KEY
+                </code>{' '}
+                and{' '}
+                <code className="bg-muted px-1 rounded text-xs">
+                  DODO_PAYMENTS_WEBHOOK_SECRET
+                </code>{' '}
+                in your environment variables to enable checkout.
               </p>
 
-              {/* Show the purchase intent so it's not lost */}
+              {/* Purchase intent preserved — never lost */}
               {intentSummary && (
                 <div className="w-full bg-muted/50 rounded-xl p-4 text-left mt-2">
-                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">Purchase intent</p>
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Purchase intent (preserved)
+                  </p>
                   <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">{intentSummary.label}</span>
-                    <span className="text-sm font-semibold text-foreground">{intentSummary.value}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {intentSummary.label}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {intentSummary.value}
+                    </span>
                   </div>
                   {checkoutType === 'subscription' && (
                     <div className="flex items-center justify-between mt-1">
-                      <span className="text-sm text-muted-foreground">Billing cycle</span>
-                      <span className="text-sm font-semibold text-foreground capitalize">{cycle}</span>
+                      <span className="text-sm text-muted-foreground">
+                        Billing cycle
+                      </span>
+                      <span className="text-sm font-semibold text-foreground capitalize">
+                        {cycle}
+                      </span>
                     </div>
                   )}
                 </div>
@@ -205,7 +240,11 @@ export default function CheckoutResumeContent() {
 
               <div className="flex gap-3 mt-2">
                 <Link
-                  href={checkoutType === 'asset_license' && assetId ? `/asset/${assetId}` : '/pricing'}
+                  href={
+                    checkoutType === 'asset_license' && assetId
+                      ? `/asset/${assetId}`
+                      : '/pricing'
+                  }
                   className="flex items-center gap-2 px-5 py-2.5 bg-secondary text-white rounded-xl text-sm font-medium hover:bg-secondary/90 transition-colors"
                 >
                   {checkoutType === 'asset_license' ? 'Back to asset' : 'Back to Pricing'}
@@ -214,15 +253,36 @@ export default function CheckoutResumeContent() {
             </div>
           )}
 
+          {/* Error state — with retry, never silent redirect to home */}
           {state === 'error' && (
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-red-100 flex items-center justify-center">
                 <AlertCircle className="w-8 h-8 text-red-500" />
               </div>
-              <h1 className="text-xl font-bold text-foreground">Checkout unavailable</h1>
+              <h1 className="text-xl font-bold text-foreground">
+                Checkout unavailable
+              </h1>
               <p className="text-sm text-muted-foreground max-w-sm">
                 {errorMessage ?? 'We could not start your checkout. Please try again.'}
               </p>
+
+              {/* Show preserved intent even on error */}
+              {intentSummary && (
+                <div className="w-full bg-muted/50 rounded-xl p-4 text-left">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Your selection
+                  </p>
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">
+                      {intentSummary.label}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">
+                      {intentSummary.value}
+                    </span>
+                  </div>
+                </div>
+              )}
+
               <div className="flex gap-3 mt-2">
                 <button
                   onClick={() => {
@@ -235,7 +295,11 @@ export default function CheckoutResumeContent() {
                   <RefreshCw className="w-4 h-4" /> Try again
                 </button>
                 <Link
-                  href={checkoutType === 'asset_license' && assetId ? `/asset/${assetId}` : '/pricing'}
+                  href={
+                    checkoutType === 'asset_license' && assetId
+                      ? `/asset/${assetId}`
+                      : '/pricing'
+                  }
                   className="flex items-center gap-2 px-5 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-muted transition-colors"
                 >
                   {checkoutType === 'asset_license' ? 'Back to asset' : 'Back to Pricing'}
@@ -244,24 +308,35 @@ export default function CheckoutResumeContent() {
             </div>
           )}
 
+          {/* No intent — clear message, never redirect to home */}
           {state === 'no_intent' && (
             <div className="flex flex-col items-center gap-4">
               <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center">
                 <ShoppingCart className="w-8 h-8 text-muted-foreground" />
               </div>
-              <h1 className="text-xl font-bold text-foreground">No purchase selected</h1>
+              <h1 className="text-xl font-bold text-foreground">
+                No purchase intent found
+              </h1>
               <p className="text-sm text-muted-foreground max-w-sm">
-                It looks like your selection was lost. Please choose a plan or image license to continue.
+                We could not find a purchase intent to resume. Please select a plan or
+                asset to purchase.
               </p>
-              <Link
-                href="/pricing"
-                className="flex items-center gap-2 px-5 py-2.5 bg-secondary text-white rounded-xl text-sm font-medium hover:bg-secondary/90 transition-colors mt-2"
-              >
-                View Plans <ArrowRight className="w-4 h-4" />
-              </Link>
+              <div className="flex gap-3 mt-2">
+                <Link
+                  href="/pricing"
+                  className="flex items-center gap-2 px-5 py-2.5 bg-secondary text-white rounded-xl text-sm font-medium hover:bg-secondary/90 transition-colors"
+                >
+                  View Pricing <ArrowRight className="w-4 h-4" />
+                </Link>
+                <Link
+                  href="/library"
+                  className="flex items-center gap-2 px-5 py-2.5 border border-border rounded-xl text-sm font-medium text-foreground hover:bg-muted transition-colors"
+                >
+                  Browse Library
+                </Link>
+              </div>
             </div>
           )}
-
         </div>
       </main>
       <Footer />

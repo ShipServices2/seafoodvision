@@ -23,11 +23,17 @@ interface Setting {
 interface DodoDiagnostic {
   apiKeyConfigured: boolean;
   webhookSecretConfigured: boolean;
+  returnUrlConfigured: boolean;
+  cancelUrlConfigured: boolean;
   environment: string;
   returnUrl: string;
   cancelUrl: string;
   providerEnabled: boolean;
   checkoutRouteAvailable: boolean;
+  webhookUrl: string;
+  subscriptionMappingsConfigured: number;
+  subscriptionMappingsExpected: number;
+  mappedProductIds: string[];
 }
 
 const CATEGORY_ORDER = ['general', 'payments', 'downloads', 'tax', 'promotions', 'subscriptions'];
@@ -213,7 +219,7 @@ export default function AdminCommerceSettingsPage() {
               {/* Overall status badge */}
               <div className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 ${
                 isFullyConfigured
-                  ? 'bg-green-50 border border-green-200' :'bg-amber-50 border border-amber-200'
+                  ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'
               }`}>
                 {isFullyConfigured ? (
                   <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
@@ -230,17 +236,27 @@ export default function AdminCommerceSettingsPage() {
               {/* Config checks */}
               <div className="bg-muted/30 rounded-xl px-4 mb-4">
                 <DiagnosticRow
-                  label="API key configured"
+                  label="DODO_PAYMENTS_API_KEY configured"
                   value={diagnostic.apiKeyConfigured ? 'yes' : 'no'}
                   ok={diagnostic.apiKeyConfigured}
                 />
                 <DiagnosticRow
-                  label="Webhook secret configured"
+                  label="DODO_PAYMENTS_WEBHOOK_SECRET configured"
                   value={diagnostic.webhookSecretConfigured ? 'yes' : 'no'}
                   ok={diagnostic.webhookSecretConfigured}
                 />
                 <DiagnosticRow
-                  label="Provider enabled"
+                  label="DODO_PAYMENTS_RETURN_URL configured"
+                  value={diagnostic.returnUrlConfigured ? 'yes' : 'no'}
+                  ok={diagnostic.returnUrlConfigured}
+                />
+                <DiagnosticRow
+                  label="DODO_PAYMENTS_CANCEL_URL configured"
+                  value={diagnostic.cancelUrlConfigured ? 'yes' : 'no'}
+                  ok={diagnostic.cancelUrlConfigured}
+                />
+                <DiagnosticRow
+                  label="Dodo Payments enabled"
                   value={diagnostic.providerEnabled ? 'yes' : 'no'}
                   ok={diagnostic.providerEnabled}
                 />
@@ -249,14 +265,35 @@ export default function AdminCommerceSettingsPage() {
                   value={diagnostic.checkoutRouteAvailable ? 'yes' : 'no'}
                   ok={diagnostic.checkoutRouteAvailable}
                 />
+                <DiagnosticRow
+                  label="Subscription mappings (test mode)"
+                  value={`${diagnostic.subscriptionMappingsConfigured} / ${diagnostic.subscriptionMappingsExpected}`}
+                  ok={diagnostic.subscriptionMappingsConfigured >= diagnostic.subscriptionMappingsExpected}
+                />
               </div>
 
               {/* Info rows */}
-              <div className="bg-muted/30 rounded-xl px-4">
-                <DiagnosticInfoRow label="Environment" value={diagnostic.environment} />
+              <div className="bg-muted/30 rounded-xl px-4 mb-4">
+                <DiagnosticInfoRow label="DODO_PAYMENTS_ENVIRONMENT" value={diagnostic.environment} />
                 <DiagnosticInfoRow label="Return URL" value={diagnostic.returnUrl} />
                 <DiagnosticInfoRow label="Cancel URL" value={diagnostic.cancelUrl} />
+                <DiagnosticInfoRow label="Webhook URL" value={diagnostic.webhookUrl} />
               </div>
+
+              {/* Mapped product IDs */}
+              {diagnostic.mappedProductIds.length > 0 && (
+                <div className="bg-muted/30 rounded-xl px-4 py-3 mb-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Mapped Dodo Product IDs ({diagnostic.environment})
+                  </p>
+                  {diagnostic.mappedProductIds.map((pid) => (
+                    <div key={pid} className="flex items-center gap-2 py-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                      <code className="text-xs text-foreground">{pid}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
 
               {!diagnostic.apiKeyConfigured && (
                 <p className="text-xs text-muted-foreground mt-3">
@@ -277,7 +314,10 @@ export default function AdminCommerceSettingsPage() {
               {process.env.NEXT_PUBLIC_SITE_URL ?? 'https://your-domain.com'}/api/webhooks/dodo-payments
             </code>
           </div>
-          <p className="text-xs text-muted-foreground mt-2">Register this URL in your Dodo Payments dashboard to receive payment events.</p>
+          <p className="text-xs text-muted-foreground mt-2">
+            Register this URL in your Dodo Payments dashboard to receive payment events.
+            The route accepts POST only and verifies the Dodo signature header.
+          </p>
         </div>
 
         {/* Database settings */}
