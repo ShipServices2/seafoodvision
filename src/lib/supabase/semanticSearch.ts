@@ -843,8 +843,8 @@ export async function searchLibraryAssets(query: string, limit = 24): Promise<Li
   const supabase = createClient();
   const q = query.trim();
 
-  // Search assets by title, description, product_form, category, and via species name
-  const [directRes, speciesRes] = await Promise.all([
+  // Search assets by title, description, product_form, category, search_aliases, and via species name
+  const [directRes, speciesRes, aliasRes] = await Promise.all([
     supabase
       .from('assets')
       .select('id, slug, title, category, product_form, product_state, is_verified, is_demo, review_status, asset_keywords(keywords(term))')
@@ -852,12 +852,21 @@ export async function searchLibraryAssets(query: string, limit = 24): Promise<Li
       .or(`title.ilike.%${q}%,description.ilike.%${q}%,product_form.ilike.%${q}%,product_state.ilike.%${q}%,category.ilike.%${q}%,packaging.ilike.%${q}%`)
       .limit(limit),
 
-    // Search via species name
+    // Search via species name (common_name or scientific_name)
     supabase
       .from('assets')
       .select('id, slug, title, category, product_form, product_state, is_verified, is_demo, review_status, species!fk_assets_species(common_name, scientific_name), asset_keywords(keywords(term))')
       .in('publication_status', ['approved', 'commercial', 'editorial'])
       .not('species_id', 'is', null)
+      .limit(limit * 2), // fetch more to filter client-side
+
+    // Search via search_aliases (validated species names written by human validation)
+    supabase
+      .from('assets')
+      .select('id, slug, title, category, product_form, product_state, is_verified, is_demo, review_status, asset_keywords(keywords(term))')
+      .in('publication_status', ['approved', 'commercial', 'editorial'])
+      .not('search_aliases', 'is', null)
+      .contains('search_aliases', [q.toLowerCase()])
       .limit(limit),
   ]);
 
@@ -878,21 +887,30 @@ export async function searchLibraryAssets(query: string, limit = 24): Promise<Li
     keywords: a.asset_keywords?.map((ak: any) => ak.keywords?.term).filter(Boolean) || [],
   });
 
+  // 1. Direct text matches
   (directRes.data || []).forEach((a: any) => {
     if (!seen.has(a.id)) { seen.add(a.id); results.push(mapAsset(a)); }
   });
 
-  // Add species-matched assets
+  // 2. Species-matched assets (filter by species name containing query)
   (speciesRes.data || []).forEach((a: any) => {
     if (seen.has(a.id)) return;
     const sp = a.species;
     if (!sp) return;
     const spName = sp.common_name || sp.scientific_name || '';
-    if (spName.toLowerCase().includes(q.toLowerCase()) ||
-        (sp.scientific_name || '').toLowerCase().includes(q.toLowerCase())) {
+    const sciName = sp.scientific_name || '';
+    if (
+      spName.toLowerCase().includes(q.toLowerCase()) ||
+      sciName.toLowerCase().includes(q.toLowerCase())
+    ) {
       seen.add(a.id);
       results.push(mapAsset(a, spName));
     }
+  });
+
+  // 3. Alias-matched assets (validated species names)
+  (aliasRes.data || []).forEach((a: any) => {
+    if (!seen.has(a.id)) { seen.add(a.id); results.push(mapAsset(a)); }
   });
 
   return results.slice(0, limit);

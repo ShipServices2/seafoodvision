@@ -8,7 +8,7 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
-import { Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader2, ShieldAlert, Eye, BarChart2 } from 'lucide-react';
+import { Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader2, Eye, BarChart2, List,  } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -34,7 +34,6 @@ interface Candidate {
   is_validated: boolean;
   source_provider: string;
   asset_id: string | null;
-  // Real AI fields
   provider_mode?: string;
   confidence_score?: number | null;
   biological_order?: string | null;
@@ -42,6 +41,7 @@ interface Candidate {
   identification_limits?: string[] | null;
   reasoning_summary?: string | null;
   is_real_ai?: boolean;
+  result_id?: string | null;
 }
 
 interface OpenAIPilotCandidate {
@@ -114,6 +114,22 @@ interface SIEJob {
   metadata_confidence: number | null;
   validation_progress?: number | null;
   processing_progress?: number | null;
+  pilot_job_name?: string | null;
+  provider_mode?: string | null;
+  total_assets?: number | null;
+}
+
+// Batch asset entry from openai_pilot_job_assets
+interface BatchAsset {
+  id: string; // openai_pilot_job_assets.id
+  batch_job_id: string;
+  asset_job_id: string | null;
+  asset_id: string | null;
+  public_asset_id: string;
+  result_id: string | null;
+  review_position: number;
+  review_status: string;
+  reviewed_at: string | null;
 }
 
 interface AssetPreviewData {
@@ -137,7 +153,7 @@ interface FieldDecision {
 
 type ValidationField =
   | 'species' | 'scientific_name' | 'commercial_name' | 'local_names'
-  | 'family'| 'genus' | 'order_name' | 'keywords' | 'category' |'description' | 'packaging' | 'product_type' | 'confidence';
+  | 'family' | 'genus' | 'order_name' | 'keywords' | 'category' | 'description' | 'packaging' | 'product_type' | 'confidence';
 
 const VALIDATION_FIELDS: { key: ValidationField; label: string; icon: React.ElementType }[] = [
   { key: 'species', label: 'Species (Common Name)', icon: Fish },
@@ -171,6 +187,13 @@ const JOB_STATUS_COLORS: Record<string, string> = {
   queued: 'bg-violet-100 text-violet-700',
   processing: 'bg-blue-100 text-blue-600',
   failed: 'bg-red-100 text-red-600',
+};
+
+const REVIEW_STATUS_COLORS: Record<string, string> = {
+  unreviewed: 'bg-gray-100 text-gray-600',
+  validated: 'bg-emerald-100 text-emerald-700',
+  skipped: 'bg-amber-100 text-amber-700',
+  unknown: 'bg-gray-100 text-gray-500',
 };
 
 const PROPAGATION_TARGETS = [
@@ -228,15 +251,29 @@ function AIStudioValidationPageInner() {
   const searchParams = useSearchParams();
   const focusJobId = searchParams.get('job');
 
+  // ── Batch mode state (OpenAI pilot job with 20 assets) ────────────────────
+  const [batchJob, setBatchJob] = useState<SIEJob | null>(null);
+  const [batchAssets, setBatchAssets] = useState<BatchAsset[]>([]);
+  const [batchPosition, setBatchPosition] = useState(0); // 0-based index into batchAssets
+  const [batchFilter, setBatchFilter] = useState<'all' | 'unreviewed' | 'validated' | 'skipped' | 'unknown'>('all');
+  const [batchMode, setBatchMode] = useState(false); // true = navigating within a batch
+  const [autoAdvance, setAutoAdvance] = useState(true);
+
+  // ── Legacy job list state (for non-batch sie_jobs) ────────────────────────
   const [jobs, setJobs] = useState<SIEJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<SIEJob | null>(null);
+  const [jobPage, setJobPage] = useState(0);
+  const [jobTotal, setJobTotal] = useState(0);
+  const [jobStatusFilter, setJobStatusFilter] = useState('');
+
+  // ── Current asset state ───────────────────────────────────────────────────
   const [candidates, setCandidates] = useState<Candidate[]>([]);
   const [history, setHistory] = useState<ValidationEntry[]>([]);
   const [assetPreview, setAssetPreview] = useState<AssetPreviewData | null>(null);
   const [assetTitle, setAssetTitle] = useState<string | null>(null);
   const [assetStatus, setAssetStatus] = useState<string | null>(null);
-  const [jobPage, setJobPage] = useState(0);
-  const [jobTotal, setJobTotal] = useState(0);
+
+  // ── UI state ──────────────────────────────────────────────────────────────
   const [fetching, setFetching] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [comment, setComment] = useState('');
@@ -247,13 +284,10 @@ function AIStudioValidationPageInner() {
   const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [propagating, setPropagating] = useState(false);
   const [propagationDone, setPropagationDone] = useState<string[]>([]);
-  const [jobStatusFilter, setJobStatusFilter] = useState('');
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
-  const [bulkConfirmOpen, setBulkConfirmOpen] = useState(false);
-  const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set());
-  const [bulkMode, setBulkMode] = useState(false);
-  const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [validationStats, setValidationStats] = useState<{ total: number; validated: number }>({ total: 0, validated: 0 });
+  const [confirmSuccess, setConfirmSuccess] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [validationStats, setValidationStats] = useState<{ total: number; validated: number; skipped: number; unknown: number }>({ total: 0, validated: 0, skipped: 0, unknown: 0 });
   const [pilotMetadata, setPilotMetadata] = useState<OpenAIPilotMetadata | null>(null);
   const [showPilotMetadata, setShowPilotMetadata] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
@@ -265,6 +299,35 @@ function AIStudioValidationPageInner() {
     }
   }, [user, profile, loading, router]);
 
+  // ── Load batch job (OpenAI pilot) from Supabase ───────────────────────────
+  const loadBatchJob = useCallback(async () => {
+    const supabase = createClient();
+    // Find the pilot batch job
+    const { data: pilotJob } = await supabase
+      .from('sie_jobs')
+      .select('*')
+      .not('pilot_job_name', 'is', null)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (!pilotJob) return;
+    setBatchJob(pilotJob);
+
+    // Load all batch assets in review_position order
+    const { data: assets } = await supabase
+      .from('openai_pilot_job_assets')
+      .select('*')
+      .eq('batch_job_id', pilotJob.id)
+      .order('review_position', { ascending: true });
+
+    if (assets && assets.length > 0) {
+      setBatchAssets(assets as BatchAsset[]);
+      setBatchMode(true);
+    }
+  }, []);
+
+  // ── Fetch legacy jobs list ────────────────────────────────────────────────
   const fetchJobs = useCallback(async () => {
     if (!profile) return;
     setFetching(true);
@@ -272,6 +335,7 @@ function AIStudioValidationPageInner() {
     let query = supabase
       .from('sie_jobs')
       .select('*', { count: 'exact' })
+      .is('pilot_job_name', null) // exclude batch anchor jobs from the list
       .order('created_at', { ascending: false })
       .range(jobPage * PAGE_SIZE, (jobPage + 1) * PAGE_SIZE - 1);
 
@@ -287,13 +351,11 @@ function AIStudioValidationPageInner() {
     setJobTotal(count ?? 0);
     setFetching(false);
 
-    // If a focusJobId is provided via URL, select that job
     if (focusJobId && !selectedJob) {
       const target = jobList.find((j: SIEJob) => j.id === focusJobId);
       if (target) {
         setSelectedJob(target);
       } else {
-        // Fetch the specific job if not in current page
         const { data: specificJob } = await supabase
           .from('sie_jobs')
           .select('*')
@@ -301,13 +363,31 @@ function AIStudioValidationPageInner() {
           .single();
         if (specificJob) setSelectedJob(specificJob);
       }
-    } else if (jobList.length > 0 && !selectedJob) {
+    } else if (jobList.length > 0 && !selectedJob && !batchMode) {
       setSelectedJob(jobList[0]);
     }
-  }, [profile, jobPage, selectedJob, jobStatusFilter, focusJobId]);
+  }, [profile, jobPage, selectedJob, jobStatusFilter, focusJobId, batchMode]);
 
-  // Fetch validation stats
+  // ── Fetch batch stats ─────────────────────────────────────────────────────
+  const fetchBatchStats = useCallback(async () => {
+    if (!batchJob) return;
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('openai_pilot_job_assets')
+      .select('review_status')
+      .eq('batch_job_id', batchJob.id);
+
+    if (!data) return;
+    const total = data.length;
+    const validated = data.filter((a) => a.review_status === 'validated').length;
+    const skipped = data.filter((a) => a.review_status === 'skipped').length;
+    const unknown = data.filter((a) => a.review_status === 'unknown').length;
+    setValidationStats({ total, validated, skipped, unknown });
+  }, [batchJob]);
+
+  // ── Fetch validation stats (legacy) ──────────────────────────────────────
   const fetchValidationStats = useCallback(async () => {
+    if (batchJob) { fetchBatchStats(); return; }
     const supabase = createClient();
     const [totalRes, validatedRes] = await Promise.all([
       supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
@@ -318,42 +398,85 @@ function AIStudioValidationPageInner() {
     setValidationStats({
       total: totalRes.count ?? 0,
       validated: validatedRes.count ?? 0,
+      skipped: 0,
+      unknown: 0,
     });
-  }, []);
+  }, [batchJob, fetchBatchStats]);
 
-  useEffect(() => { fetchJobs(); }, [fetchJobs]);
+  useEffect(() => {
+    if (profile) {
+      loadBatchJob();
+      fetchJobs();
+    }
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => { fetchValidationStats(); }, [fetchValidationStats]);
 
-  const fetchCandidates = useCallback(async (jobId: string, assetId?: string | null) => {
+  // ── Current batch asset (derived) ────────────────────────────────────────
+  const filteredBatchAssets = batchAssets.filter((a) => {
+    if (batchFilter === 'all') return true;
+    return a.review_status === batchFilter;
+  });
+
+  const currentBatchAsset = batchMode && filteredBatchAssets.length > 0
+    ? filteredBatchAssets[batchPosition] ?? null
+    : null;
+
+  // ── Effective "current job" — either from batch or legacy list ────────────
+  // When in batch mode, we synthesize a job-like object from the batch asset
+  const effectiveAssetId = batchMode ? currentBatchAsset?.asset_id ?? null : selectedJob?.asset_id ?? null;
+  const effectiveJobId = batchMode ? currentBatchAsset?.asset_job_id ?? batchJob?.id ?? null : selectedJob?.id ?? null;
+  const effectivePublicAssetId = batchMode ? currentBatchAsset?.public_asset_id ?? null : selectedJob?.public_asset_id ?? null;
+  const effectiveResultId = batchMode ? currentBatchAsset?.result_id ?? null : null;
+
+  const fetchCandidates = useCallback(async (assetId: string | null, resultId: string | null, jobId: string | null) => {
     const supabase = createClient();
+    let rows: Candidate[] = [];
 
-    // Primary query: by job_id (correct relationship)
-    const { data, error } = await supabase
-      .from('sie_species_candidates')
-      .select('*')
-      .eq('job_id', jobId)
-      .order('rank', { ascending: true });
-
-    if (error) {
-      console.error('[Validation] fetchCandidates error:', error.message, error.hint);
-    }
-
-    let rows = data ?? [];
-
-    // Fallback: if no rows by job_id but we have asset_id, try asset_id lookup
-    // (handles legacy rows inserted without job_id linkage)
-    if (rows.length === 0 && assetId) {
-      const { data: fallbackData } = await supabase
-        .from('sie_species_candidates')
+    // Primary: load OpenAI pilot candidates if we have a result_id
+    if (resultId) {
+      const { data: pilotCandidates } = await supabase
+        .from('openai_pilot_candidates')
         .select('*')
-        .eq('asset_id', assetId)
-        .order('rank', { ascending: true })
-        .limit(5);
-      rows = fallbackData ?? [];
+        .eq('result_id', resultId)
+        .order('rank', { ascending: true });
+
+      if (pilotCandidates && pilotCandidates.length > 0) {
+        rows = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
+          id: pc.id,
+          rank: pc.rank,
+          common_name: pc.common_name,
+          scientific_name: pc.scientific_name,
+          family: pc.family,
+          genus: pc.genus,
+          order_name: pc.biological_order,
+          ai_score: Math.round((pc.confidence_score ?? 0) * 100),
+          similarity_score: Math.round((pc.confidence_score ?? 0) * 100),
+          main_reasons: pc.visual_evidence ?? [],
+          product_form: null,
+          commercial_name: null,
+          description_candidate: null,
+          category_candidate: null,
+          packaging_candidate: null,
+          product_candidate: null,
+          keywords_candidate: null,
+          is_selected: pc.is_selected,
+          is_validated: pc.is_validated,
+          source_provider: 'openai',
+          asset_id: pc.asset_id,
+          provider_mode: 'real_ai',
+          confidence_score: pc.confidence_score,
+          biological_order: pc.biological_order,
+          visual_evidence: pc.visual_evidence,
+          identification_limits: pc.identification_limits,
+          is_real_ai: true,
+          result_id: pc.result_id,
+        }));
+      }
     }
 
-    // Also check for OpenAI pilot candidates (Real AI) linked to this asset
-    if (assetId) {
+    // Fallback: load from openai_pilot_results by asset_id
+    if (rows.length === 0 && assetId) {
       const { data: pilotResultData } = await supabase
         .from('openai_pilot_results')
         .select('id')
@@ -371,8 +494,7 @@ function AIStudioValidationPageInner() {
           .order('rank', { ascending: true });
 
         if (pilotCandidates && pilotCandidates.length > 0) {
-          // Map pilot candidates to the Candidate interface
-          const mappedPilot: Candidate[] = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
+          rows = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
             id: pc.id,
             rank: pc.rank,
             common_name: pc.common_name,
@@ -400,17 +522,34 @@ function AIStudioValidationPageInner() {
             visual_evidence: pc.visual_evidence,
             identification_limits: pc.identification_limits,
             is_real_ai: true,
+            result_id: pc.result_id,
           }));
-
-          // Merge: Real AI candidates take precedence, shown first
-          rows = [...mappedPilot, ...rows.map((r) => ({ ...r, is_real_ai: false, provider_mode: r.provider_mode ?? 'mock' }))];
         }
       }
     }
 
+    // Also load sie_species_candidates (mock or legacy)
+    if (jobId) {
+      const { data: sieData } = await supabase
+        .from('sie_species_candidates')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('rank', { ascending: true });
+
+      const sieMapped = (sieData ?? []).map((r) => ({ ...r, is_real_ai: false, provider_mode: r.provider_mode ?? 'mock' }));
+      rows = [...rows, ...sieMapped];
+    } else if (assetId && rows.length === 0) {
+      const { data: fallbackData } = await supabase
+        .from('sie_species_candidates')
+        .select('*')
+        .eq('asset_id', assetId)
+        .order('rank', { ascending: true })
+        .limit(5);
+      rows = [...rows, ...(fallbackData ?? []).map((r) => ({ ...r, is_real_ai: false, provider_mode: 'mock' }))];
+    }
+
     setCandidates(rows);
-    // Auto-select rank 1 candidate
-    const rank1 = rows.find((c: Candidate) => c.rank === 1);
+    const rank1 = rows.find((c) => c.rank === 1);
     if (rank1) setSelectedCandidateId(rank1.id);
     else if (rows.length > 0) setSelectedCandidateId(rows[0].id);
     else setSelectedCandidateId(null);
@@ -427,7 +566,6 @@ function AIStudioValidationPageInner() {
     setHistory(data ?? []);
   }, []);
 
-  // Fetch OpenAI pilot metadata for a selected candidate
   const fetchPilotMetadata = useCallback(async (candidateId: string) => {
     const supabase = createClient();
     const { data } = await supabase
@@ -438,7 +576,6 @@ function AIStudioValidationPageInner() {
     setPilotMetadata(data ?? null);
   }, []);
 
-  // Fetch asset preview for selected job
   const fetchAssetPreview = useCallback(async (assetId: string | null) => {
     if (!assetId) { setAssetPreview(null); setAssetTitle(null); setAssetStatus(null); return; }
     const supabase = createClient();
@@ -455,9 +592,26 @@ function AIStudioValidationPageInner() {
     }
   }, []);
 
+  // ── Load asset when batch position changes ────────────────────────────────
   useEffect(() => {
-    if (selectedJob) {
-      fetchCandidates(selectedJob.id, selectedJob.asset_id);
+    if (batchMode && currentBatchAsset) {
+      fetchCandidates(currentBatchAsset.asset_id, currentBatchAsset.result_id, currentBatchAsset.asset_job_id);
+      fetchAssetPreview(currentBatchAsset.asset_id);
+      if (currentBatchAsset.asset_job_id) fetchHistory(currentBatchAsset.asset_job_id);
+      setFieldDecisions({});
+      setEditValues({});
+      setComment('');
+      setPropagationDone([]);
+      setConfirmDialogOpen(false);
+      setConfirmSuccess(null);
+      setConfirmError(null);
+    }
+  }, [batchMode, currentBatchAsset, fetchCandidates, fetchAssetPreview, fetchHistory]);
+
+  // ── Load asset when legacy job changes ────────────────────────────────────
+  useEffect(() => {
+    if (!batchMode && selectedJob) {
+      fetchCandidates(selectedJob.asset_id, null, selectedJob.id);
       fetchHistory(selectedJob.id);
       fetchAssetPreview(selectedJob.asset_id);
       setFieldDecisions({});
@@ -465,27 +619,49 @@ function AIStudioValidationPageInner() {
       setComment('');
       setPropagationDone([]);
       setConfirmDialogOpen(false);
+      setConfirmSuccess(null);
+      setConfirmError(null);
     }
-  }, [selectedJob, fetchCandidates, fetchHistory, fetchAssetPreview]);
+  }, [selectedJob, batchMode, fetchCandidates, fetchHistory, fetchAssetPreview]);
 
-  // ── Navigation ───────────────────────────────────────────────────────────────
+  // ── Batch navigation ──────────────────────────────────────────────────────
+  const goToBatchPrev = useCallback(() => {
+    setBatchPosition((p) => Math.max(0, p - 1));
+  }, []);
+
+  const goToBatchNext = useCallback(() => {
+    setBatchPosition((p) => Math.min(filteredBatchAssets.length - 1, p + 1));
+  }, [filteredBatchAssets.length]);
+
+  const goToNextUnreviewed = useCallback(() => {
+    const nextIdx = filteredBatchAssets.findIndex((a, i) => i > batchPosition && a.review_status === 'unreviewed');
+    if (nextIdx >= 0) {
+      setBatchPosition(nextIdx);
+    } else {
+      // No more unreviewed — just go to next
+      setBatchPosition((p) => Math.min(filteredBatchAssets.length - 1, p + 1));
+    }
+  }, [filteredBatchAssets, batchPosition]);
+
+  // ── Legacy navigation ─────────────────────────────────────────────────────
   const currentJobIndex = jobs.findIndex((j) => j.id === selectedJob?.id);
 
   const goToPrev = useCallback(() => {
+    if (batchMode) { goToBatchPrev(); return; }
     if (currentJobIndex > 0) setSelectedJob(jobs[currentJobIndex - 1]);
     else if (jobPage > 0) setJobPage((p) => p - 1);
-  }, [currentJobIndex, jobs, jobPage]);
+  }, [batchMode, goToBatchPrev, currentJobIndex, jobs, jobPage]);
 
   const goToNext = useCallback(() => {
+    if (batchMode) { goToBatchNext(); return; }
     if (currentJobIndex < jobs.length - 1) setSelectedJob(jobs[currentJobIndex + 1]);
     else if ((jobPage + 1) * PAGE_SIZE < jobTotal) setJobPage((p) => p + 1);
-  }, [currentJobIndex, jobs, jobPage, jobTotal]);
+  }, [batchMode, goToBatchNext, currentJobIndex, jobs, jobPage, jobTotal]);
 
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────────
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (!selectedJob) return;
       switch (e.key) {
         case 'ArrowLeft': e.preventDefault(); goToPrev(); break;
         case 'ArrowRight': e.preventDefault(); goToNext(); break;
@@ -494,19 +670,19 @@ function AIStudioValidationPageInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedJob, goToPrev, goToNext]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [goToPrev, goToNext]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Get field value from selected candidate ──────────────────────────────────
+  // ── Get field value from selected candidate ───────────────────────────────
   const getFieldValue = (key: ValidationField, candidate: Candidate | null): string | null => {
     if (!candidate) return null;
     switch (key) {
       case 'species': return candidate.common_name;
       case 'scientific_name': return candidate.scientific_name;
       case 'commercial_name': return candidate.commercial_name;
-      case 'local_names': return null; // Not stored in candidates — no invention
+      case 'local_names': return null;
       case 'family': return candidate.family;
       case 'genus': return candidate.genus;
-      case 'order_name': return candidate.order_name;
+      case 'order_name': return candidate.order_name ?? candidate.biological_order ?? null;
       case 'keywords': return candidate.keywords_candidate?.slice(0, 5).join(', ') ?? null;
       case 'category': return candidate.category_candidate;
       case 'description': return candidate.description_candidate;
@@ -516,271 +692,199 @@ function AIStudioValidationPageInner() {
     }
   };
 
-  // ── Propagation ──────────────────────────────────────────────────────────────
-  const propagateValidation = async (
-    jobId: string,
-    assetId: string | null,
-    candidate: Candidate,
-    approvedFields: Record<string, FieldDecision>,
-    editedValues: Record<string, string>
-  ) => {
-    if (!assetId) return;
-    setPropagating(true);
-    const supabase = createClient();
-    const done: string[] = [];
-
-    // Build approved data only from approved/edited fields
-    const approvedData: Record<string, unknown> = {};
-    for (const [field, decision] of Object.entries(approvedFields)) {
-      if (decision.action === 'approve') {
-        const val = getFieldValue(field as ValidationField, candidate);
-        if (val) approvedData[field] = val;
-      } else if (decision.action === 'edit' && editedValues[field]) {
-        approvedData[field] = editedValues[field];
-      }
-      // reject and unknown are NOT propagated
-    }
-
-    // 1. Update asset with validated species data
-    try {
-      const assetUpdate: Record<string, unknown> = {
-        review_status: 'approved',
-        updated_at: new Date().toISOString(),
-      };
-
-      // Only propagate approved fields
-      if (approvedData.category) assetUpdate.category = approvedData.category;
-      if (approvedData.packaging) assetUpdate.packaging = approvedData.packaging;
-      if (approvedData.product_type) assetUpdate.product_form = approvedData.product_type;
-      if (approvedData.description) assetUpdate.description = approvedData.description;
-
-      await supabase.from('assets').update(assetUpdate).eq('id', assetId);
-      done.push('assets');
-      setPropagationDone([...done]);
-    } catch { /* continue */ }
-
-    // 2. Find or create species and link to asset
-    try {
-      const speciesCommonName = (approvedData.species as string) ?? candidate.common_name;
-      const speciesScientificName = (approvedData.scientific_name as string) ?? candidate.scientific_name;
-
-      if (speciesCommonName && speciesScientificName) {
-        // Check if species exists
-        const { data: existingSpecies } = await supabase
-          .from('species')
-          .select('id')
-          .eq('scientific_name', speciesScientificName)
-          .maybeSingle();
-
-        let speciesId = existingSpecies?.id;
-
-        if (!speciesId) {
-          // Create new species entry
-          const slug = speciesScientificName.toLowerCase().replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
-          const { data: newSpecies } = await supabase
-            .from('species')
-            .insert({
-              slug,
-              common_name: speciesCommonName,
-              scientific_name: speciesScientificName,
-              family: (approvedData.family as string) ?? candidate.family ?? null,
-              category: (approvedData.category as string) ?? candidate.category_candidate ?? null,
-              is_validated: true,
-              is_demo: false,
-            })
-            .select('id')
-            .single();
-          speciesId = newSpecies?.id;
-        }
-
-        if (speciesId) {
-          // Link species to asset
-          await supabase.from('assets').update({ species_id: speciesId }).eq('id', assetId);
-          done.push('asset_species');
-          setPropagationDone([...done]);
-        }
-      }
-    } catch { /* continue */ }
-
-    // 3. Update keywords if approved
-    try {
-      if (approvedData.keywords) {
-        const kwTerms = (approvedData.keywords as string).split(',').map((k) => k.trim()).filter(Boolean);
-        for (const term of kwTerms) {
-          // Upsert keyword
-          const { data: kw } = await supabase
-            .from('keywords')
-            .upsert({ term }, { onConflict: 'term' })
-            .select('id')
-            .single();
-          if (kw?.id) {
-            await supabase.from('asset_keywords').upsert({ asset_id: assetId, keyword_id: kw.id }, { onConflict: 'asset_id,keyword_id' });
-          }
-        }
-      }
-      done.push('search_index');
-      setPropagationDone([...done]);
-    } catch { /* continue */ }
-
-    // 4. Log propagation
-    try {
-      await supabase.from('sie_propagation_log').insert({
-        job_id: jobId,
-        asset_id: assetId,
-        target_system: 'all',
-        target_table: 'assets',
-        target_id: assetId,
-        propagation_status: 'completed',
-        status: 'completed',
-        propagated_fields: approvedData,
-        propagated_at: new Date().toISOString(),
-      });
-    } catch { /* continue */ }
-
-    // 5. Update metadata_suggestions to validated
-    try {
-      await supabase.from('metadata_suggestions')
-        .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-        .eq('asset_id', assetId)
-        .eq('field_name', 'species_candidate');
-    } catch { /* continue */ }
-
-    // 6. Update sie_jobs propagation status
-    await supabase.from('sie_jobs').update({
-      propagation_status: 'completed',
-      propagated_at: new Date().toISOString(),
-    }).eq('id', jobId);
-
-    done.push('species_center', 'knowledge_graph', 'marketplace', 'library');
-    setPropagationDone([...done]);
-    setPropagating(false);
-  };
-
-  // ── CONFIRM IDENTIFICATION ───────────────────────────────────────────────────
+  // ── CONFIRM IDENTIFICATION (calls server-side transactional API) ──────────
   const handleConfirmIdentification = async () => {
-    if (!selectedJob || !profile || actionLoading) return;
+    if (actionLoading) return;
     const candidate = candidates.find((c) => c.id === selectedCandidateId) ?? candidates[0];
     if (!candidate) return;
 
+    const jobId = effectiveJobId ?? batchJob?.id;
+    if (!jobId) return;
+
     setActionLoading(true);
     setConfirmDialogOpen(false);
-    const supabase = createClient();
-    const prevStatus = selectedJob.job_status;
+    setConfirmSuccess(null);
+    setConfirmError(null);
+    setPropagating(true);
+    setPropagationDone([]);
 
-    // 1. Mark selected candidate as validated
-    await supabase.from('sie_species_candidates').update({
-      is_selected: true,
-      is_validated: true,
-    }).eq('id', candidate.id);
-
-    // 2. Update job status to validated with human_validated flag
-    await supabase.from('sie_jobs').update({
-      job_status: 'validated',
-      reviewed_at: new Date().toISOString(),
-      reviewer_id: profile.id,
-      reviewer_comment: comment || null,
-      validation_progress: (selectedJob.validation_progress ?? 0) + 1,
-    }).eq('id', selectedJob.id);
-
-    // 3. Log validation history — action must be valid sie_validation_action enum value
-    // Valid values: 'approve' | 'reject' | 'edit' | 'unknown' | 'undo' | 'comment'
-    const fieldEntries = Object.entries(fieldDecisions);
-    if (fieldEntries.length > 0) {
-      await supabase.from('sie_validation_history').insert(
-        fieldEntries.map(([field, decision]) => ({
-          job_id: selectedJob.id,
-          candidate_id: candidate.id,
-          action: decision.action === 'approve' ? 'approve' :
-                  decision.action === 'reject' ? 'reject' :
-                  decision.action === 'edit' ? 'edit' : 'unknown',
-          field_name: field,
-          new_value: decision.action === 'edit' ? (editValues[field] ?? null) : null,
-          comment: comment || null,
-          previous_status: prevStatus,
-          new_status: 'validated',
-          reviewer_id: profile.id,
-          reviewer_name: profile.display_name ?? profile.email ?? null,
-        }))
-      );
-    } else {
-      // No field decisions — log as a comment (species approved implicitly)
-      await supabase.from('sie_validation_history').insert({
-        job_id: selectedJob.id,
-        candidate_id: candidate.id,
-        action: 'human_validated',
-        field_name: 'species',
-        new_value: candidate.common_name,
-        comment: comment || `Human validated: ${candidate.common_name} (${candidate.scientific_name ?? 'unknown'})`,
-        previous_status: prevStatus,
-        new_status: 'validated',
-        reviewer_id: profile.id,
-        reviewer_name: profile.display_name ?? profile.email ?? null,
-      });
+    // Fetch metadata for this candidate if it's a real AI candidate
+    let meta: OpenAIPilotMetadata | null = pilotMetadata;
+    if (candidate.is_real_ai && candidate.id && !meta) {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('openai_pilot_candidate_metadata')
+        .select('*')
+        .eq('candidate_id', candidate.id)
+        .maybeSingle();
+      meta = data ?? null;
     }
 
-    // 4. Propagate approved data
-    await propagateValidation(selectedJob.id, selectedJob.asset_id, candidate, fieldDecisions, editValues);
+    const payload = {
+      jobId,
+      assetId: effectiveAssetId,
+      publicAssetId: effectivePublicAssetId,
+      candidateId: candidate.id,
+      candidateSource: candidate.is_real_ai ? 'openai_pilot' : 'sie',
+      resultId: candidate.result_id ?? effectiveResultId,
+      batchJobId: batchMode ? batchJob?.id ?? null : null,
+      fieldDecisions,
+      editValues,
+      comment,
+      commonName: candidate.common_name,
+      scientificName: candidate.scientific_name,
+      family: candidate.family,
+      genus: candidate.genus,
+      biologicalOrder: candidate.order_name ?? candidate.biological_order ?? null,
+      confidenceScore: candidate.confidence_score ?? (candidate.ai_score / 100),
+      commercialNames: meta?.commercial_names ?? [],
+      localNamesFr: meta?.local_names_fr ?? [],
+      localNamesEn: meta?.local_names_en ?? [],
+      localNamesEs: meta?.local_names_es ?? [],
+      localNamesPt: meta?.local_names_pt ?? [],
+      localNamesAr: meta?.local_names_ar ?? [],
+      synonyms: meta?.synonyms ?? [],
+    };
 
-    setLastUndo({ jobId: selectedJob.id, prevStatus });
-    const t = setTimeout(() => setLastUndo(null), 8000);
-    setUndoTimer(t);
-    setComment('');
-    setFieldDecisions({});
-    setEditValues({});
-    setActionLoading(false);
-    fetchJobs();
-    fetchValidationStats();
-    fetchHistory(selectedJob.id);
+    try {
+      const res = await fetch('/api/admin/validate-identification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json();
 
-    // Auto-advance to next
-    setTimeout(() => goToNext(), 500);
+      if (result.success || (result.steps && result.steps.length > 0)) {
+        // Show propagation steps visually
+        const stepMap: Record<string, string> = {
+          candidate_validated: 'assets',
+          asset_species_written: 'asset_species',
+          species_created: 'species_center',
+          species_reused: 'species_center',
+          asset_updated_with_aliases: 'search_index',
+          species_names_written: 'knowledge_graph',
+          job_validated: 'library',
+          job_asset_updated: 'marketplace',
+        };
+        const done: string[] = [];
+        for (const step of (result.steps ?? [])) {
+          const target = stepMap[step];
+          if (target && !done.includes(target)) done.push(target);
+        }
+        setPropagationDone(done);
+        setConfirmSuccess(result.message ?? 'Identification confirmed');
+
+        // Update batch asset status locally
+        if (batchMode && currentBatchAsset) {
+          setBatchAssets((prev) =>
+            prev.map((a) =>
+              a.id === currentBatchAsset.id ? { ...a, review_status: 'validated', reviewed_at: new Date().toISOString() } : a
+            )
+          );
+        }
+
+        setLastUndo({ jobId, prevStatus: 'proposals_ready' });
+        const t = setTimeout(() => setLastUndo(null), 8000);
+        setUndoTimer(t);
+        setComment('');
+        setFieldDecisions({});
+        setEditValues({});
+        fetchValidationStats();
+        if (effectiveJobId) fetchHistory(effectiveJobId);
+
+        // Auto-advance to next unreviewed asset
+        if (autoAdvance) {
+          setTimeout(() => {
+            if (batchMode) goToNextUnreviewed();
+            else goToNext();
+          }, 1200);
+        }
+      } else {
+        setConfirmError(result.error ?? result.errors?.join('; ') ?? 'Confirmation failed');
+      }
+    } catch (e) {
+      setConfirmError(`Network error: ${e}`);
+    } finally {
+      setActionLoading(false);
+      setPropagating(false);
+    }
   };
 
-  // ── Skip ─────────────────────────────────────────────────────────────────────
-  const handleSkip = () => goToNext();
-
-  // ── Mark Unknown ─────────────────────────────────────────────────────────────
-  const handleMarkUnknown = async () => {
-    if (!selectedJob || !profile || actionLoading) return;
-    setActionLoading(true);
-    const supabase = createClient();
-    await supabase.from('sie_jobs').update({
-      job_status: 'unknown',
-      reviewed_at: new Date().toISOString(),
-      reviewer_id: profile.id,
-    }).eq('id', selectedJob.id);
-    await supabase.from('sie_validation_history').insert({
-      job_id: selectedJob.id,
-      action: 'unknown',
-      comment: comment || 'Marked as unknown by reviewer',
-      previous_status: selectedJob.job_status,
-      new_status: 'unknown',
-      reviewer_id: profile.id,
-      reviewer_name: profile.display_name ?? profile.email ?? null,
-    });
-    setActionLoading(false);
-    fetchJobs();
+  // ── Skip ──────────────────────────────────────────────────────────────────
+  const handleSkip = async () => {
+    if (batchMode && currentBatchAsset) {
+      const supabase = createClient();
+      await supabase
+        .from('openai_pilot_job_assets')
+        .update({ review_status: 'skipped', reviewed_at: new Date().toISOString() })
+        .eq('id', currentBatchAsset.id);
+      setBatchAssets((prev) =>
+        prev.map((a) => a.id === currentBatchAsset.id ? { ...a, review_status: 'skipped' } : a)
+      );
+      fetchBatchStats();
+    }
     goToNext();
   };
 
-  // ── Reject candidate ─────────────────────────────────────────────────────────
-  const handleRejectCandidate = async (candidateId: string) => {
-    if (!selectedJob || !profile) return;
+  // ── Mark Unknown ──────────────────────────────────────────────────────────
+  const handleMarkUnknown = async () => {
+    if (actionLoading) return;
+    setActionLoading(true);
     const supabase = createClient();
-    await supabase.from('sie_species_candidates').update({ is_selected: false }).eq('id', candidateId);
-    await supabase.from('sie_validation_history').insert({
-      job_id: selectedJob.id,
-      candidate_id: candidateId,
-      action: 'reject',
-      field_name: 'candidate',
-      comment: 'Candidate rejected by reviewer',
-      reviewer_id: profile.id,
-      reviewer_name: profile.display_name ?? profile.email ?? null,
-    });
-    fetchCandidates(selectedJob.id, selectedJob.asset_id);
+    const jobId = effectiveJobId ?? batchJob?.id;
+
+    if (jobId) {
+      await supabase.from('sie_jobs').update({
+        job_status: 'unknown',
+        reviewed_at: new Date().toISOString(),
+        reviewer_id: profile?.id,
+      }).eq('id', jobId);
+      await supabase.from('sie_validation_history').insert({
+        job_id: jobId,
+        action: 'unknown',
+        comment: comment || 'Marked as unknown by reviewer',
+        previous_status: 'proposals_ready',
+        new_status: 'unknown',
+        reviewer_id: profile?.id,
+        reviewer_name: profile?.display_name ?? profile?.email ?? null,
+      });
+    }
+
+    if (batchMode && currentBatchAsset) {
+      await supabase
+        .from('openai_pilot_job_assets')
+        .update({ review_status: 'unknown', reviewed_at: new Date().toISOString() })
+        .eq('id', currentBatchAsset.id);
+      setBatchAssets((prev) =>
+        prev.map((a) => a.id === currentBatchAsset.id ? { ...a, review_status: 'unknown' } : a)
+      );
+      fetchBatchStats();
+    }
+
+    setActionLoading(false);
+    goToNext();
   };
 
-  // ── Undo ─────────────────────────────────────────────────────────────────────
+  // ── Reject candidate ──────────────────────────────────────────────────────
+  const handleRejectCandidate = async (candidateId: string) => {
+    const supabase = createClient();
+    await supabase.from('sie_species_candidates').update({ is_selected: false }).eq('id', candidateId);
+    const jobId = effectiveJobId;
+    if (jobId) {
+      await supabase.from('sie_validation_history').insert({
+        job_id: jobId,
+        candidate_id: candidateId,
+        action: 'reject',
+        field_name: 'candidate',
+        comment: 'Candidate rejected by reviewer',
+        reviewer_id: profile?.id,
+        reviewer_name: profile?.display_name ?? profile?.email ?? null,
+      });
+    }
+    fetchCandidates(effectiveAssetId, effectiveResultId, effectiveJobId);
+  };
+
+  // ── Undo ──────────────────────────────────────────────────────────────────
   const handleUndo = async () => {
     if (!lastUndo || !profile) return;
     if (undoTimer) clearTimeout(undoTimer);
@@ -798,55 +902,6 @@ function AIStudioValidationPageInner() {
     fetchValidationStats();
   };
 
-  // ── Bulk Validation ──────────────────────────────────────────────────────────
-  const selectedBulkJobs = jobs.filter((j) => bulkSelectedIds.has(j.id));
-  const bulkTopCandidate = selectedBulkJobs.length > 0 ? null : null; // determined at confirm time
-
-  const runBulkValidation = async () => {
-    if (bulkSelectedIds.size === 0 || !profile) return;
-    setBulkProcessing(true);
-    const supabase = createClient();
-    const ids = Array.from(bulkSelectedIds);
-
-    for (const jobId of ids) {
-      // Get top candidate for this job
-      const { data: topCandidates } = await supabase
-        .from('sie_species_candidates')
-        .select('*')
-        .eq('job_id', jobId)
-        .eq('rank', 1)
-        .limit(1);
-      const topC = topCandidates?.[0];
-
-      await supabase.from('sie_jobs').update({
-        job_status: 'validated',
-        reviewed_at: new Date().toISOString(),
-        reviewer_id: profile.id,
-        reviewer_comment: `Bulk validation — ${ids.length} jobs`,
-      }).eq('id', jobId);
-
-      if (topC) {
-        await supabase.from('sie_species_candidates').update({ is_selected: true, is_validated: true }).eq('id', topC.id);
-      }
-
-      await supabase.from('sie_validation_history').insert({
-        job_id: jobId,
-        action: 'bulk_human_validated',
-        field_name: 'species',
-        comment: `Bulk validation — ${ids.length} jobs selected explicitly`,
-        reviewer_id: profile.id,
-        reviewer_name: profile.display_name ?? profile.email ?? null,
-      });
-    }
-
-    setBulkProcessing(false);
-    setBulkSelectedIds(new Set());
-    setBulkMode(false);
-    setBulkConfirmOpen(false);
-    fetchJobs();
-    fetchValidationStats();
-  };
-
   if (loading || !user || !profile) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -860,31 +915,34 @@ function AIStudioValidationPageInner() {
 
   const totalPages = Math.ceil(jobTotal / PAGE_SIZE);
   const selectedCandidate = candidates.find((c) => c.id === selectedCandidateId) ?? candidates[0] ?? null;
-  const isMockEngine = !selectedJob?.ai_provider || selectedJob.ai_provider === 'mock';
+  const isMockEngine = !selectedCandidate?.is_real_ai;
 
-  // Bulk confirmation info
-  const bulkJobsArray = Array.from(bulkSelectedIds);
-  const bulkFirstJob = jobs.find((j) => bulkSelectedIds.has(j.id));
+  // Batch navigation state
+  const batchTotal = filteredBatchAssets.length;
+  const batchDisplayPos = batchTotal > 0 ? batchPosition + 1 : 0;
+  const isFirstBatch = batchPosition === 0;
+  const isLastBatch = batchPosition >= batchTotal - 1;
+
+  // Legacy navigation state
+  const isFirstLegacy = currentJobIndex === 0 && jobPage === 0;
+  const isLastLegacy = currentJobIndex === jobs.length - 1 && (jobPage + 1) * PAGE_SIZE >= jobTotal;
+
+  const isPrevDisabled = batchMode ? isFirstBatch : isFirstLegacy;
+  const isNextDisabled = batchMode ? isLastBatch : isLastLegacy;
+
+  const hasActiveAsset = batchMode ? !!currentBatchAsset : !!selectedJob;
+  const currentAssetTitle = batchMode
+    ? (assetTitle ?? currentBatchAsset?.public_asset_id ?? '—')
+    : (assetTitle ?? selectedJob?.current_name ?? selectedJob?.public_asset_id ?? '—');
+  const currentPublicId = batchMode
+    ? currentBatchAsset?.public_asset_id ?? '—' : selectedJob?.public_asset_id ??'—';
+  const currentReviewStatus = batchMode
+    ? currentBatchAsset?.review_status ?? 'unreviewed' : selectedJob?.job_status ??'—';
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
       <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
-
-        {/* ── Mock Engine Warning Banner ── */}
-        <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-4 flex items-start gap-3">
-          <ShieldAlert size={16} className="text-amber-600 shrink-0 mt-0.5" />
-          <div>
-            <p className="text-sm font-semibold text-amber-800">
-              Mock proposals — workflow testing only. Not real visual identification.
-            </p>
-            <p className="text-xs text-amber-700 mt-0.5">
-              These proposals are generated by <strong>Mock Engine v2</strong> using asset metadata, not actual visual AI analysis.
-              Human validation of mock proposals is possible but reviewers must be aware of this limitation.
-              <span className="ml-1 font-mono bg-amber-100 px-1 rounded">provider_mode = mock</span>
-            </p>
-          </div>
-        </div>
 
         {/* ── Header ── */}
         <div className="flex items-start justify-between mb-4">
@@ -903,22 +961,71 @@ function AIStudioValidationPageInner() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {/* Validation progress */}
             <div className="text-right hidden sm:block">
-              <p className="text-xs text-muted-foreground">Validation progress</p>
+              <p className="text-xs text-muted-foreground">Progress</p>
               <p className="text-sm font-bold text-foreground">
                 {validationStats.validated} / {validationStats.total}
                 <span className="text-xs font-normal text-muted-foreground ml-1">validated</span>
               </p>
             </div>
-            <button
-              onClick={() => setBulkMode((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${bulkMode ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-muted/40 border-border text-muted-foreground hover:border-blue-300'}`}>
-              <CheckSquare size={12} />Bulk
-            </button>
             <Link href="/admin/ai-studio" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← AI Studio</Link>
           </div>
         </div>
+
+        {/* ── Batch Job Banner ── */}
+        {batchJob && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Brain size={14} className="text-emerald-600" />
+                <span className="text-sm font-semibold text-emerald-800">{batchJob.pilot_job_name ?? 'OpenAI Vision Pilot'}</span>
+                <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
+                  REAL AI — OPENAI VISION
+                </span>
+                <span className="text-xs text-emerald-700 font-mono">
+                  {batchAssets.length} assets · {batchJob.ai_model ?? 'gpt-5-mini-2025-08-07'}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-emerald-700">
+                <span>{validationStats.validated} validated</span>
+                <span>{validationStats.skipped} skipped</span>
+                <span>{validationStats.total - validationStats.validated - validationStats.skipped - validationStats.unknown} remaining</span>
+                <button
+                  onClick={() => setBatchMode((v) => !v)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-medium transition-all ${batchMode ? 'bg-emerald-200 border-emerald-400 text-emerald-800' : 'bg-white border-emerald-300 text-emerald-700 hover:bg-emerald-100'}`}>
+                  <List size={11} />{batchMode ? 'Batch Mode ON' : 'Switch to Batch Mode'}
+                </button>
+              </div>
+            </div>
+
+            {/* Batch filter tabs */}
+            {batchMode && (
+              <div className="flex items-center gap-1 mt-2 flex-wrap">
+                {(['all', 'unreviewed', 'validated', 'skipped', 'unknown'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => { setBatchFilter(f); setBatchPosition(0); }}
+                    className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-all capitalize ${batchFilter === f ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}>
+                    {f} {f === 'all' ? `(${batchAssets.length})` :
+                         f === 'unreviewed' ? `(${batchAssets.filter((a) => a.review_status === 'unreviewed').length})` :
+                         f === 'validated' ? `(${validationStats.validated})` :
+                         f === 'skipped' ? `(${validationStats.skipped})` :
+                         `(${validationStats.unknown})`}
+                  </button>
+                ))}
+                <label className="flex items-center gap-1.5 ml-auto text-xs text-emerald-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoAdvance}
+                    onChange={(e) => setAutoAdvance(e.target.checked)}
+                    className="rounded border-emerald-300 text-emerald-600"
+                  />
+                  Auto-advance after confirmation
+                </label>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Undo banner ── */}
         {lastUndo && (
@@ -931,88 +1038,24 @@ function AIStudioValidationPageInner() {
           </div>
         )}
 
-        {/* ── Bulk validation bar ── */}
-        {bulkMode && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-blue-800">
-                  Bulk Validation — {bulkSelectedIds.size} selected
-                </span>
-                <button onClick={() => setBulkSelectedIds(new Set(jobs.map((j) => j.id)))}
-                  className="text-xs text-blue-600 underline">Select all</button>
-                <button onClick={() => setBulkSelectedIds(new Set())}
-                  className="text-xs text-blue-600 underline">Clear</button>
-              </div>
-              <button
-                onClick={() => { if (bulkSelectedIds.size > 0) setBulkConfirmOpen(true); }}
-                disabled={bulkSelectedIds.size === 0}
-                className="px-4 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all">
-                Review &amp; Confirm {bulkSelectedIds.size} jobs
-              </button>
-            </div>
+        {/* ── Confirm Success Banner ── */}
+        {confirmSuccess && (
+          <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 mb-4 flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <p className="text-sm text-emerald-800 font-medium">{confirmSuccess}</p>
           </div>
         )}
 
-        {/* ── Bulk Confirmation Dialog ── */}
-        {bulkConfirmOpen && (
-          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-            <div className="bg-card border border-border rounded-2xl p-6 max-w-md w-full shadow-2xl">
-              <div className="flex items-start gap-3 mb-4">
-                <ShieldAlert size={20} className="text-amber-500 shrink-0 mt-0.5" />
-                <div>
-                  <h3 className="text-base font-bold text-foreground">Confirm Bulk Validation</h3>
-                  <p className="text-sm text-muted-foreground mt-1">
-                    You are about to validate <strong>{bulkSelectedIds.size} jobs</strong> using their top AI candidate.
-                    Each proposal will be shown before confirmation.
-                  </p>
-                </div>
-              </div>
-
-              {/* Show top candidate for first selected job */}
-              {bulkFirstJob && (
-                <div className="bg-muted/30 border border-border rounded-xl p-3 mb-4">
-                  <p className="text-xs text-muted-foreground mb-1">Example — first selected job:</p>
-                  <p className="text-sm font-semibold text-foreground">
-                    {bulkFirstJob.current_name ?? bulkFirstJob.public_asset_id ?? bulkFirstJob.id.slice(0, 8)}
-                  </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Will apply top AI candidate (rank 1) to each selected job.
-                  </p>
-                </div>
-              )}
-
-              <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-                <p className="text-xs text-amber-700">
-                  <strong>Warning:</strong> This will mark {bulkSelectedIds.size} jobs as human_validated.
-                  Only proceed if you have reviewed the proposals for each selected asset.
-                  This action cannot be undone in bulk.
-                </p>
-              </div>
-
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setBulkConfirmOpen(false)}
-                  className="flex-1 px-4 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-muted transition-colors">
-                  Cancel
-                </button>
-                <button
-                  onClick={runBulkValidation}
-                  disabled={bulkProcessing}
-                  className="flex-1 px-4 py-2.5 text-sm font-bold bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-                  {bulkProcessing ? (
-                    <><Loader2 size={14} className="animate-spin" />Processing...</>
-                  ) : (
-                    <>Confirm {bulkSelectedIds.size} jobs</>
-                  )}
-                </button>
-              </div>
-            </div>
+        {/* ── Confirm Error Banner ── */}
+        {confirmError && (
+          <div className="bg-red-50 border border-red-300 rounded-xl p-3 mb-4 flex items-center gap-2">
+            <AlertTriangle size={16} className="text-red-600 shrink-0" />
+            <p className="text-sm text-red-800">{confirmError}</p>
           </div>
         )}
 
         {/* ── CONFIRM IDENTIFICATION Dialog ── */}
-        {confirmDialogOpen && selectedJob && selectedCandidate && (
+        {confirmDialogOpen && hasActiveAsset && selectedCandidate && (
           <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
             <div className="bg-card border border-border rounded-2xl p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto">
               <div className="flex items-start gap-3 mb-4">
@@ -1020,12 +1063,11 @@ function AIStudioValidationPageInner() {
                 <div>
                   <h3 className="text-base font-bold text-foreground">Confirm Identification</h3>
                   <p className="text-sm text-muted-foreground mt-1">
-                    You are about to confirm the identification for this asset.
+                    This will write a real transactional commit to asset_species, species table, search aliases, and species_names.
                   </p>
                 </div>
               </div>
 
-              {/* Selected candidate summary */}
               <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
                 <p className="text-xs text-muted-foreground mb-1">Selected species:</p>
                 <p className="text-base font-bold text-foreground">{selectedCandidate.common_name}</p>
@@ -1034,20 +1076,17 @@ function AIStudioValidationPageInner() {
                 )}
                 <div className="flex flex-wrap gap-1.5 mt-2">
                   {selectedCandidate.family && (
-                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">
-                      {selectedCandidate.family}
-                    </span>
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{selectedCandidate.family}</span>
                   )}
                   <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-mono">
                     {selectedCandidate.ai_score}% confidence
                   </span>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-0.5 rounded-full font-mono">
-                    provider_mode = {isMockEngine ? 'mock' : 'real_ai'}
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${selectedCandidate.is_real_ai ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {selectedCandidate.is_real_ai ? 'REAL AI — OPENAI VISION' : 'Mock Engine'}
                   </span>
                 </div>
               </div>
 
-              {/* Field decisions summary */}
               {Object.keys(fieldDecisions).length > 0 && (
                 <div className="mb-4">
                   <p className="text-xs font-semibold text-foreground mb-2">Field decisions:</p>
@@ -1058,7 +1097,7 @@ function AIStudioValidationPageInner() {
                         <span className={`px-1.5 py-0.5 rounded font-medium ${
                           decision.action === 'approve' ? 'bg-emerald-100 text-emerald-700' :
                           decision.action === 'reject' ? 'bg-red-100 text-red-700' :
-                          decision.action === 'edit'? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                          decision.action === 'edit' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
                         }`}>
                           {decision.action === 'edit' && editValues[field] ? `Edit: "${editValues[field]}"` : decision.action}
                         </span>
@@ -1068,19 +1107,11 @@ function AIStudioValidationPageInner() {
                 </div>
               )}
 
-              {isMockEngine && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-3 mb-4">
-                  <p className="text-xs text-amber-700">
-                    <strong>Mock Engine Warning:</strong> This proposal was generated by Mock Engine v2, not real visual AI.
-                    You are confirming a mock proposal. This is valid for workflow testing.
-                  </p>
-                </div>
-              )}
-
               <p className="text-xs text-muted-foreground mb-4">
-                This will: mark as <strong>human_validated</strong>, record reviewer &amp; date,
-                propagate approved fields to assets/species/library, and update job status to <strong>validated</strong>.
-                Other proposals will be preserved in history.
+                Writes: <strong>asset_species</strong> · <strong>species</strong> (dedup by scientific_name) ·
+                <strong> species_names</strong> · <strong>search_aliases</strong> · <strong>validated_metadata</strong> ·
+                job status → <strong>validated</strong>.
+                Asset will be immediately findable in Library by common name, scientific name, and aliases.
               </p>
 
               <div className="flex gap-3">
@@ -1106,39 +1137,75 @@ function AIStudioValidationPageInner() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
-          {/* ── Job list ── */}
+          {/* ── Left panel: batch asset list OR legacy job list ── */}
           <div className="lg:col-span-1">
             <div className="bg-card border border-border rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-border">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-foreground">Jobs ({jobTotal})</span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => setJobPage((p) => Math.max(0, p - 1))} disabled={jobPage === 0}
-                      className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
-                      <ChevronLeft size={14} />
-                    </button>
-                    <span className="text-xs text-muted-foreground">{jobPage + 1}/{totalPages || 1}</span>
-                    <button onClick={() => setJobPage((p) => p + 1)} disabled={(jobPage + 1) * PAGE_SIZE >= jobTotal}
-                      className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </div>
-                <select value={jobStatusFilter} onChange={(e) => { setJobStatusFilter(e.target.value); setJobPage(0); }}
-                  className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none">
-                  <option value="">All statuses</option>
-                  <option value="proposals_ready">Proposals Ready</option>
-                  <option value="under_review">Under Review</option>
-                  <option value="validated">Validated</option>
-                  <option value="partially_validated">Partially Validated</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="unknown">Unknown</option>
-                </select>
+                {batchMode && batchJob ? (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-foreground">
+                        Batch ({batchTotal})
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {batchDisplayPos}/{batchTotal}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">{batchJob.pilot_job_name}</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-foreground">Jobs ({jobTotal})</span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setJobPage((p) => Math.max(0, p - 1))} disabled={jobPage === 0}
+                          className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span className="text-xs text-muted-foreground">{jobPage + 1}/{totalPages || 1}</span>
+                        <button onClick={() => setJobPage((p) => p + 1)} disabled={(jobPage + 1) * PAGE_SIZE >= jobTotal}
+                          className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <select value={jobStatusFilter} onChange={(e) => { setJobStatusFilter(e.target.value); setJobPage(0); }}
+                      className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none">
+                      <option value="">All statuses</option>
+                      <option value="proposals_ready">Proposals Ready</option>
+                      <option value="under_review">Under Review</option>
+                      <option value="validated">Validated</option>
+                      <option value="partially_validated">Partially Validated</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </>
+                )}
               </div>
 
-              {fetching ? (
+              {fetching && !batchMode ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="w-5 h-5 border-2 border-border border-t-blue-500 rounded-full animate-spin" />
+                </div>
+              ) : batchMode ? (
+                <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
+                  {filteredBatchAssets.map((ba, idx) => (
+                    <div key={ba.id}
+                      className={`flex items-start gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer ${idx === batchPosition ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
+                      onClick={() => setBatchPosition(idx)}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground truncate">
+                          {ba.public_asset_id}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${REVIEW_STATUS_COLORS[ba.review_status] ?? 'bg-gray-100 text-gray-600'}`}>
+                            {ba.review_status}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">#{ba.review_position}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : jobs.length === 0 ? (
                 <div className="py-8 text-center px-4">
@@ -1153,18 +1220,6 @@ function AIStudioValidationPageInner() {
                     <div key={job.id}
                       className={`flex items-start gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer ${selectedJob?.id === job.id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
                       onClick={() => setSelectedJob(job)}>
-                      {bulkMode && (
-                        <input type="checkbox" checked={bulkSelectedIds.has(job.id)}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            setBulkSelectedIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(job.id)) next.delete(job.id); else next.add(job.id);
-                              return next;
-                            });
-                          }}
-                          className="mt-1 rounded border-border text-blue-600 shrink-0" />
-                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground truncate">
                           {job.current_name ?? job.public_asset_id ?? job.id.slice(0, 8)}
@@ -1189,31 +1244,37 @@ function AIStudioValidationPageInner() {
 
           {/* ── Main validation panel ── */}
           <div className="lg:col-span-3">
-            {!selectedJob ? (
+            {!hasActiveAsset ? (
               <div className="bg-card border border-border rounded-xl flex items-center justify-center py-24 text-center">
                 <div>
                   <Target size={32} className="text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">Select a job to start validation</p>
-                  <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
-                    Launch AI identification first
-                  </Link>
+                  <p className="text-sm text-muted-foreground">
+                    {batchMode ? 'No assets in this filter' : 'Select a job to start validation'}
+                  </p>
+                  {!batchMode && (
+                    <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
+                      Launch AI identification first
+                    </Link>
+                  )}
                 </div>
               </div>
             ) : (
               <div>
                 {/* Navigation bar */}
                 <div className="flex items-center justify-between mb-4 bg-card border border-border rounded-xl px-4 py-2.5">
-                  <button onClick={goToPrev} disabled={currentJobIndex === 0 && jobPage === 0}
+                  <button onClick={goToPrev} disabled={isPrevDisabled}
                     className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors">
                     <ChevronLeft size={16} />Previous
                   </button>
                   <div className="text-center">
                     <p className="text-xs font-semibold text-foreground">
-                      {currentJobIndex + 1 + jobPage * PAGE_SIZE} / {jobTotal}
+                      {batchMode
+                        ? `${batchDisplayPos} / ${batchTotal}`
+                        : `${currentJobIndex + 1 + jobPage * PAGE_SIZE} / ${jobTotal}`}
                     </p>
                     <p className="text-[10px] text-muted-foreground">← → keys to navigate</p>
                   </div>
-                  <button onClick={goToNext} disabled={currentJobIndex === jobs.length - 1 && (jobPage + 1) * PAGE_SIZE >= jobTotal}
+                  <button onClick={goToNext} disabled={isNextDisabled}
                     className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors">
                     Next<ChevronRight size={16} />
                   </button>
@@ -1229,63 +1290,27 @@ function AIStudioValidationPageInner() {
                       <div className="px-4 py-3 border-b border-border">
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <p className="text-sm font-semibold text-foreground truncate">
-                              {assetTitle ?? selectedJob.current_name ?? selectedJob.public_asset_id ?? selectedJob.id.slice(0, 12)}
-                            </p>
-                            <p className="text-xs text-muted-foreground font-mono mt-0.5">
-                              {selectedJob.public_asset_id ?? selectedJob.asset_id?.slice(0, 12) ?? '—'}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-0.5">
-                              {selectedJob.current_category ?? 'Unknown category'}
-                            </p>
+                            <p className="text-sm font-semibold text-foreground truncate">{currentAssetTitle}</p>
+                            <p className="text-xs text-muted-foreground font-mono mt-0.5">{currentPublicId}</p>
                           </div>
                           <div className="flex flex-col items-end gap-1 shrink-0">
-                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${JOB_STATUS_COLORS[selectedJob.job_status] ?? 'bg-gray-100 text-gray-600'}`}>
-                              {selectedJob.job_status}
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${REVIEW_STATUS_COLORS[currentReviewStatus] ?? JOB_STATUS_COLORS[currentReviewStatus] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {currentReviewStatus}
                             </span>
-                            {assetStatus && assetStatus !== selectedJob.job_status && (
-                              <span className="text-[10px] text-muted-foreground">
-                                Asset: {assetStatus}
-                              </span>
+                            {assetStatus && (
+                              <span className="text-[10px] text-muted-foreground">Asset: {assetStatus}</span>
                             )}
                           </div>
                         </div>
                       </div>
 
-                      {/* Real asset preview */}
                       <AssetPreview preview={assetPreview} />
 
-                      {/* Confidence scores */}
-                      <div className="p-4 grid grid-cols-2 gap-2 text-xs">
-                        {[
-                          { label: 'Vision', value: selectedJob.vision_confidence },
-                          { label: 'Species', value: selectedJob.species_confidence },
-                          { label: 'Commercial', value: selectedJob.commercial_confidence },
-                          { label: 'Metadata', value: selectedJob.metadata_confidence },
-                        ].map(({ label, value }) => value != null && (
-                          <div key={label} className="flex items-center justify-between">
-                            <span className="text-muted-foreground">{label}</span>
-                            <span className={`font-mono font-semibold ${confidenceColor(value)}`}>{value}%</span>
-                          </div>
-                        ))}
-                        {selectedJob.global_confidence != null && (
-                          <div className="col-span-2 flex items-center justify-between pt-1 border-t border-border">
-                            <span className="text-muted-foreground font-medium">Global</span>
-                            <span className={`font-mono font-bold text-sm ${confidenceColor(selectedJob.global_confidence)}`}>
-                              {selectedJob.global_confidence}%
-                            </span>
-                          </div>
-                        )}
-                      </div>
-
                       {/* Provider mode indicator */}
-                      <div className="px-4 pb-3">
+                      <div className="px-4 py-3">
                         <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${isMockEngine ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                           provider_mode = {isMockEngine ? 'mock' : 'real_ai'}
                         </span>
-                        {selectedJob.ai_model && (
-                          <span className="text-[10px] text-muted-foreground ml-2">{selectedJob.ai_model}</span>
-                        )}
                       </div>
                     </div>
 
@@ -1357,21 +1382,19 @@ function AIStudioValidationPageInner() {
 
                     {/* Action buttons */}
                     <div className="space-y-2">
-                      {/* CONFIRM IDENTIFICATION — primary action */}
                       <button
                         onClick={() => setConfirmDialogOpen(true)}
-                        disabled={actionLoading || !selectedCandidate || selectedJob.job_status === 'validated'}
+                        disabled={actionLoading || !selectedCandidate || currentReviewStatus === 'validated'}
                         className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold px-6 py-3.5 rounded-xl hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm text-sm">
                         {actionLoading ? (
                           <><Loader2 size={16} className="animate-spin" />Confirming...</>
-                        ) : selectedJob.job_status === 'validated' ? (
+                        ) : currentReviewStatus === 'validated' ? (
                           <><CheckCircle2 size={16} />Already Validated</>
                         ) : (
                           <><CheckCircle2 size={16} />CONFIRM IDENTIFICATION</>
                         )}
                       </button>
 
-                      {/* Secondary actions */}
                       <div className="grid grid-cols-2 gap-2">
                         <button onClick={handleSkip}
                           className="flex items-center justify-center gap-1.5 py-2 text-xs font-medium bg-muted/40 border border-border rounded-xl hover:bg-muted transition-colors text-muted-foreground">
@@ -1419,9 +1442,8 @@ function AIStudioValidationPageInner() {
                             <div key={h.id} className="flex items-start gap-2 text-xs">
                               <span className={`px-1.5 py-0.5 rounded font-medium shrink-0 ${
                                 h.action === 'human_validated' || h.action === 'approve' ? 'bg-emerald-100 text-emerald-700' :
-                                h.action === 'reject' || h.action === 'reject_candidate' ? 'bg-red-100 text-red-700' :
-                                h.action === 'undo' ? 'bg-amber-100 text-amber-700' :
-                                h.action === 'bulk_human_validated'? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                                h.action === 'reject' ? 'bg-red-100 text-red-700' :
+                                h.action === 'undo' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'
                               }`}>
                                 {h.action}
                               </span>
@@ -1435,11 +1457,11 @@ function AIStudioValidationPageInner() {
                     )}
                   </div>
 
-                  {/* ── RIGHT: Top 5 AI Proposals ── */}
+                  {/* ── RIGHT: Top AI Proposals ── */}
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
                       <Brain size={14} className="text-violet-500" />
-                      <h3 className="text-sm font-semibold text-foreground">Top 5 AI Proposals</h3>
+                      <h3 className="text-sm font-semibold text-foreground">Top AI Proposals</h3>
                       {candidates.some((c) => c.is_real_ai) ? (
                         <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full ml-auto font-semibold">
                           REAL AI — OPENAI VISION
@@ -1451,7 +1473,6 @@ function AIStudioValidationPageInner() {
                       )}
                     </div>
 
-                    {/* Confidence alert */}
                     {selectedCandidate && (
                       <div className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 ${
                         selectedCandidate.ai_score < 40
@@ -1470,37 +1491,21 @@ function AIStudioValidationPageInner() {
                     {candidates.length === 0 ? (
                       <div className="bg-card border border-border rounded-xl p-6 text-center">
                         <AlertTriangle size={24} className="text-amber-500 mx-auto mb-3" />
-                        <p className="text-sm font-semibold text-foreground mb-2">No proposals found for this job</p>
-                        <div className="text-left bg-muted/40 border border-border rounded-lg p-3 mb-4 text-xs space-y-1.5">
-                          <p className="font-semibold text-foreground">Diagnostic:</p>
+                        <p className="text-sm font-semibold text-foreground mb-2">No proposals found</p>
+                        <div className="text-left bg-muted/40 border border-border rounded-lg p-3 text-xs space-y-1.5">
                           <p className="text-muted-foreground">
-                            <span className="font-mono text-foreground">job_id:</span> {selectedJob.id}
+                            <span className="font-mono text-foreground">asset_id:</span> {effectiveAssetId ?? '— (null)'}
                           </p>
                           <p className="text-muted-foreground">
-                            <span className="font-mono text-foreground">asset_id:</span> {selectedJob.asset_id ?? '— (null)'}
+                            <span className="font-mono text-foreground">result_id:</span> {effectiveResultId ?? '— (null)'}
                           </p>
                           <p className="text-muted-foreground">
-                            <span className="font-mono text-foreground">job_status:</span>{' '}
-                            <span className={`px-1.5 py-0.5 rounded font-medium ${JOB_STATUS_COLORS[selectedJob.job_status] ?? 'bg-gray-100 text-gray-600'}`}>
-                              {selectedJob.job_status}
-                            </span>
+                            Import the OpenAI pilot CSV files to generate proposals.
                           </p>
-                          <p className="text-muted-foreground">
-                            <span className="font-mono text-foreground">ai_provider:</span> {selectedJob.ai_provider ?? 'mock'}
-                          </p>
-                          <div className="pt-1 border-t border-border">
-                            <p className="font-semibold text-foreground mb-1">Possible causes:</p>
-                            <ul className="space-y-0.5 text-muted-foreground">
-                              <li>• Candidate rows were never inserted (check browser console for insert errors)</li>
-                              <li>• RLS policy blocked the insert (reviewer role may lack write permission)</li>
-                              <li>• product_form enum mismatch caused a silent insert failure</li>
-                              <li>• This job was created before the fix — re-run identification to generate candidates</li>
-                            </ul>
-                          </div>
                         </div>
-                        <Link href={`/admin/ai-studio/identify`}
-                          className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 underline">
-                          Re-run identification to generate proposals →
+                        <Link href="/admin/ai-studio/import-real-ai"
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 underline mt-3">
+                          Import Real AI Results →
                         </Link>
                       </div>
                     ) : (
@@ -1514,7 +1519,6 @@ function AIStudioValidationPageInner() {
                             }`}
                             onClick={() => setSelectedCandidateId(c.id)}>
 
-                            {/* Candidate header */}
                             <div className="flex items-start justify-between gap-2 mb-3">
                               <div className="flex items-center gap-2">
                                 <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
@@ -1536,7 +1540,6 @@ function AIStudioValidationPageInner() {
                               </div>
                             </div>
 
-                            {/* Source + Mock indicator */}
                             <div className="flex flex-wrap gap-1.5 mb-3">
                               {c.is_real_ai ? (
                                 <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full font-semibold">
@@ -1562,19 +1565,8 @@ function AIStudioValidationPageInner() {
                                   Order: {c.order_name ?? c.biological_order}
                                 </span>
                               )}
-                              {c.product_form && (
-                                <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                  <Package size={9} />{c.product_form}
-                                </span>
-                              )}
-                              {c.commercial_name && c.commercial_name !== c.common_name && (
-                                <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full">
-                                  {c.commercial_name}
-                                </span>
-                              )}
                             </div>
 
-                            {/* Real AI: visual evidence */}
                             {c.is_real_ai && c.visual_evidence && c.visual_evidence.length > 0 && (
                               <div className="mb-3">
                                 <p className="text-xs text-muted-foreground font-medium mb-1">Visual evidence:</p>
@@ -1588,7 +1580,6 @@ function AIStudioValidationPageInner() {
                               </div>
                             )}
 
-                            {/* Real AI: identification limits */}
                             {c.is_real_ai && c.identification_limits && c.identification_limits.length > 0 && (
                               <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg">
                                 <p className="text-xs text-amber-700 font-medium mb-1">Identification limits:</p>
@@ -1602,23 +1593,6 @@ function AIStudioValidationPageInner() {
                               </div>
                             )}
 
-                            {/* Description */}
-                            {c.description_candidate && (
-                              <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{c.description_candidate}</p>
-                            )}
-
-                            {/* Keywords */}
-                            {c.keywords_candidate && c.keywords_candidate.length > 0 && (
-                              <div className="flex flex-wrap gap-1 mb-3">
-                                {c.keywords_candidate.slice(0, 5).map((kw, i) => (
-                                  <span key={i} className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
-                                    {kw}
-                                  </span>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Reasons */}
                             {c.main_reasons && c.main_reasons.length > 0 && (
                               <div className="mb-3">
                                 <p className="text-xs text-muted-foreground font-medium mb-1">Why this proposal:</p>
@@ -1632,7 +1606,6 @@ function AIStudioValidationPageInner() {
                               </div>
                             )}
 
-                            {/* Similarity bar */}
                             <div className="flex items-center gap-2 mb-3">
                               <span className="text-xs text-muted-foreground shrink-0">Similarity:</span>
                               <div className="flex-1 bg-muted rounded-full h-1.5">
@@ -1642,10 +1615,13 @@ function AIStudioValidationPageInner() {
                               <span className="text-xs font-mono text-muted-foreground shrink-0">{c.similarity_score}%</span>
                             </div>
 
-                            {/* Per-candidate actions */}
                             <div className="flex gap-1.5">
                               <button
-                                onClick={(e) => { e.stopPropagation(); setSelectedCandidateId(c.id); if (c.is_real_ai) { fetchPilotMetadata(c.id); setShowPilotMetadata(true); } }}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedCandidateId(c.id);
+                                  if (c.is_real_ai) { fetchPilotMetadata(c.id); setShowPilotMetadata(true); }
+                                }}
                                 className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-xs font-medium transition-all ${
                                   isSelected
                                     ? 'bg-violet-100 border-violet-400 text-violet-700 ring-1 ring-violet-300'
@@ -1668,14 +1644,11 @@ function AIStudioValidationPageInner() {
                               </button>
                             </div>
 
-                            {/* Validated badge */}
                             {c.is_validated && (
                               <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
                                 <CheckCircle2 size={12} />Validated — propagated to all targets
                               </div>
                             )}
-
-                            {/* Selected indicator */}
                             {isSelected && !c.is_validated && (
                               <div className="mt-2 flex items-center gap-1.5 text-xs text-violet-600 font-medium">
                                 <Target size={12} />Selected for confirmation
@@ -1689,23 +1662,21 @@ function AIStudioValidationPageInner() {
                     {/* Propagation info */}
                     <div className="bg-muted/30 border border-border rounded-xl p-3">
                       <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                        <ArrowRight size={11} className="text-violet-500" />After CONFIRM IDENTIFICATION — propagates to:
+                        <ArrowRight size={11} className="text-violet-500" />After CONFIRM — writes to:
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {PROPAGATION_TARGETS.map(({ key, label }) => (
-                          <span key={key} className="text-[10px] bg-card border border-border text-muted-foreground px-2 py-0.5 rounded-full">
-                            {label}
-                          </span>
+                        {['asset_species', 'species (dedup)', 'species_names', 'search_aliases', 'validated_metadata', 'Library'].map((t) => (
+                          <span key={t} className="text-[10px] bg-card border border-border text-muted-foreground px-2 py-0.5 rounded-full">{t}</span>
                         ))}
                       </div>
                       <p className="text-[10px] text-muted-foreground mt-2">
-                        Only approved fields are propagated. Rejected and unknown fields are never published.
+                        Only approved fields are propagated. Asset immediately findable in Library by common name, scientific name, and aliases.
                       </p>
                     </div>
 
                     {/* OpenAI Pilot Candidate Metadata Panel */}
                     {showPilotMetadata && pilotMetadata && (
-                      <div className="bg-card border border-emerald-200 rounded-xl p-4" id="candidate-metadata">
+                      <div className="bg-card border border-emerald-200 rounded-xl p-4">
                         <div className="flex items-center justify-between mb-3">
                           <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
                             <Tag size={14} className="text-emerald-500" />
@@ -1746,7 +1717,6 @@ function AIStudioValidationPageInner() {
                             </div>
                           ))}
 
-                          {/* Confidence scores */}
                           <div className="pt-2 border-t border-border">
                             <p className="font-semibold text-foreground mb-2">Confidence Scores</p>
                             <div className="grid grid-cols-2 gap-1.5">
@@ -1767,7 +1737,6 @@ function AIStudioValidationPageInner() {
                             </div>
                           </div>
 
-                          {/* Warnings */}
                           {pilotMetadata.warnings && pilotMetadata.warnings.length > 0 && (
                             <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
                               <p className="font-semibold text-amber-800 mb-1">Warnings</p>

@@ -190,10 +190,11 @@ export async function fetchAssets(
     .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
     .neq('publication_status', 'archived');
 
-  // Text search
+  // Text search — includes search_aliases (validated species names) and species join
   if (filters.query) {
+    const q = filters.query;
     query = query.or(
-      `title.ilike.%${filters.query}%,product_form.ilike.%${filters.query}%,country.ilike.%${filters.query}%`
+      `title.ilike.%${q}%,product_form.ilike.%${q}%,country.ilike.%${q}%,description.ilike.%${q}%,category.ilike.%${q}%`
     );
   }
 
