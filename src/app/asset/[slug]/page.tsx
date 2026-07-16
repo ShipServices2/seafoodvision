@@ -7,7 +7,7 @@ import Footer from '@/components/Footer';
 import { fetchAssetBySlug, getAssetPreviewFile } from '@/lib/supabase/assetService';
 import type { AssetRow } from '@/lib/supabase/assetService';
 import Link from 'next/link';
-import { ChevronRight, Heart, Plus, Share2, ShieldCheck, Camera, CheckCircle2, AlertCircle, Globe2, Hash, Layers, Thermometer, Ruler, ShoppingCart, Lock, Info } from 'lucide-react';
+import { ChevronRight, Heart, Plus, Share2, ShieldCheck, Camera, CheckCircle2, AlertCircle, Globe2, Hash, Layers, Thermometer, Ruler, ShoppingCart, Lock, Info, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '@/components/ui/Badge';
 import AssetPreview from '@/app/asset-detail/components/AssetPreview';
@@ -45,6 +45,82 @@ const LICENSE_OPTIONS = [
   },
 ];
 
+interface CommercialCriterion {
+  key: string;
+  label: string;
+  passed: boolean;
+  value: string;
+  required: boolean;
+}
+
+function getCommercialCriteria(asset: AssetRow): CommercialCriterion[] {
+  const hasOriginalFile = (asset.asset_files ?? []).some((f) => f.file_level === 'original');
+
+  return [
+    {
+      key: 'asset_approved',
+      label: 'Asset approved',
+      passed: asset.review_status === 'approved',
+      value: asset.review_status ?? 'unknown',
+      required: true,
+    },
+    {
+      key: 'species_validated',
+      label: 'Species validated',
+      passed: !!asset.species_id,
+      value: asset.species?.common_name ?? (asset.species_id ? 'linked' : 'not linked'),
+      required: false,
+    },
+    {
+      key: 'rights_validated',
+      label: 'Rights validated',
+      passed: !!(asset.rights_info && asset.rights_info.length > 0),
+      value: asset.rights_info ?? 'not set',
+      required: false,
+    },
+    {
+      key: 'privacy_cleared',
+      label: 'Privacy cleared',
+      passed: !asset.restrictions || asset.restrictions.toLowerCase() !== 'privacy',
+      value: asset.restrictions ?? 'none',
+      required: false,
+    },
+    {
+      key: 'commercial_status',
+      label: 'Commercial status',
+      passed: asset.license_type !== 'editorial' && !asset.is_demo,
+      value: asset.is_demo ? 'demo (not for sale)' : (asset.license_type ?? 'not set'),
+      required: true,
+    },
+    {
+      key: 'commercial_use',
+      label: 'Commercial use permitted',
+      passed: asset.commercial_use === true,
+      value: asset.commercial_use ? 'yes' : 'no',
+      required: true,
+    },
+    {
+      key: 'original_file',
+      label: 'Original file available',
+      passed: hasOriginalFile,
+      value: hasOriginalFile ? 'yes' : 'not found in asset_files',
+      required: true,
+    },
+    {
+      key: 'active_license',
+      label: 'Active license type',
+      passed: !!asset.license_type && asset.license_type !== 'none',
+      value: asset.license_type ?? 'not set',
+      required: true,
+    },
+  ];
+}
+
+function isCommerciallyReady(criteria: CommercialCriterion[]): { ok: boolean; blockers: CommercialCriterion[] } {
+  const blockers = criteria.filter((c) => c.required && !c.passed);
+  return { ok: blockers.length === 0, blockers };
+}
+
 export default function AssetSlugPage() {
   const params = useParams();
   const router = useRouter();
@@ -58,6 +134,7 @@ export default function AssetSlugPage() {
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [selectedLicense, setSelectedLicense] = useState<string | null>(null);
   const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [showBlockers, setShowBlockers] = useState(false);
 
   useEffect(() => {
     if (!slug) { setNotFound(true); setLoading(false); return; }
@@ -80,26 +157,6 @@ export default function AssetSlugPage() {
     toast.success('Link copied to clipboard');
   };
 
-  // Determine if asset is commercially purchasable
-  // Uses fields available on AssetRow
-  function isCommerciallyAvailable(): { ok: boolean; reason?: string } {
-    if (!asset) return { ok: false, reason: 'Asset not loaded' };
-    if (asset.review_status && asset.review_status !== 'approved') {
-      return { ok: false, reason: `Asset is pending review (status: ${asset.review_status})` };
-    }
-    if (!asset.commercial_use) {
-      return { ok: false, reason: 'This asset is not licensed for commercial use' };
-    }
-    if (asset.license_type === 'editorial') {
-      return { ok: false, reason: 'Editorial-only asset — commercial licensing not available' };
-    }
-    if (asset.is_demo) {
-      return { ok: false, reason: 'Demo asset — not available for purchase' };
-    }
-    // If no blocking conditions, allow purchase attempt (server will do full validation)
-    return { ok: true };
-  }
-
   async function handleBuyLicense() {
     if (!asset || !selectedLicense) return;
 
@@ -108,14 +165,14 @@ export default function AssetSlugPage() {
 
     // If not logged in, redirect to sign-in with checkout intent
     if (!user) {
-      const params = new URLSearchParams({
+      const intentParams = new URLSearchParams({
         return_to: '/checkout/resume',
         checkout_intent: '1',
         asset_id: asset.id,
         license_type: licenseOption.code,
         unit_product: licenseOption.unitProductCode,
       });
-      router.push(`/auth/sign-in?${params.toString()}`);
+      router.push(`/auth/sign-in?${intentParams.toString()}`);
       return;
     }
 
@@ -162,7 +219,8 @@ export default function AssetSlugPage() {
   const emoji = categoryEmoji[asset?.category || ''] || '🐠';
   const bgColor = 'from-blue-200 via-blue-100 to-slate-100';
 
-  const commercialStatus = asset ? isCommerciallyAvailable() : null;
+  const criteria = asset ? getCommercialCriteria(asset) : [];
+  const { ok: isReady, blockers } = isCommerciallyReady(criteria);
 
   return (
     <div className="min-h-screen bg-background">
@@ -287,7 +345,7 @@ export default function AssetSlugPage() {
 
                 {/* License / Purchase panel */}
                 <div className="bg-card rounded-xl border border-border p-5 flex flex-col gap-3">
-                  {commercialStatus?.ok ? (
+                  {isReady ? (
                     <>
                       <div className="flex items-center gap-2 mb-1">
                         <ShoppingCart size={15} className="text-secondary" />
@@ -346,12 +404,65 @@ export default function AssetSlugPage() {
                         <Info size={15} className="text-muted-foreground" />
                         <h2 className="text-sm font-semibold text-foreground">Licensing</h2>
                       </div>
-                      <div className="flex items-start gap-3 bg-muted/60 rounded-xl p-3">
-                        <AlertCircle size={14} className="text-muted-foreground mt-0.5 shrink-0" />
-                        <p className="text-xs text-muted-foreground leading-relaxed">
-                          {commercialStatus?.reason ?? 'This asset is not currently available for licensing.'}
-                        </p>
+
+                      {/* Commercial readiness blockers panel */}
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                          <span className="text-xs font-semibold text-amber-700">Commercial readiness blockers</span>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          {blockers.map((b) => (
+                            <div key={b.key} className="flex items-start gap-2">
+                              <XCircle size={12} className="text-red-400 mt-0.5 shrink-0" />
+                              <span className="text-xs text-amber-800">
+                                <span className="font-medium">{b.label}:</span>{' '}
+                                <span className="font-mono">{b.value}</span>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
                       </div>
+
+                      {/* Full criteria toggle */}
+                      <button
+                        onClick={() => setShowBlockers(!showBlockers)}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors text-left flex items-center gap-1"
+                      >
+                        <Info size={11} />
+                        {showBlockers ? 'Hide' : 'Show'} full readiness checklist
+                      </button>
+
+                      {showBlockers && (
+                        <div className="bg-muted/40 rounded-xl p-3 flex flex-col gap-1.5">
+                          {criteria.map((c) => (
+                            <div key={c.key} className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {c.passed ? (
+                                  <CheckCircle2 size={12} className="text-green-500 shrink-0" />
+                                ) : (
+                                  <XCircle size={12} className={`shrink-0 ${c.required ? 'text-red-400' : 'text-amber-400'}`} />
+                                )}
+                                <span className="text-xs text-foreground truncate">{c.label}</span>
+                                {c.required && !c.passed && (
+                                  <span className="text-xs text-red-500 shrink-0">*</span>
+                                )}
+                              </div>
+                              <span className="text-xs font-mono text-muted-foreground shrink-0 max-w-[120px] truncate text-right">{c.value}</span>
+                            </div>
+                          ))}
+                          <p className="text-xs text-muted-foreground mt-1">* Required for purchase</p>
+                        </div>
+                      )}
+
+                      {/* Disabled buy button */}
+                      <button
+                        disabled
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold bg-muted text-muted-foreground cursor-not-allowed"
+                      >
+                        <Lock size={15} />
+                        Buy License — not available
+                      </button>
                     </>
                   )}
 

@@ -1,6 +1,8 @@
 import React, { Suspense } from 'react';
 import CheckoutResumeContent from './CheckoutResumeContent';
 
+export const dynamic = 'force-dynamic';
+
 export default function CheckoutResumePage() {
   return (
     <Suspense fallback={
