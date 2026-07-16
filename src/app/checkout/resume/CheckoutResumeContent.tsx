@@ -71,6 +71,20 @@ export default function CheckoutResumeContent() {
 
   async function initiateCheckout() {
     try {
+      // ── Server-side configuration check ──────────────────
+      // This check runs on the server where process.env is available.
+      // Never rely on client-side env vars for payment configuration.
+      const configRes = await fetch('/api/payments/dodo/config-check');
+      if (configRes.ok) {
+        const configData = await configRes.json() as { isCheckoutReady: boolean };
+        if (!configData.isCheckoutReady) {
+          setState('not_configured');
+          setErrorMessage('Dodo Payments is not configured for checkout.');
+          return;
+        }
+      }
+      // ─────────────────────────────────────────────────────
+
       let res: Response;
 
       if (checkoutType === 'subscription') {
@@ -133,7 +147,17 @@ export default function CheckoutResumeContent() {
 
   const productLabel =
     checkoutType === 'subscription'
-      ? `${plan ? plan.charAt(0).toUpperCase() + plan.slice(1) : ''} plan (${cycle})`
+      ? (() => {
+          // plan param is like "professional_monthly" or "professional" — extract the plan name only
+          const planName = plan
+            ? plan
+                .replace(/_(monthly|annual)$/i, '')          // strip billing cycle suffix
+                .split('_')
+                .map((w: string) => w.charAt(0).toUpperCase() + w.slice(1))
+                .join(' ')
+            : '';
+          return `${planName} plan (${cycle})`;
+        })()
       : checkoutType === 'asset_license'
       ? `Image license (${licenseTypeCode ?? ''})`
       : '';
