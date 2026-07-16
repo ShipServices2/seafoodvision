@@ -13,6 +13,9 @@ import {
 } from '@/lib/payments/WebhookService';
 import type { PaymentEnvironment } from '@/lib/payments/types';
 
+// Disable body parsing — we need the raw body for signature verification
+export const dynamic = 'force-dynamic';
+
 const provider = new DodoPaymentsProvider();
 
 export async function POST(request: NextRequest) {
@@ -23,24 +26,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Failed to read request body' }, { status: 400 });
   }
 
-  const signature = request.headers.get('dodo-signature') ?? '';
+  // Extract Standard Webhooks headers used by Dodo Payments
+  const webhookHeaders: Record<string, string> = {
+    'webhook-id': request.headers.get('webhook-id') ?? '',
+    'webhook-signature': request.headers.get('webhook-signature') ?? '',
+    'webhook-timestamp': request.headers.get('webhook-timestamp') ?? '',
+  };
+
+  const config = provider.getConfig();
 
   // 1. Verify webhook signature
   let verificationResult;
   try {
-    verificationResult = await provider.verifyWebhookSignature(rawBody, signature);
-  } catch {
-    // Provider not yet implemented — in test mode, accept unsigned events
-    const config = provider.getConfig();
+    verificationResult = await provider.verifyWebhookSignature(rawBody, '', webhookHeaders);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Verification error';
+    console.error('[webhook/dodo] Signature verification threw:', msg);
+
+    // In test mode with no secret configured, accept unsigned events for development
     if (config.environment === 'test' && !config.isConfigured) {
-      // Parse body manually for test mode
       try {
         const parsed = JSON.parse(rawBody);
         verificationResult = {
           isValid: true,
-          payload: parsed,
-          eventType: parsed.type ?? parsed.event_type ?? 'unknown',
-          externalEventId: parsed.id ?? parsed.event_id ?? `test-${Date.now()}`,
+          payload: parsed as Record<string, unknown>,
+          eventType: String(parsed.type ?? parsed.event_type ?? 'unknown'),
+          externalEventId: webhookHeaders['webhook-id'] || String(parsed.id ?? `test-${Date.now()}`),
         };
       } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
@@ -72,6 +83,7 @@ export async function POST(request: NextRequest) {
     );
 
     if (isDuplicate) {
+      console.log(`[webhook/dodo] Duplicate event ignored: ${externalEventId}`);
       return NextResponse.json({ received: true, status: 'duplicate_ignored' });
     }
     webhookEventId = evtId;
@@ -80,7 +92,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal error' }, { status: 500 });
   }
 
-  // 3. Process event
+  // 3. Mark as processing
   if (webhookEventId) {
     await markWebhookProcessing(webhookEventId);
   }
@@ -89,37 +101,50 @@ export async function POST(request: NextRequest) {
   let relatedSubscriptionId: string | undefined;
 
   try {
-    // TODO: Replace these event type strings with the actual Dodo Payments event names
-    // from the official Dodo Payments webhook documentation.
-    // These are placeholder names — update when API docs are confirmed.
+    // Official Dodo Payments event types (from documentation)
     switch (eventType) {
-      case 'payment.succeeded': case'checkout.completed': {
+      // One-time payment events
+      case 'payment.succeeded': {
         const result = await handlePaymentSucceeded(payload);
         relatedOrderId = result.orderId;
         break;
       }
 
-      case 'credit_pack.payment.succeeded': {
+      // Credit pack purchases (one-time payment with credit metadata)
+      case 'payment.succeeded.credit_pack': {
         const result = await handleCreditPurchaseSucceeded(payload);
         relatedOrderId = result.orderId;
         break;
       }
 
-      case 'subscription.activated': case'subscription.renewed': {
+      // Subscription events
+      case 'subscription.active': case'subscription.renewed': {
         const result = await handleSubscriptionActivated(payload);
         relatedSubscriptionId = result.subscriptionId;
         break;
       }
 
-      case 'payment.failed': case'checkout.expired': {
+      // Payment failure events
+      case 'payment.failed': case'payment.cancelled': {
         await handlePaymentFailed(payload);
         break;
       }
 
-      case 'refund.issued': case'payment.refunded': {
+      // Refund events
+      case 'refund.succeeded': case'payment.refunded': {
         await handleRefundIssued(payload);
         break;
       }
+
+      // Subscription lifecycle events (log only for now)
+      case 'subscription.cancelled': case'subscription.expired': case'subscription.on_hold': case'subscription.plan_changed': case'subscription.updated': case'subscription.failed':
+        console.log(`[webhook/dodo] Subscription lifecycle event: ${eventType}`, payload);
+        break;
+
+      // License key events
+      case 'license_key.created':
+        console.log(`[webhook/dodo] License key created`, payload);
+        break;
 
       default:
         console.log(`[webhook/dodo] Unhandled event type: ${eventType}`);

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Eye, EyeOff, Fish, Mail, Lock, User, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -16,7 +16,13 @@ interface AuthFormProps {
 export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const next = searchParams.get('next') || '/';
+
+  // Preserve ALL query params through auth flow
+  const next = searchParams.get('next') || searchParams.get('return_to') || '/';
+  const plan = searchParams.get('plan');
+  const cycle = searchParams.get('cycle') || 'monthly';
+  const hasCheckoutIntent = searchParams.get('checkout_intent') === '1';
+
   const { user, loading, signIn, signUp } = useAuth();
 
   const [mode, setMode] = useState<AuthMode>(defaultMode);
@@ -26,11 +32,32 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const [showPassword, setShowPassword] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  useEffect(() => {
-    if (!loading && user) {
-      router.replace(next);
+  // Track whether we've already redirected to prevent double-redirect
+  const redirectedRef = useRef(false);
+
+  /**
+   * Build the post-auth redirect URL.
+   * If there's a checkout intent, go to /checkout/resume with plan params.
+   * Otherwise use the `next` param.
+   */
+  function buildRedirectUrl(): string {
+    if (hasCheckoutIntent && plan) {
+      const params = new URLSearchParams({ plan, cycle });
+      return `/checkout/resume?${params.toString()}`;
     }
-  }, [user, loading, router, next]);
+    return next;
+  }
+
+  // Only redirect if user is already logged in BEFORE they interact with the form.
+  // Do NOT redirect on auth state change triggered by the form submission itself —
+  // the form's handleSubmit handles that redirect explicitly.
+  useEffect(() => {
+    if (!loading && user && !submitting && !redirectedRef.current) {
+      redirectedRef.current = true;
+      router.replace(buildRedirectUrl());
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, loading]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +67,6 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
       if (mode === 'login') {
         await signIn(email.trim(), password);
         toast.success('Welcome back!');
-        router.replace(next);
       } else {
         if (!displayName.trim()) {
           toast.error('Please enter your name');
@@ -49,8 +75,10 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
         }
         await signUp(email.trim(), password, { fullName: displayName.trim() });
         toast.success('Account created! Welcome to SeafoodVision.');
-        router.replace(next);
       }
+      // Explicit redirect after successful auth — prevents race with useEffect
+      redirectedRef.current = true;
+      router.replace(buildRedirectUrl());
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Authentication failed';
       toast.error(message);
@@ -76,6 +104,17 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
         </div>
         <span className="text-white font-bold text-lg tracking-tight">SeafoodVision</span>
       </Link>
+
+      {/* Plan context banner */}
+      {hasCheckoutIntent && plan && (
+        <div className="w-full max-w-md mb-4 bg-secondary/10 border border-secondary/30 rounded-xl px-4 py-3 flex items-center gap-3">
+          <CheckCircle2 size={16} className="text-secondary shrink-0" />
+          <p className="text-sm text-foreground">
+            You selected the <span className="font-semibold capitalize">{plan}</span> plan ({cycle}).
+            {mode === 'login' ? ' Sign in' : ' Create your account'} to continue to checkout.
+          </p>
+        </div>
+      )}
 
       {/* Card */}
       <div className="w-full max-w-md bg-card rounded-2xl border border-border shadow-modal p-8">

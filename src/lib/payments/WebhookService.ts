@@ -97,12 +97,19 @@ export async function markWebhookFailed(
   errorMessage: string
 ): Promise<void> {
   const supabase = await createClient();
+  // Fetch current retry count first to avoid RPC dependency
+  const { data: existing } = await supabase
+    .from('payment_webhook_events')
+    .select('retry_count')
+    .eq('id', webhookEventId)
+    .maybeSingle();
+
   await supabase
     .from('payment_webhook_events')
     .update({
       processing_status: 'failed',
       error_message: errorMessage,
-      retry_count: supabase.rpc('increment_retry_count', { event_id: webhookEventId }),
+      retry_count: (existing?.retry_count ?? 0) + 1,
     })
     .eq('id', webhookEventId);
 }
@@ -112,31 +119,42 @@ export async function markWebhookFailed(
 /**
  * Handle a successful one-time payment.
  * Updates order → paid, transaction → succeeded.
- * Prepared for future: purchased_license + download_entitlement creation.
+ * Dodo Payments payload structure: { type, data: { payment_id, checkout_id, ... } }
  */
 export async function handlePaymentSucceeded(
   payload: Record<string, unknown>
 ): Promise<{ orderId?: string }> {
   const supabase = await createClient();
 
-  // TODO: Extract actual field names from Dodo Payments webhook payload
-  // These field names are placeholders — update when Dodo API docs are confirmed
-  const externalPaymentId = payload['payment_id'] as string | undefined;
-  const externalCheckoutId = payload['checkout_id'] as string | undefined;
+  // Dodo Payments wraps event data in a `data` field
+  const data = (payload['data'] ?? payload) as Record<string, unknown>;
+  const externalPaymentId = String(data['payment_id'] ?? data['id'] ?? '');
+  const externalCheckoutId = String(data['checkout_id'] ?? data['session_id'] ?? '');
+  const metadata = (data['metadata'] ?? {}) as Record<string, string>;
+  const orderId = metadata['order_id'] ?? '';
 
-  if (!externalPaymentId && !externalCheckoutId) {
-    throw new Error('handlePaymentSucceeded: missing payment_id or checkout_id in payload');
+  // Find order by internal order_id from metadata (most reliable)
+  // Fall back to external_checkout_id
+  let order = null;
+  if (orderId) {
+    const { data: o } = await supabase
+      .from('orders')
+      .select('id, user_id, total_amount, currency, status')
+      .eq('id', orderId)
+      .maybeSingle();
+    order = o;
+  }
+  if (!order && externalCheckoutId) {
+    const { data: o } = await supabase
+      .from('orders')
+      .select('id, user_id, total_amount, currency, status')
+      .eq('external_checkout_id', externalCheckoutId)
+      .maybeSingle();
+    order = o;
   }
 
-  // Find order by external checkout ID
-  const { data: order } = await supabase
-    .from('orders')
-    .select('id, user_id, total_amount, currency, status')
-    .eq('external_checkout_id', externalCheckoutId ?? '')
-    .maybeSingle();
-
   if (!order) {
-    throw new Error(`handlePaymentSucceeded: order not found for checkout ${externalCheckoutId}`);
+    throw new Error(`handlePaymentSucceeded: order not found. orderId=${orderId}, checkoutId=${externalCheckoutId}`);
   }
 
   if (order.status === 'paid') {
@@ -149,19 +167,19 @@ export async function handlePaymentSucceeded(
     .from('orders')
     .update({
       status: 'paid',
-      external_payment_id: externalPaymentId ?? null,
+      external_payment_id: externalPaymentId || null,
       paid_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
     .eq('id', order.id);
 
-  // Update or create payment transaction
+  // Upsert payment transaction
   await supabase.from('payment_transactions').upsert(
     {
       order_id: order.id,
       user_id: order.user_id,
       provider: 'dodo_payments',
-      external_payment_id: externalPaymentId ?? null,
+      external_payment_id: externalPaymentId || null,
       amount: Number(order.total_amount),
       currency: order.currency,
       status: 'succeeded',
@@ -172,9 +190,6 @@ export async function handlePaymentSucceeded(
     },
     { onConflict: 'order_id' }
   );
-
-  // TODO (Phase 7.2 Part 2): Create purchased_license and download_entitlement rows
-  // after verifying asset commercial eligibility server-side
 
   return { orderId: order.id };
 }
@@ -188,31 +203,44 @@ export async function handleCreditPurchaseSucceeded(
 ): Promise<{ orderId?: string }> {
   const supabase = await createClient();
 
-  const externalCheckoutId = payload['checkout_id'] as string | undefined;
+  const data = (payload['data'] ?? payload) as Record<string, unknown>;
+  const externalCheckoutId = String(data['checkout_id'] ?? data['session_id'] ?? '');
+  const metadata = (data['metadata'] ?? {}) as Record<string, string>;
+  const orderId = metadata['order_id'] ?? '';
 
-  const { data: order } = await supabase
-    .from('orders')
-    .select('id, user_id, status, metadata')
-    .eq('external_checkout_id', externalCheckoutId ?? '')
-    .eq('order_type', 'credit_pack')
-    .maybeSingle();
+  let order = null;
+  if (orderId) {
+    const { data: o } = await supabase
+      .from('orders')
+      .select('id, user_id, status, metadata')
+      .eq('id', orderId)
+      .eq('order_type', 'credit_pack')
+      .maybeSingle();
+    order = o;
+  }
+  if (!order && externalCheckoutId) {
+    const { data: o } = await supabase
+      .from('orders')
+      .select('id, user_id, status, metadata')
+      .eq('external_checkout_id', externalCheckoutId)
+      .eq('order_type', 'credit_pack')
+      .maybeSingle();
+    order = o;
+  }
 
   if (!order) {
-    throw new Error(`handleCreditPurchaseSucceeded: order not found for checkout ${externalCheckoutId}`);
+    throw new Error(`handleCreditPurchaseSucceeded: order not found. orderId=${orderId}`);
   }
 
   if (order.status === 'paid') {
-    // Already credited — idempotent
     return { orderId: order.id };
   }
 
-  // Mark order paid
   await supabase
     .from('orders')
     .update({ status: 'paid', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
     .eq('id', order.id);
 
-  // Get current balance
   const { data: lastEntry } = await supabase
     .from('credit_ledger')
     .select('balance_after')
@@ -224,7 +252,6 @@ export async function handleCreditPurchaseSucceeded(
   const balanceBefore = lastEntry?.balance_after ?? 0;
   const credits = (order.metadata as Record<string, unknown>)?.credits as number ?? 0;
 
-  // Insert credit ledger entry
   await supabase.from('credit_ledger').insert({
     user_id: order.user_id,
     movement_type: 'purchase',
@@ -248,26 +275,39 @@ export async function handleSubscriptionActivated(
 ): Promise<{ subscriptionId?: string }> {
   const supabase = await createClient();
 
-  // TODO: Extract actual field names from Dodo Payments subscription webhook
-  const externalSubscriptionId = payload['subscription_id'] as string | undefined;
-  const externalCheckoutId = payload['checkout_id'] as string | undefined;
+  const data = (payload['data'] ?? payload) as Record<string, unknown>;
+  const externalSubscriptionId = String(data['subscription_id'] ?? data['id'] ?? '');
+  const externalCheckoutId = String(data['checkout_id'] ?? data['session_id'] ?? '');
+  const metadata = (data['metadata'] ?? {}) as Record<string, string>;
+  const orderId = metadata['order_id'] ?? '';
 
   if (!externalSubscriptionId) {
     throw new Error('handleSubscriptionActivated: missing subscription_id in payload');
   }
 
-  // Find order
-  const { data: order } = await supabase
-    .from('orders')
-    .select('id, user_id, metadata')
-    .eq('external_checkout_id', externalCheckoutId ?? '')
-    .maybeSingle();
-
-  if (!order) {
-    throw new Error(`handleSubscriptionActivated: order not found for checkout ${externalCheckoutId}`);
+  // Find order by internal order_id from metadata first
+  let order = null;
+  if (orderId) {
+    const { data: o } = await supabase
+      .from('orders')
+      .select('id, user_id, metadata')
+      .eq('id', orderId)
+      .maybeSingle();
+    order = o;
+  }
+  if (!order && externalCheckoutId) {
+    const { data: o } = await supabase
+      .from('orders')
+      .select('id, user_id, metadata')
+      .eq('external_checkout_id', externalCheckoutId)
+      .maybeSingle();
+    order = o;
   }
 
-  // Find plan
+  if (!order) {
+    throw new Error(`handleSubscriptionActivated: order not found. orderId=${orderId}`);
+  }
+
   const planCode = (order.metadata as Record<string, unknown>)?.planCode as string;
   const { data: plan } = await supabase
     .from('pricing_plans')
@@ -275,7 +315,9 @@ export async function handleSubscriptionActivated(
     .eq('plan_code', planCode)
     .maybeSingle();
 
-  // Upsert user_subscription
+  const periodStart = data['current_period_start'] ? String(data['current_period_start']) : new Date().toISOString();
+  const periodEnd = data['current_period_end'] ? String(data['current_period_end']) : null;
+
   const { data: sub } = await supabase
     .from('user_subscriptions')
     .upsert(
@@ -287,6 +329,8 @@ export async function handleSubscriptionActivated(
         status: 'active',
         environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production',
         billing_cycle: ((order.metadata as Record<string, unknown>)?.billingCycle as string) ?? 'monthly',
+        current_period_start: periodStart,
+        current_period_end: periodEnd,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'external_subscription_id' }
@@ -294,7 +338,6 @@ export async function handleSubscriptionActivated(
     .select('id')
     .single();
 
-  // Record subscription event
   if (sub) {
     await supabase.from('subscription_events').insert({
       subscription_id: sub.id,
@@ -306,7 +349,6 @@ export async function handleSubscriptionActivated(
     });
   }
 
-  // Mark order paid
   await supabase
     .from('orders')
     .update({ status: 'paid', paid_at: new Date().toISOString(), updated_at: new Date().toISOString() })
@@ -323,14 +365,22 @@ export async function handlePaymentFailed(
   payload: Record<string, unknown>
 ): Promise<void> {
   const supabase = await createClient();
-  const externalCheckoutId = payload['checkout_id'] as string | undefined;
+  const data = (payload['data'] ?? payload) as Record<string, unknown>;
+  const externalCheckoutId = String(data['checkout_id'] ?? data['session_id'] ?? '');
+  const metadata = (data['metadata'] ?? {}) as Record<string, string>;
+  const orderId = metadata['order_id'] ?? '';
 
-  if (!externalCheckoutId) return;
-
-  await supabase
-    .from('orders')
-    .update({ status: 'failed', updated_at: new Date().toISOString() })
-    .eq('external_checkout_id', externalCheckoutId);
+  if (orderId) {
+    await supabase
+      .from('orders')
+      .update({ status: 'failed', updated_at: new Date().toISOString() })
+      .eq('id', orderId);
+  } else if (externalCheckoutId) {
+    await supabase
+      .from('orders')
+      .update({ status: 'failed', updated_at: new Date().toISOString() })
+      .eq('external_checkout_id', externalCheckoutId);
+  }
 }
 
 /**

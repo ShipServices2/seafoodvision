@@ -62,9 +62,11 @@ export interface PaymentProvider {
    * Verify the signature of an incoming webhook request.
    * Returns the parsed event if valid, or isValid=false if tampered.
    * The raw body must be passed as-is (not parsed JSON).
+   * headers: Standard Webhooks headers (webhook-id, webhook-signature, webhook-timestamp)
    */
   verifyWebhookSignature(
     rawBody: string,
-    signature: string
+    signature: string,
+    headers?: Record<string, string>
   ): Promise<WebhookVerificationResult>;
 }

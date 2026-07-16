@@ -2,13 +2,31 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { CheckCircle2, XCircle, ArrowRight, Zap, BarChart2, HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
-import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle,  } from '@/lib/pricingConfig';
+import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle } from '@/lib/pricingConfig';
 
 export default function PricingPage() {
   const [billing, setBilling] = useState<BillingCycle>('monthly');
+  const router = useRouter();
+
+  /**
+   * Build the signup URL with checkout intent params so the plan is preserved
+   * through the auth flow and automatically resumed after login/signup.
+   */
+  function buildPlanSignupHref(planId: string): string {
+    if (planId === 'free') return '/auth/sign-up';
+    if (planId === 'enterprise') return '/enterprise';
+    const params = new URLSearchParams({
+      plan: planId,
+      cycle: billing,
+      return_to: '/checkout/resume',
+      checkout_intent: '1',
+    });
+    return `/auth/sign-up?${params.toString()}`;
+  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -52,6 +70,7 @@ export default function PricingPage() {
           {SUBSCRIPTION_PLANS.map((plan) => {
             const price = billing === 'annual' ? plan.annualPrice : plan.monthlyPrice;
             const savings = annualSavings(plan);
+            const href = buildPlanSignupHref(plan.id);
             return (
               <div
                 key={plan.id}
@@ -101,11 +120,11 @@ export default function PricingPage() {
                 </ul>
 
                 <Link
-                  href={plan.ctaHref}
+                  href={href}
                   className={`w-full text-center text-sm font-semibold py-2.5 px-4 rounded-xl transition-all duration-150 flex items-center justify-center gap-1.5 ${
                     plan.highlight
                       ? 'bg-secondary text-white hover:bg-secondary/90'
-                      : plan.id === 'enterprise' ?'bg-primary text-white hover:bg-ocean-800' :'border border-border text-foreground hover:bg-muted'
+                      : plan.id === 'enterprise' ? 'bg-primary text-white hover:bg-ocean-800' : 'border border-border text-foreground hover:bg-muted'
                   }`}
                 >
                   {plan.ctaLabel}

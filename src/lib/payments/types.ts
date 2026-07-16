@@ -60,8 +60,8 @@ export interface CancelSubscriptionParams {
 export interface SubscriptionDetails {
   externalSubscriptionId: string;
   status: SubscriptionStatus;
-  currentPeriodStart: Date;
-  currentPeriodEnd: Date;
+  currentPeriodStart: Date | null;
+  currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
 }
 
