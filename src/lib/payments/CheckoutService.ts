@@ -78,9 +78,9 @@ export async function initiateAssetLicenseCheckout(params: {
 
   // 5. Create checkout via provider
   const config = provider.getConfig();
-  if (!config.isEnabled || !config.isConfigured) {
+  if (!config.isCheckoutReady) {
     throw new Error(
-      'Dodo Payments is not configured. Set DODO_PAYMENTS_API_KEY and DODO_PAYMENTS_WEBHOOK_SECRET.'
+      'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
     );
   }
 
@@ -166,11 +166,11 @@ export async function initiateSubscriptionCheckout(params: {
     .eq('is_active', true)
     .maybeSingle();
 
-  // 4. Verify Dodo is configured
+  // 4. Verify Dodo is configured for checkout (API key only — webhook secret not required)
   const config = provider.getConfig();
-  if (!config.isEnabled || !config.isConfigured) {
+  if (!config.isCheckoutReady) {
     throw new Error(
-      'Dodo Payments is not configured. Set DODO_PAYMENTS_API_KEY and DODO_PAYMENTS_WEBHOOK_SECRET.'
+      'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
     );
   }
 

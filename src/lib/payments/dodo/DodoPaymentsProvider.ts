@@ -2,6 +2,11 @@
 // SEAFOOD VISION — DodoPaymentsProvider
 // Official Dodo Payments TypeScript SDK integration.
 // Server-side only. Never expose API key to frontend.
+//
+// VARIABLE MAPPING (server-side):
+//   DODO_PAYMENTS_API_KEY        → bearerToken (FOUND/MISSING)
+//   DODO_PAYMENTS_WEBHOOK_SECRET → webhookKey  (FOUND/MISSING)
+//   DODO_PAYMENTS_ENVIRONMENT    → environment (FOUND, defaults to 'test')
 // ============================================================
 
 import DodoPayments from 'dodopayments';
@@ -22,6 +27,8 @@ import { getDodoConfig } from './config';
 function createDodoClient(): DodoPayments {
   const apiKey = process.env.DODO_PAYMENTS_API_KEY;
   const env = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
+  // The Dodo SDK constructor accepts webhookKey for signature verification.
+  // We read DODO_PAYMENTS_WEBHOOK_SECRET (our env var name) and pass it as webhookKey.
   const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
 
   return new DodoPayments({
@@ -38,14 +45,17 @@ export class DodoPaymentsProvider implements PaymentProvider {
 
   async createCheckout(params: CreateCheckoutParams): Promise<CheckoutResult> {
     const config = getDodoConfig();
-    if (!config.isEnabled || !config.isConfigured) {
-      throw new Error('Dodo Payments is not configured. Set DODO_PAYMENTS_API_KEY and DODO_PAYMENTS_WEBHOOK_SECRET.');
+    // Checkout only requires the API key (isCheckoutReady), NOT the webhook secret.
+    if (!config.isCheckoutReady) {
+      throw new Error(
+        'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
+      );
     }
 
     const client = createDodoClient();
 
-    // Dodo Payments uses product_cart with product_id from payment_product_mappings
-    // For one-time payments we need a product_id mapped in the Dodo dashboard
+    // Dodo Payments API uses return_url (not success_url) and cancel_url.
+    // The response contains checkout_url and session_id.
     const session = await client.checkoutSessions.create({
       product_cart: [
         {
@@ -56,7 +66,7 @@ export class DodoPaymentsProvider implements PaymentProvider {
       customer: {
         email: params.userEmail,
       },
-      success_url: params.successUrl,
+      return_url: params.successUrl,
       cancel_url: params.cancelUrl,
       metadata: {
         order_id: params.orderId,
@@ -65,8 +75,13 @@ export class DodoPaymentsProvider implements PaymentProvider {
       },
     });
 
+    const checkoutUrl = session.checkout_url ?? '';
+    if (!checkoutUrl) {
+      throw new Error('Dodo Payments did not return a checkout_url. Check your API key and product ID.');
+    }
+
     return {
-      checkoutUrl: (session as unknown as { url: string }).url ?? (session as unknown as { checkout_url: string }).checkout_url,
+      checkoutUrl,
       externalCheckoutId: session.session_id,
     };
   }
@@ -75,13 +90,17 @@ export class DodoPaymentsProvider implements PaymentProvider {
     params: CreateSubscriptionCheckoutParams
   ): Promise<SubscriptionCheckoutResult> {
     const config = getDodoConfig();
-    if (!config.isEnabled || !config.isConfigured) {
-      throw new Error('Dodo Payments is not configured.');
+    // Checkout only requires the API key (isCheckoutReady), NOT the webhook secret.
+    if (!config.isCheckoutReady) {
+      throw new Error(
+        'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
+      );
     }
 
     const client = createDodoClient();
 
-    // Subscription checkout uses a price_id (recurring price) from Dodo dashboard
+    // Subscription checkout: use product_id (Dodo Product ID from payment_product_mappings).
+    // Dodo API uses return_url (not success_url).
     const session = await client.checkoutSessions.create({
       product_cart: [
         {
@@ -92,7 +111,7 @@ export class DodoPaymentsProvider implements PaymentProvider {
       customer: {
         email: params.userEmail,
       },
-      success_url: params.successUrl,
+      return_url: params.successUrl,
       cancel_url: params.cancelUrl,
       metadata: {
         order_id: params.orderId,
@@ -102,8 +121,13 @@ export class DodoPaymentsProvider implements PaymentProvider {
       },
     });
 
+    const checkoutUrl = session.checkout_url ?? '';
+    if (!checkoutUrl) {
+      throw new Error('Dodo Payments did not return a checkout_url. Check your API key and product ID.');
+    }
+
     return {
-      checkoutUrl: (session as unknown as { url: string }).url ?? (session as unknown as { checkout_url: string }).checkout_url,
+      checkoutUrl,
       externalCheckoutId: session.session_id,
     };
   }
@@ -151,7 +175,13 @@ export class DodoPaymentsProvider implements PaymentProvider {
       throw new Error('DODO_PAYMENTS_WEBHOOK_SECRET is not set');
     }
 
-    const client = createDodoClient();
+    // Create a client with the webhook key for signature verification.
+    // The SDK's webhooks.unwrap() uses the webhookKey passed to the constructor.
+    const client = new DodoPayments({
+      bearerToken: process.env.DODO_PAYMENTS_API_KEY,
+      environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') === 'production' ? 'live_mode' : 'test_mode',
+      webhookKey,
+    });
 
     try {
       const unwrapped = client.webhooks.unwrap(rawBody, {

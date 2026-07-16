@@ -19,11 +19,13 @@ export async function GET() {
       return NextResponse?.json({ error: 'Forbidden' }, { status: 403 });
     }
 
-    // Server-side only — never expose actual key values
+    // ── Variable audit (server-side only — never expose values) ──────────────
+    // DODO_PAYMENTS_API_KEY: required for checkout
     const apiKeyConfigured = !!(
       process.env.DODO_PAYMENTS_API_KEY &&
       process.env.DODO_PAYMENTS_API_KEY?.length > 0
     );
+    // DODO_PAYMENTS_WEBHOOK_SECRET: required for webhook signature verification
     const webhookSecretConfigured = !!(
       process.env.DODO_PAYMENTS_WEBHOOK_SECRET &&
       process.env.DODO_PAYMENTS_WEBHOOK_SECRET?.length > 0
@@ -39,6 +41,11 @@ export async function GET() {
       process.env.DODO_PAYMENTS_CANCEL_URL?.length > 0
     );
 
+    // Checkout is ready when API key is present and provider is enabled
+    const checkoutReady = providerEnabled && apiKeyConfigured;
+    // Webhook verification is ready when webhook secret is present
+    const webhookReady = webhookSecretConfigured;
+
     // Return URLs (safe to show — not secrets)
     const returnUrl =
       process.env.DODO_PAYMENTS_RETURN_URL ??
@@ -48,25 +55,35 @@ export async function GET() {
       `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/checkout/cancel`;
 
     // Check product mappings for the three subscription plans
-    const { data: mappings } = await supabase?.from('payment_product_mappings')?.select('dodo_product_id, notes, is_active, internal_product_id')?.eq('internal_product_type', 'subscription_plan')?.eq('environment', environment)?.eq('is_active', true);
+    const { data: mappings } = await supabase
+      ?.from('payment_product_mappings')
+      ?.select('dodo_product_id, notes, is_active, internal_product_id')
+      ?.eq('internal_product_type', 'subscription_plan')
+      ?.eq('environment', environment)
+      ?.eq('is_active', true);
 
     const mappingCount = mappings?.length ?? 0;
     const mappedProductIds = mappings?.map((m) => m?.dodo_product_id)?.filter(Boolean) ?? [];
 
     return NextResponse?.json({
-      // Key presence — yes/no only, never the actual values
-      apiKeyConfigured,
-      webhookSecretConfigured,
-      returnUrlConfigured,
-      cancelUrlConfigured,
-      // Non-secret config
+      // ── Variable presence (FOUND / MISSING — never the actual values) ──
+      'DODO_PAYMENTS_API_KEY': apiKeyConfigured ? 'FOUND' : 'MISSING',
+      'DODO_PAYMENTS_WEBHOOK_SECRET': webhookSecretConfigured ? 'FOUND' : 'MISSING',
+      'DODO_PAYMENTS_ENVIRONMENT': 'FOUND',
+      'DODO_PAYMENTS_RETURN_URL': returnUrlConfigured ? 'FOUND' : 'MISSING',
+      'DODO_PAYMENTS_CANCEL_URL': cancelUrlConfigured ? 'FOUND' : 'MISSING',
+      'NEXT_PUBLIC_DODO_PAYMENTS_ENABLED': providerEnabled ? 'FOUND (true)' : 'FOUND (false)',
+      // ── Readiness ──
+      checkoutReady,
+      webhookReady,
+      // ── Non-secret config ──
       environment,
       returnUrl,
       cancelUrl,
       providerEnabled,
       checkoutRouteAvailable: true,
       webhookUrl: `${process.env.NEXT_PUBLIC_SITE_URL ?? ''}/api/webhooks/dodo-payments`,
-      // Mapping status
+      // ── Mapping status ──
       subscriptionMappingsConfigured: mappingCount,
       subscriptionMappingsExpected: 3,
       mappedProductIds,

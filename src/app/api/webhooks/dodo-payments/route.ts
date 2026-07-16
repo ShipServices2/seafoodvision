@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DodoPaymentsProvider } from '@/lib/payments/dodo/DodoPaymentsProvider';
+import DodoPayments from 'dodopayments';
 import {
   recordWebhookEvent,
   markWebhookProcessing,
@@ -33,53 +34,80 @@ export async function POST(request: NextRequest) {
     'webhook-timestamp': request.headers.get('webhook-timestamp') ?? '',
   };
 
-  const webhookSecretConfigured = !!(
-    process.env.DODO_PAYMENTS_WEBHOOK_SECRET &&
-    process.env.DODO_PAYMENTS_WEBHOOK_SECRET.length > 0
-  );
+  const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+  const webhookSecretConfigured = !!(webhookSecret && webhookSecret.length > 0);
+  const environment = (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as PaymentEnvironment;
 
   // 1. Verify webhook signature
-  let verificationResult;
-  try {
-    verificationResult = await provider.verifyWebhookSignature(rawBody, '', webhookHeaders);
-  } catch (err) {
-    const msg = err instanceof Error ? err.message : 'Verification error';
-    console.error('[webhook/dodo] Signature verification threw:', msg);
+  let verificationResult: {
+    isValid: boolean;
+    payload: Record<string, unknown>;
+    eventType: string;
+    externalEventId: string;
+  } | null = null;
 
-    // STRICT: if webhook secret is configured, ALWAYS reject invalid signatures
-    if (webhookSecretConfigured) {
-      return NextResponse.json(
-        { error: 'Webhook signature verification failed' },
-        { status: 401 }
-      );
+  if (webhookSecretConfigured) {
+    // STRICT: webhook secret is configured — always verify signature
+    try {
+      const result = await provider.verifyWebhookSignature(rawBody, '', webhookHeaders);
+      if (!result.isValid) {
+        console.error('[webhook/dodo] Invalid signature');
+        return NextResponse.json({ error: 'Invalid webhook signature' }, { status: 401 });
+      }
+      verificationResult = {
+        isValid: true,
+        payload: result.payload ?? {},
+        eventType: result.eventType ?? 'unknown',
+        externalEventId: result.externalEventId ?? `evt-${Date.now()}`,
+      };
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Verification error';
+      console.error('[webhook/dodo] Signature verification failed:', msg);
+      return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 401 });
     }
-
-    // Only allow unsigned events in test mode WITHOUT a secret configured (local dev only)
-    const environment = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
-    if (environment === 'test' && !webhookSecretConfigured) {
+  } else if (environment === 'test') {
+    // TEST MODE without secret: use unsafe_unwrap (no signature verification).
+    // This allows testing via Dodo dashboard test events and CLI trigger.
+    try {
+      const client = new DodoPayments({
+        bearerToken: process.env.DODO_PAYMENTS_API_KEY,
+        environment: 'test_mode',
+      });
+      // unsafe_unwrap parses without verifying signature
+      const unwrapped = client.webhooks.unwrapUnsafe(rawBody);
+      const u = unwrapped as unknown as Record<string, unknown>;
+      const eventType = String(u.type ?? u.event_type ?? 'unknown');
+      const externalEventId = webhookHeaders['webhook-id'] || String(u.id ?? `test-${Date.now()}`);
+      verificationResult = {
+        isValid: true,
+        payload: u,
+        eventType,
+        externalEventId,
+      };
+    } catch {
+      // Fall back to raw JSON parse if unwrapUnsafe is not available
       try {
-        const parsed = JSON.parse(rawBody);
+        const parsed = JSON.parse(rawBody) as Record<string, unknown>;
         verificationResult = {
           isValid: true,
-          payload: parsed as Record<string, unknown>,
+          payload: parsed,
           eventType: String(parsed.type ?? parsed.event_type ?? 'unknown'),
-          externalEventId:
-            webhookHeaders['webhook-id'] ||
-            String(parsed.id ?? `test-${Date.now()}`),
+          externalEventId: webhookHeaders['webhook-id'] || String(parsed.id ?? `test-${Date.now()}`),
         };
       } catch {
         return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
       }
-    } else {
-      return NextResponse.json(
-        { error: 'Webhook signature verification failed' },
-        { status: 401 }
-      );
     }
+  } else {
+    // Production mode without secret — reject
+    console.error('[webhook/dodo] DODO_PAYMENTS_WEBHOOK_SECRET is not configured in production mode');
+    return NextResponse.json(
+      { error: 'Webhook secret not configured' },
+      { status: 500 }
+    );
   }
 
   if (!verificationResult || !verificationResult.isValid) {
-    console.error('[webhook/dodo] Invalid signature');
     return NextResponse.json({ error: 'Invalid signature' }, { status: 401 });
   }
 
@@ -88,8 +116,6 @@ export async function POST(request: NextRequest) {
   if (!payload || !eventType || !externalEventId) {
     return NextResponse.json({ error: 'Missing event data' }, { status: 400 });
   }
-
-  const environment = (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as PaymentEnvironment;
 
   // 2. Record event and check for duplicates (idempotency)
   let webhookEventId: string | undefined;
