@@ -94,7 +94,7 @@ export default function CheckoutResumeContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'subscription',
-            planCode: plan,
+            planCode: plan && !plan.includes('_') ? `${plan}_${cycle}` : plan,
             billingCycle: cycle,
           }),
         });
