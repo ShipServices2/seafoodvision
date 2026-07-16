@@ -23,6 +23,12 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const cycle = searchParams.get('cycle') || 'monthly';
   const hasCheckoutIntent = searchParams.get('checkout_intent') === '1';
 
+  // Asset license params (for image license checkout intent)
+  const assetId = searchParams.get('asset_id');
+  const licenseTypeCode = searchParams.get('license_type');
+  const unitProductCode = searchParams.get('unit_product');
+  const hasAssetIntent = !!(assetId && licenseTypeCode && unitProductCode);
+
   const { user, loading, signIn, signUp } = useAuth();
 
   const [mode, setMode] = useState<AuthMode>(defaultMode);
@@ -43,6 +49,14 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   function buildRedirectUrl(): string {
     if (hasCheckoutIntent && plan) {
       const params = new URLSearchParams({ plan, cycle });
+      return `/checkout/resume?${params.toString()}`;
+    }
+    if (hasCheckoutIntent && hasAssetIntent) {
+      const params = new URLSearchParams({
+        asset_id: assetId!,
+        license_type: licenseTypeCode!,
+        unit_product: unitProductCode!,
+      });
       return `/checkout/resume?${params.toString()}`;
     }
     return next;
@@ -111,6 +125,16 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
           <CheckCircle2 size={16} className="text-secondary shrink-0" />
           <p className="text-sm text-foreground">
             You selected the <span className="font-semibold capitalize">{plan}</span> plan ({cycle}).
+            {mode === 'login' ? ' Sign in' : ' Create your account'} to continue to checkout.
+          </p>
+        </div>
+      )}
+
+      {hasCheckoutIntent && hasAssetIntent && !plan && (
+        <div className="w-full max-w-md mb-4 bg-secondary/10 border border-secondary/30 rounded-xl px-4 py-3 flex items-center gap-3">
+          <CheckCircle2 size={16} className="text-secondary shrink-0" />
+          <p className="text-sm text-foreground">
+            You selected an image license.
             {mode === 'login' ? ' Sign in' : ' Create your account'} to continue to checkout.
           </p>
         </div>
