@@ -1,6 +1,7 @@
 // ============================================================
 // SEAFOOD VISION — OpenAI Pilot Import API Route
-// Handles dry-run and confirmed import of 20-asset OpenAI Vision pilot CSVs
+// Handles dry-run and confirmed import of OpenAI Vision pilot CSVs
+// Each confirmed import creates a NEW sie_jobs batch record + openai_pilot_job_assets entries
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -121,6 +122,20 @@ export async function POST(req: NextRequest) {
     .select('*', { count: 'exact', head: true })
     .in('public_asset_id', expectedPublicIds);
 
+  // Count existing pilot batches to generate batch name
+  const { count: existingBatchCount } = await supabase
+    .from('sie_jobs')
+    .select('*', { count: 'exact', head: true })
+    .not('pilot_job_name', 'is', null)
+    .eq('provider_mode', 'real_ai');
+
+  const batchNumber = (existingBatchCount ?? 0) + 1;
+  const assetCount = assetsFound.length;
+  // Generate a human-readable batch name: "Batch 01 (100 assets)" or "OpenAI Pilot 20" for the first
+  const batchLabel = batchNumber === 1
+    ? `OpenAI Pilot ${assetCount}`
+    : `Batch ${String(batchNumber - 1).padStart(2, '0')} (${assetCount})`;
+
   // Build dry-run report
   const dryRunReport = {
     assets_expected: expectedPublicIds.length,
@@ -137,6 +152,7 @@ export async function POST(req: NextRequest) {
     rows_to_create: resultRows.filter((r) => assetsFound.includes(r.public_asset_id)).length,
     rows_to_update: existingRealAI ?? 0,
     rejected_rows: assetsMissing.map((id) => ({ public_asset_id: id, reason: 'Asset not found in database' })),
+    batch_label: batchLabel,
   };
 
   if (mode === 'dry_run') {
@@ -161,58 +177,49 @@ export async function POST(req: NextRequest) {
 
   const importLogId = importLog?.id;
 
-  // Create or find the pilot job
-  let pilotJobId: string | null = null;
-  const { data: existingPilotJob } = await supabase
+  // Always create a NEW sie_jobs record for each import batch
+  // This ensures each batch is independently selectable in the validation workspace
+  const firstAssetId = assetsFound[0] ? assetMap.get(assetsFound[0])?.id : null;
+  const avgConf = resultRows.length > 0
+    ? resultRows.reduce((s, r) => s + parseFloat(r.avg_confidence || '0'), 0) / resultRows.length
+    : 0;
+
+  const { data: newJob } = await supabase
     .from('sie_jobs')
+    .insert({
+      asset_id: firstAssetId ?? null,
+      public_asset_id: assetsFound[0] ?? null,
+      pilot_job_name: batchLabel,
+      job_status: 'proposals_ready',
+      ai_provider: 'openai',
+      ai_model: 'gpt-5-mini-2025-08-07',
+      provider_mode: 'real_ai',
+      total_assets: assetsFound.length,
+      avg_confidence: Math.round(avgConf * 100),
+      global_confidence: Math.round(avgConf * 100),
+      processing_progress: assetsFound.length,
+      validation_progress: 0,
+    })
     .select('id')
-    .eq('pilot_job_name', 'OpenAI Vision Pilot — 20 Assets')
     .single();
 
-  if (existingPilotJob) {
-    pilotJobId = existingPilotJob.id;
-  } else {
-    // Use first asset as anchor for the pilot job
-    const firstAssetId = assetsFound[0] ? assetMap.get(assetsFound[0])?.id : null;
-    const avgConf = resultRows.length > 0
-      ? resultRows.reduce((s, r) => s + parseFloat(r.avg_confidence || '0'), 0) / resultRows.length
-      : 0;
-
-    const { data: newJob } = await supabase
-      .from('sie_jobs')
-      .insert({
-        asset_id: firstAssetId ?? null,
-        public_asset_id: assetsFound[0] ?? null,
-        pilot_job_name: 'OpenAI Vision Pilot — 20 Assets',
-        job_status: 'proposals_ready',
-        ai_provider: 'openai',
-        ai_model: 'gpt-5-mini-2025-08-07',
-        provider_mode: 'real_ai',
-        total_assets: assetsFound.length,
-        avg_confidence: Math.round(avgConf * 100),
-        global_confidence: Math.round(avgConf * 100),
-        processing_progress: assetsFound.length,
-        validation_progress: 0,
-      })
-      .select('id')
-      .single();
-    pilotJobId = newJob?.id ?? null;
-  }
+  const pilotJobId = newJob?.id ?? null;
 
   // Import results + candidates per asset
   let resultsImported = 0;
   let candidatesImported = 0;
   let metadataImported = 0;
+  let reviewPosition = 1;
 
   for (const publicAssetId of assetsFound) {
     const asset = assetMap.get(publicAssetId)!;
     const resultRow = resultRows.find((r) => r.public_asset_id === publicAssetId);
     if (!resultRow) continue;
 
-    // Upsert pilot result — requires unique index on public_asset_id (migration 20260715900000)
+    // Insert a new pilot result for this batch (do NOT upsert — each batch gets its own rows)
     const { data: pilotResult, error: resultError } = await supabase
       .from('openai_pilot_results')
-      .upsert({
+      .insert({
         asset_id: asset.id,
         public_asset_id: publicAssetId,
         job_id: pilotJobId,
@@ -227,21 +234,29 @@ export async function POST(req: NextRequest) {
         total_candidates: parseInt(resultRow.total_candidates || '0'),
         avg_confidence: parseFloat(resultRow.avg_confidence || '0'),
         import_log_id: importLogId,
-      }, { onConflict: 'public_asset_id' })
+      })
       .select('id')
       .single();
 
     if (resultError || !pilotResult) {
-      console.error(`[Import] Failed to upsert result for ${publicAssetId}:`, resultError?.message ?? 'null result');
+      console.error(`[Import] Failed to insert result for ${publicAssetId}:`, resultError?.message ?? 'null result');
       continue;
     }
     resultsImported++;
 
-    // Delete existing candidates for this result before re-inserting (idempotent re-import)
+    // Create openai_pilot_job_assets entry for this batch asset
+    // This is what the validation workspace uses to navigate assets
     await supabase
-      .from('openai_pilot_candidates')
-      .delete()
-      .eq('result_id', pilotResult.id);
+      .from('openai_pilot_job_assets')
+      .insert({
+        batch_job_id: pilotJobId,
+        asset_id: asset.id,
+        public_asset_id: publicAssetId,
+        result_id: pilotResult.id,
+        review_position: reviewPosition,
+        review_status: 'unreviewed',
+      });
+    reviewPosition++;
 
     // Import candidates for this asset
     const assetCandidates = candidateRows.filter((c) => c.public_asset_id === publicAssetId);
@@ -345,6 +360,7 @@ export async function POST(req: NextRequest) {
     success: true,
     mode: 'import',
     pilot_job_id: pilotJobId,
+    batch_label: batchLabel,
     report: {
       ...dryRunReport,
       results_imported: resultsImported,
