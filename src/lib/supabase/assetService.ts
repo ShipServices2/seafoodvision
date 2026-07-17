@@ -190,7 +190,7 @@ export async function fetchAssets(
     .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
     .neq('publication_status', 'archived');
 
-  // Text search — includes search_aliases (validated species names) and species join
+  // Text search — searches text columns; alias search handled separately below
   if (filters.query) {
     const q = filters.query;
     query = query.or(
@@ -272,7 +272,39 @@ export async function fetchAssets(
     return { assets: [], total: 0 };
   }
 
-  return { assets: (data as AssetRow[]) || [], total: count ?? 0 };
+  let assets = (data as AssetRow[]) || [];
+  let total = count ?? 0;
+
+  // If a text query is present, also search by search_aliases (validated species names)
+  // and merge results (dedup by id), boosting total count
+  if (filters.query && page === 1) {
+    try {
+      const q = filters.query.toLowerCase().trim();
+      const { data: aliasData } = await supabase
+        .from('assets')
+        .select(
+          `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`
+        )
+        .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
+        .neq('publication_status', 'archived')
+        .not('search_aliases', 'is', null)
+        .contains('search_aliases', [q])
+        .limit(pageSize);
+
+      if (aliasData && aliasData.length > 0) {
+        const existingIds = new Set(assets.map((a) => a.id));
+        const newFromAliases = (aliasData as AssetRow[]).filter((a) => !existingIds.has(a.id));
+        if (newFromAliases.length > 0) {
+          assets = [...assets, ...newFromAliases].slice(0, pageSize);
+          total = total + newFromAliases.length;
+        }
+      }
+    } catch {
+      // Non-fatal: alias search failure doesn't break main results
+    }
+  }
+
+  return { assets, total };
 }
 
 export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {

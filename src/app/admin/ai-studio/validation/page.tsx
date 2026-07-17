@@ -8,7 +8,7 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
-import { Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader2, Eye, BarChart2, List, ChevronDown } from 'lucide-react';
+import { Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader2, Eye, BarChart2, List, ChevronDown, RefreshCw } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -302,6 +302,16 @@ function AIStudioValidationPageInner() {
   const [pilotMetadata, setPilotMetadata] = useState<OpenAIPilotMetadata | null>(null);
   const [showPilotMetadata, setShowPilotMetadata] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
+
+  // ── Backfill state ────────────────────────────────────────────────────
+  const [backfillLoading, setBackfillLoading] = useState(false);
+  const [backfillResult, setBackfillResult] = useState<{
+    summary: { totalAudited: number; propagated: number; alreadyPropagated: number; failed: number; speciesCreated: number; speciesReused: number; assetSpeciesWritten: number; aliasesWritten: number; speciesNamesWritten: number };
+    results: Array<{ resultId: string; publicAssetId: string; status: string; errors: string[]; message: string }>;
+    success: boolean;
+  } | null>(null);
+  const [backfillError, setBackfillError] = useState<string | null>(null);
+  const [showBackfillDetails, setShowBackfillDetails] = useState(false);
 
   // Track if initial load has run (to avoid double-loading)
   const initialLoadDone = useRef(false);
@@ -1248,6 +1258,35 @@ function AIStudioValidationPageInner() {
     fetchValidationStats();
   };
 
+  // ── Backfill propagation for all validated Batch 02 assets ───────────────
+  const handleBackfillPropagation = async () => {
+    if (backfillLoading) return;
+    setBackfillLoading(true);
+    setBackfillResult(null);
+    setBackfillError(null);
+    try {
+      const res = await fetch('/api/admin/backfill-propagation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ batchJobId: selectedBatchJobId }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setBackfillError(data.error ?? 'Backfill failed');
+      } else {
+        setBackfillResult(data);
+        // Reload batch stats after backfill
+        if (selectedBatchJobId) {
+          loadBatchJobAssets(selectedBatchJobId);
+        }
+      }
+    } catch (e) {
+      setBackfillError(`Network error: ${e}`);
+    } finally {
+      setBackfillLoading(false);
+    }
+  };
+
   if (loading || !user || !profile) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -1430,6 +1469,105 @@ function AIStudioValidationPageInner() {
                   />
                   Auto-advance after confirmation
                 </label>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Backfill Propagation Panel ── */}
+        {batchJob && (
+          <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Zap size={14} className="text-violet-600" />
+                <span className="text-sm font-semibold text-violet-800">Backfill Propagation</span>
+                <span className="text-xs text-violet-600">
+                  Propagate all validated assets → species · asset_species · search aliases · Library
+                </span>
+              </div>
+              <div className="flex items-center gap-2">
+                {backfillResult && (
+                  <button
+                    onClick={() => setShowBackfillDetails((v) => !v)}
+                    className="text-xs text-violet-700 underline">
+                    {showBackfillDetails ? 'Hide details' : `View results (${backfillResult.summary.propagated} propagated)`}
+                  </button>
+                )}
+                <button
+                  onClick={handleBackfillPropagation}
+                  disabled={backfillLoading}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors">
+                  {backfillLoading ? (
+                    <><Loader2 size={12} className="animate-spin" />Running backfill...</>
+                  ) : (
+                    <><RefreshCw size={12} />Run Backfill</>
+                  )}
+                </button>
+              </div>
+            </div>
+
+            {backfillError && (
+              <div className="mt-2 flex items-center gap-2 text-xs text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+                <AlertTriangle size={12} />
+                {backfillError}
+              </div>
+            )}
+
+            {backfillResult && (
+              <div className="mt-2">
+                <div className="flex flex-wrap gap-2 text-xs">
+                  <span className={`px-2 py-0.5 rounded-full font-medium border ${backfillResult.success ? 'bg-emerald-50 border-emerald-200 text-emerald-700' : 'bg-amber-50 border-amber-200 text-amber-700'}`}>
+                    {backfillResult.success ? '✓ Success' : '⚠ Partial'}
+                  </span>
+                  <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                    {backfillResult.summary.propagated} propagated
+                  </span>
+                  {backfillResult.summary.alreadyPropagated > 0 && (
+                    <span className="bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                      {backfillResult.summary.alreadyPropagated} already done
+                    </span>
+                  )}
+                  {backfillResult.summary.failed > 0 && (
+                    <span className="bg-red-50 border border-red-200 text-red-700 px-2 py-0.5 rounded-full font-medium">
+                      {backfillResult.summary.failed} failed
+                    </span>
+                  )}
+                  <span className="bg-violet-50 border border-violet-200 text-violet-700 px-2 py-0.5 rounded-full font-medium">
+                    {backfillResult.summary.speciesCreated} species created · {backfillResult.summary.speciesReused} reused
+                  </span>
+                  <span className="bg-teal-50 border border-teal-200 text-teal-700 px-2 py-0.5 rounded-full font-medium">
+                    {backfillResult.summary.assetSpeciesWritten} asset_species · {backfillResult.summary.aliasesWritten} aliases · {backfillResult.summary.speciesNamesWritten} names
+                  </span>
+                </div>
+
+                {showBackfillDetails && (
+                  <div className="mt-2 max-h-48 overflow-y-auto border border-violet-200 rounded-lg bg-white">
+                    <table className="w-full text-xs">
+                      <thead className="bg-violet-50 sticky top-0">
+                        <tr>
+                          <th className="text-left px-2 py-1.5 font-semibold text-violet-800">Asset ID</th>
+                          <th className="text-left px-2 py-1.5 font-semibold text-violet-800">Status</th>
+                          <th className="text-left px-2 py-1.5 font-semibold text-violet-800">Message</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-violet-100">
+                        {backfillResult.results.map((r) => (
+                          <tr key={r.resultId} className={r.status === 'failed' ? 'bg-red-50' : r.status === 'already_propagated' ? 'bg-blue-50/30' : ''}>
+                            <td className="px-2 py-1 font-mono text-muted-foreground truncate max-w-[120px]">{r.publicAssetId}</td>
+                            <td className="px-2 py-1">
+                              <span className={`px-1.5 py-0.5 rounded font-medium ${
+                                r.status === 'propagated' ? 'bg-emerald-100 text-emerald-700' :
+                                r.status === 'already_propagated' ? 'bg-blue-100 text-blue-700' :
+                                r.status === 'failed' ? 'bg-red-100 text-red-700' : 'bg-gray-100 text-gray-600'
+                              }`}>{r.status}</span>
+                            </td>
+                            <td className="px-2 py-1 text-muted-foreground truncate max-w-[200px]">{r.message}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>
