@@ -84,14 +84,7 @@ export default function Header({ transparent = false }: HeaderProps) {
           <div className="flex items-center h-16 gap-6">
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <AppLogo size={36} />
-              <span
-                className={`font-bold text-lg tracking-tight transition-colors duration-300 ${
-                  isTransparent ? 'text-white' : 'text-primary'
-                }`}
-              >
-                SeafoodVision
-              </span>
+              <AppLogo size={48} />
             </Link>
 
             {/* Desktop Nav */}

@@ -13,7 +13,7 @@ interface AppLogoProps {
 }
 
 const AppLogo = memo(function AppLogo({
-  src = '/assets/images/app_logo.png',
+  src = '/assets/images/LOGO_SEAFOODVISION-1784258939839.png',
   iconName = 'SparklesIcon',
   size = 64,
   className = '',
@@ -33,10 +33,10 @@ const AppLogo = memo(function AppLogo({
       {src ? (
         <AppImage
           src={src}
-          alt="Logo" 
+          alt="Seafood Vision Logo"
           width={size}
           height={size}
-          className="flex-shrink-0"
+          className="flex-shrink-0 object-contain"
           priority={true}
           unoptimized={src.endsWith('.svg')}
         />
