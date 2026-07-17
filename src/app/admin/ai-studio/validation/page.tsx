@@ -325,16 +325,12 @@ function AIStudioValidationPageInner() {
   const loadAllBatchJobs = useCallback(async () => {
     const supabase = createClient();
     try {
-      // Only load non-superseded jobs. If is_superseded column doesn't exist yet
-      // (migration pending), fall back to all real_ai pilot jobs.
-      let query = supabase
+      const { data: allJobs, error: allJobsError } = await supabase
         .from('sie_jobs')
         .select('*')
         .not('pilot_job_name', 'is', null)
         .eq('provider_mode', 'real_ai')
-        .order('created_at', { ascending: false });
-
-      const { data: allJobs, error: allJobsError } = await query;
+        .order('created_at', { ascending: true }); // ASC so Batch01 < Batch02 in order
 
       if (allJobsError || !allJobs || allJobs.length === 0) return;
 
@@ -343,14 +339,29 @@ function AIStudioValidationPageInner() {
         (j) => j.is_superseded !== true && !j.pilot_job_name?.includes('[superseded]')
       );
 
-      if (pilotJobs.length === 0) {
-        // Fallback: if all are marked superseded (shouldn't happen), show all
-        setAllBatchJobs(allJobs as SIEJob[]);
-      } else {
-        setAllBatchJobs(pilotJobs);
+      // Further filter: only show jobs that have actual assets
+      // (avoids showing stale empty jobs)
+      const jobsWithAssets: SIEJob[] = [];
+      for (const job of (pilotJobs.length > 0 ? pilotJobs : (allJobs as SIEJob[]))) {
+        const { count } = await supabase
+          .from('openai_pilot_job_assets')
+          .select('*', { count: 'exact', head: true })
+          .eq('batch_job_id', job.id);
+        if ((count ?? 0) > 0) {
+          jobsWithAssets.push(job);
+        }
       }
 
-      const activePilotJobs = pilotJobs.length > 0 ? pilotJobs : (allJobs as SIEJob[]);
+      const activePilotJobs = jobsWithAssets.length > 0
+        ? jobsWithAssets
+        : (pilotJobs.length > 0 ? pilotJobs : (allJobs as SIEJob[]));
+
+      // Sort by created_at ASC so Batch01 appears before Batch02 in selector
+      activePilotJobs.sort((a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
+      );
+
+      setAllBatchJobs(activePilotJobs);
 
       // Determine which job to auto-select:
       // Priority 1: job specified in URL param (must be non-superseded)
@@ -364,7 +375,11 @@ function AIStudioValidationPageInner() {
       }
 
       if (!targetJobId) {
-        for (const job of activePilotJobs) {
+        // Check from most recent to oldest for unreviewed assets
+        const jobsDesc = [...activePilotJobs].sort((a, b) =>
+          new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+        );
+        for (const job of jobsDesc) {
           const { count: unreviewedCount } = await supabase
             .from('openai_pilot_job_assets')
             .select('*', { count: 'exact', head: true })
@@ -379,7 +394,8 @@ function AIStudioValidationPageInner() {
       }
 
       if (!targetJobId && activePilotJobs.length > 0) {
-        targetJobId = activePilotJobs[0].id;
+        // Default to most recent job
+        targetJobId = activePilotJobs[activePilotJobs.length - 1].id;
       }
 
       if (targetJobId) {

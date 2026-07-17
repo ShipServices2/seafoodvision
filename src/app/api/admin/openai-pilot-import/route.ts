@@ -123,18 +123,34 @@ export async function POST(req: NextRequest) {
     .in('public_asset_id', expectedPublicIds);
 
   // Count existing pilot batches to generate batch name
-  const { count: existingBatchCount } = await supabase
+  // CRITICAL: Only count non-superseded jobs that actually have assets
+  // (stale sie_jobs from failed imports must not inflate the batch number)
+  const { data: activeBatchJobs } = await supabase
     .from('sie_jobs')
-    .select('*', { count: 'exact', head: true })
+    .select('id')
     .not('pilot_job_name', 'is', null)
-    .eq('provider_mode', 'real_ai');
+    .eq('provider_mode', 'real_ai')
+    .or('is_superseded.is.null,is_superseded.eq.false')
+    .not('pilot_job_name', 'like', '[superseded]%');
+
+  // Further filter: only count jobs that actually have assets
+  let activeBatchCount = 0;
+  if (activeBatchJobs && activeBatchJobs.length > 0) {
+    for (const job of activeBatchJobs) {
+      const { count: assetCount } = await supabase
+        .from('openai_pilot_job_assets')
+        .select('*', { count: 'exact', head: true })
+        .eq('batch_job_id', job.id);
+      if ((assetCount ?? 0) > 0) activeBatchCount++;
+    }
+  }
 
   // Build dry-run report
-  const batchNumber = (existingBatchCount ?? 0) + 1;
+  const batchNumber = activeBatchCount + 1;
   const assetCount = assetsFound.length;
   const batchLabel = batchNumber === 1
     ? `OpenAI Pilot ${assetCount}`
-    : `Batch ${String(batchNumber - 1).padStart(2, '0')} (${assetCount})`;
+    : `Batch ${String(batchNumber).padStart(2, '0')} (${assetCount})`;
 
   const dryRunReport = {
     assets_expected: expectedPublicIds.length,
