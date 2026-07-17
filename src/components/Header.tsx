@@ -81,10 +81,17 @@ export default function Header({ transparent = false }: HeaderProps) {
         }`}
       >
         <div className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16">
-          <div className="flex items-center h-20 gap-6">
+          <div className="flex items-center h-16 gap-6">
             {/* Logo */}
             <Link href="/" className="flex items-center gap-2.5 shrink-0">
-              <AppLogo size={80} />
+              <AppLogo size={36} />
+              <span
+                className={`font-bold text-lg tracking-tight transition-colors duration-300 ${
+                  isTransparent ? 'text-white' : 'text-primary'
+                }`}
+              >
+                SeafoodVision
+              </span>
             </Link>
 
             {/* Desktop Nav */}

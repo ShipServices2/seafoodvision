@@ -302,51 +302,6 @@ function AIStudioValidationPageInner() {
   const [showPilotMetadata, setShowPilotMetadata] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
 
-  // ── Backfill state ────────────────────────────────────────────────────────
-  const [showBackfillPanel, setShowBackfillPanel] = useState(false);
-  const [backfillLoading, setBackfillLoading] = useState(false);
-  const [backfillMode, setBackfillMode] = useState<'audit' | 'backfill'>('audit');
-  const [backfillResult, setBackfillResult] = useState<{
-    success: boolean;
-    job_id?: string;
-    job_name?: string;
-    mode?: string;
-    summary?: {
-      total_audited: number;
-      complete: number;
-      partial: number;
-      none: number;
-      errors?: number;
-      repaired?: number;
-      species_reused?: number;
-      species_created?: number;
-      asset_species_written?: number;
-      aliases_created?: number;
-      indexes_rebuilt?: number;
-      repair_errors?: Array<{ asset_id: string; public_asset_id: string; errors: string[] }>;
-    };
-    error?: string;
-  } | null>(null);
-
-  const handleRunBackfill = async (mode: 'audit' | 'backfill') => {
-    if (backfillLoading) return;
-    setBackfillLoading(true);
-    setBackfillResult(null);
-    try {
-      const res = await fetch('/api/admin/backfill-propagation', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ mode, jobId: selectedBatchJobId }),
-      });
-      const data = await res.json();
-      setBackfillResult(data);
-    } catch (err) {
-      setBackfillResult({ success: false, error: `Network error: ${err}` });
-    } finally {
-      setBackfillLoading(false);
-    }
-  };
-
   // Track if initial load has run (to avoid double-loading)
   const initialLoadDone = useRef(false);
 
@@ -1095,7 +1050,7 @@ function AIStudioValidationPageInner() {
       });
       const result = await res.json();
 
-      if (result.success || (result.steps && result.steps.length > 0 && !result.critical_failure)) {
+      if (result.success || (result.steps && result.steps.length > 0)) {
         const stepMap: Record<string, string> = {
           candidate_validated: 'assets',
           asset_species_written: 'asset_species',
@@ -1111,12 +1066,7 @@ function AIStudioValidationPageInner() {
           const target = stepMap[step];
           if (target && !done.includes(target)) done.push(target);
         }
-        // All 7 propagation targets are confirmed by the server
-        const allTargets = ['assets', 'asset_species', 'species_center', 'knowledge_graph', 'search_index', 'marketplace', 'library'];
-        const finalDone = result.propagationTargets
-          ? allTargets.filter((t) => (result.propagationTargets as string[]).includes(t))
-          : done;
-        setPropagationDone(finalDone.length > 0 ? finalDone : done);
+        setPropagationDone(done);
         setConfirmSuccess(result.message ?? 'Identification confirmed');
 
         // Update batch asset status locally — mark current asset as validated
@@ -1156,7 +1106,6 @@ function AIStudioValidationPageInner() {
 
         if (effectiveJobId) fetchHistory(effectiveJobId);
 
-        // Auto-advance ONLY after successful commit — never on failure
         if (autoAdvance) {
           setTimeout(() => {
             if (batchMode) {
@@ -1167,14 +1116,7 @@ function AIStudioValidationPageInner() {
           }, 1200);
         }
       } else {
-        // Critical failure — keep asset open, show exact error, do NOT advance
-        const errorMsg = result.message ?? result.error ?? result.errors?.join('; ') ?? 'Confirmation failed';
-        setConfirmError(
-          result.critical_failure
-            ? `⚠ Critical failure — asset NOT validated. ${errorMsg}`
-            : errorMsg
-        );
-        // Do NOT advance, do NOT mark as validated
+        setConfirmError(result.error ?? result.errors?.join('; ') ?? 'Confirmation failed');
       }
     } catch (e) {
       setConfirmError(`Network error: ${e}`);
@@ -1475,114 +1417,6 @@ function AIStudioValidationPageInner() {
               className="flex items-center gap-1.5 text-sm font-semibold text-amber-700 hover:text-amber-900 transition-colors">
               <RotateCcw size={14} />Undo (Ctrl+Z)
             </button>
-          </div>
-        )}
-
-        {/* ── Backfill Propagation Panel ── */}
-        {batchJob && (profile?.role === 'administrator' || profile?.role === 'super_admin') && (
-          <div className="mb-4">
-            <button
-              onClick={() => setShowBackfillPanel((v) => !v)}
-              className="flex items-center gap-2 text-xs font-semibold text-violet-700 bg-violet-50 border border-violet-200 px-3 py-1.5 rounded-lg hover:bg-violet-100 transition-colors">
-              <Zap size={12} />
-              {showBackfillPanel ? 'Hide' : 'Show'} Backfill Propagation Panel
-              <span className="text-[10px] bg-violet-200 text-violet-800 px-1.5 py-0.5 rounded-full font-bold">ADMIN</span>
-            </button>
-
-            {showBackfillPanel && (
-              <div className="mt-2 bg-violet-50 border border-violet-200 rounded-xl p-4">
-                <div className="flex items-start gap-3 mb-3">
-                  <Zap size={16} className="text-violet-600 shrink-0 mt-0.5" />
-                  <div>
-                    <h3 className="text-sm font-bold text-violet-900">Backfill Validated Asset Propagation</h3>
-                    <p className="text-xs text-violet-700 mt-0.5">
-                      Audits all validated assets in the current batch and repairs missing propagation
-                      (asset_species, species, search aliases, species_names, Library visibility).
-                      Idempotent — safe to run multiple times.
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 mb-3">
-                  <button
-                    onClick={() => handleRunBackfill('audit')}
-                    disabled={backfillLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold bg-white border border-violet-300 text-violet-700 rounded-lg hover:bg-violet-100 disabled:opacity-50 transition-colors">
-                    {backfillLoading && backfillMode === 'audit' ? (
-                      <><Loader2 size={12} className="animate-spin" />Auditing...</>
-                    ) : (
-                      <><Eye size={12} />Audit Only (Read-only)</>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => { setBackfillMode('backfill'); handleRunBackfill('backfill'); }}
-                    disabled={backfillLoading}
-                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold bg-violet-600 text-white rounded-lg hover:bg-violet-700 disabled:opacity-50 transition-colors">
-                    {backfillLoading && backfillMode === 'backfill' ? (
-                      <><Loader2 size={12} className="animate-spin" />Repairing...</>
-                    ) : (
-                      <><Zap size={12} />Run Backfill (Repair Missing)</>
-                    )}
-                  </button>
-                </div>
-
-                {backfillResult && (
-                  <div className={`rounded-lg border p-3 text-xs ${backfillResult.success ? 'bg-white border-violet-200' : 'bg-red-50 border-red-200'}`}>
-                    {!backfillResult.success && (
-                      <p className="text-red-700 font-semibold mb-1">Error: {backfillResult.error}</p>
-                    )}
-                    {backfillResult.summary && (
-                      <>
-                        <div className="flex items-center gap-2 mb-2">
-                          <span className="font-bold text-violet-900">
-                            {backfillResult.mode === 'audit' ? 'Audit Report' : 'Backfill Report'}
-                          </span>
-                          <span className="text-violet-600 font-mono">{backfillResult.job_name}</span>
-                        </div>
-                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-2">
-                          <div className="bg-violet-50 rounded p-2 text-center">
-                            <p className="text-lg font-bold text-violet-900">{backfillResult.summary.total_audited}</p>
-                            <p className="text-[10px] text-violet-600">Audited</p>
-                          </div>
-                          <div className="bg-emerald-50 rounded p-2 text-center">
-                            <p className="text-lg font-bold text-emerald-700">{backfillResult.summary.complete}</p>
-                            <p className="text-[10px] text-emerald-600">Complete</p>
-                          </div>
-                          <div className="bg-amber-50 rounded p-2 text-center">
-                            <p className="text-lg font-bold text-amber-700">{backfillResult.summary.partial}</p>
-                            <p className="text-[10px] text-amber-600">Partial</p>
-                          </div>
-                          <div className="bg-red-50 rounded p-2 text-center">
-                            <p className="text-lg font-bold text-red-700">{backfillResult.summary.none}</p>
-                            <p className="text-[10px] text-red-600">No Propagation</p>
-                          </div>
-                        </div>
-                        {backfillResult.mode === 'backfill' && backfillResult.summary.repaired !== undefined && (
-                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 text-[10px] text-violet-700 mt-1">
-                            <span>✓ {backfillResult.summary.repaired} repaired</span>
-                            <span>✓ {backfillResult.summary.species_reused ?? 0} species reused</span>
-                            <span>✓ {backfillResult.summary.species_created ?? 0} species created</span>
-                            <span>✓ {backfillResult.summary.asset_species_written ?? 0} asset_species written</span>
-                            <span>✓ {backfillResult.summary.aliases_created ?? 0} aliases created</span>
-                            <span>✓ {backfillResult.summary.indexes_rebuilt ?? 0} indexes rebuilt</span>
-                          </div>
-                        )}
-                        {backfillResult.summary.repair_errors && backfillResult.summary.repair_errors.length > 0 && (
-                          <div className="mt-2 bg-red-50 border border-red-200 rounded p-2">
-                            <p className="font-semibold text-red-700 mb-1">Repair errors ({backfillResult.summary.repair_errors.length}):</p>
-                            {backfillResult.summary.repair_errors.slice(0, 5).map((e, i) => (
-                              <p key={i} className="text-red-600 font-mono text-[10px]">
-                                {e.public_asset_id}: {e.errors.join(', ')}
-                              </p>
-                            ))}
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         )}
 

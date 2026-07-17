@@ -3,19 +3,14 @@
 // POST /api/admin/validate-identification
 // Performs a full transactional CONFIRM IDENTIFICATION:
 //   1. Marks candidate as validated
-//   2. Marks openai_pilot_result as human_validated
-//   3. Updates sie_jobs status
-//   4. Finds or creates species (dedup by scientific_name)
-//   5. Writes asset_species row
-//   6. Updates assets.search_aliases + validated_metadata
-//   7. Writes species_names / aliases
-//   8. Updates openai_pilot_job_assets review_status
-//   9. Writes propagation log entries
-//  10. Logs validation history
-//
-// CRITICAL STEPS (1-8): if any fail → return error, do NOT mark
-//   human_validated, do NOT advance to next asset.
-// NON-CRITICAL STEPS (9-10): logged but do not block success.
+//   2. Writes asset_species row
+//   3. Creates/reuses species (dedup by scientific_name)
+//   4. Writes species_names / aliases
+//   5. Updates assets.search_aliases + validated_metadata
+//   6. Updates sie_jobs status
+//   7. Updates openai_pilot_job_assets review_status
+//   8. Logs validation history
+// All steps in a single server-side operation with error reporting.
 // ============================================================
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -34,12 +29,13 @@ interface ValidateRequest {
   assetId: string | null;
   publicAssetId: string | null;
   candidateId: string;
-  candidateSource: 'sie' | 'openai_pilot';
-  resultId?: string | null;
-  batchJobId?: string | null;
+  candidateSource: 'sie' | 'openai_pilot'; // which table the candidate is from
+  resultId?: string | null; // openai_pilot_results.id if source = openai_pilot
+  batchJobId?: string | null; // openai_pilot_job_assets.batch_job_id
   fieldDecisions: Record<string, FieldDecision>;
   editValues: Record<string, string>;
   comment?: string;
+  // Candidate data (passed from client to avoid re-fetch)
   commonName: string;
   scientificName: string | null;
   family: string | null;
@@ -81,11 +77,13 @@ function buildSearchAliases(
   add(family);
   add(genus);
 
+  // Add genus alone (e.g. "sepia" from "Sepia officinalis")
   if (scientificName) {
     const parts = scientificName.trim().split(/\s+/);
     if (parts.length >= 1) add(parts[0]);
   }
 
+  // Add common name words (e.g. "cuttlefish" from "common cuttlefish")
   if (commonName) {
     commonName.split(/\s+/).forEach((w) => { if (w.length > 3) add(w); });
   }
@@ -145,6 +143,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Missing required fields: jobId, candidateId' }, { status: 400 });
   }
 
+  const errors: string[] = [];
+  const steps: string[] = [];
+
   // ── Helper: get approved value for a field ──────────────────────────────────
   const getApprovedValue = (field: string, fallback: string | null): string | null => {
     const decision = fieldDecisions[field];
@@ -160,44 +161,28 @@ export async function POST(req: NextRequest) {
   const approvedGenus = getApprovedValue('genus', genus);
   const approvedOrder = getApprovedValue('order_name', biologicalOrder);
 
-  // ── CRITICAL STEPS — any failure here blocks the confirmation ──────────────
-  // We collect critical errors and return early if any occur.
-  const criticalErrors: string[] = [];
-  const steps: string[] = [];
-  const nonCriticalErrors: string[] = [];
-
-  // ── Critical Step 1: Mark candidate as validated ───────────────────────────
+  // ── Step 1: Mark candidate as validated ────────────────────────────────────
   try {
     if (candidateSource === 'openai_pilot') {
       const { error } = await supabase
         .from('openai_pilot_candidates')
         .update({ is_selected: true, is_validated: true, status: 'human_validated' })
         .eq('id', candidateId);
-      if (error) criticalErrors.push(`candidate_update: ${error.message}`);
+      if (error) errors.push(`candidate_update: ${error.message}`);
       else steps.push('candidate_validated');
     } else {
       const { error } = await supabase
         .from('sie_species_candidates')
         .update({ is_selected: true, is_validated: true })
         .eq('id', candidateId);
-      if (error) criticalErrors.push(`candidate_update: ${error.message}`);
+      if (error) errors.push(`candidate_update: ${error.message}`);
       else steps.push('candidate_validated');
     }
   } catch (e) {
-    criticalErrors.push(`candidate_update_exception: ${e}`);
+    errors.push(`candidate_update_exception: ${e}`);
   }
 
-  if (criticalErrors.length > 0) {
-    return NextResponse.json({
-      success: false,
-      steps,
-      errors: criticalErrors,
-      critical_failure: true,
-      message: `CONFIRM IDENTIFICATION failed at step 1 (candidate): ${criticalErrors.join('; ')}`,
-    }, { status: 500 });
-  }
-
-  // ── Critical Step 2: Mark openai_pilot_result as human_validated ───────────
+  // ── Step 2: Mark openai_pilot_result as human_validated ────────────────────
   if (resultId) {
     try {
       const { error } = await supabase
@@ -209,32 +194,14 @@ export async function POST(req: NextRequest) {
           updated_at: new Date().toISOString(),
         })
         .eq('id', resultId);
-      if (error) criticalErrors.push(`result_update: ${error.message}`);
+      if (error) errors.push(`result_update: ${error.message}`);
       else steps.push('result_validated');
     } catch (e) {
-      criticalErrors.push(`result_update_exception: ${e}`);
-    }
-
-    if (criticalErrors.length > 0) {
-      // Rollback step 1
-      try {
-        if (candidateSource === 'openai_pilot') {
-          await supabase.from('openai_pilot_candidates')
-            .update({ is_selected: false, is_validated: false, status: 'suggested_unverified' })
-            .eq('id', candidateId);
-        }
-      } catch { /* best-effort rollback */ }
-      return NextResponse.json({
-        success: false,
-        steps,
-        errors: criticalErrors,
-        critical_failure: true,
-        message: `CONFIRM IDENTIFICATION failed at step 2 (result): ${criticalErrors.join('; ')}`,
-      }, { status: 500 });
+      errors.push(`result_update_exception: ${e}`);
     }
   }
 
-  // ── Critical Step 3: Update sie_jobs status ────────────────────────────────
+  // ── Step 3: Update sie_jobs status ─────────────────────────────────────────
   try {
     const { error } = await supabase
       .from('sie_jobs')
@@ -248,17 +215,18 @@ export async function POST(req: NextRequest) {
         propagation_status: 'pending',
       })
       .eq('id', jobId);
-    if (error) criticalErrors.push(`job_update: ${error.message}`);
+    if (error) errors.push(`job_update: ${error.message}`);
     else steps.push('job_validated');
   } catch (e) {
-    criticalErrors.push(`job_update_exception: ${e}`);
+    errors.push(`job_update_exception: ${e}`);
   }
 
-  // ── Critical Step 4: Find or create species ────────────────────────────────
+  // ── Step 4: Find or create species (dedup by LOWER(TRIM(scientific_name))) ──
   let speciesId: string | null = null;
 
   if (approvedScientificName) {
     try {
+      // Try to find existing species by normalized scientific name
       const normalizedSci = normalizeText(approvedScientificName);
       const { data: existingSpecies } = await supabase
         .from('species')
@@ -268,6 +236,7 @@ export async function POST(req: NextRequest) {
 
       if (existingSpecies?.id) {
         speciesId = existingSpecies.id;
+        // Update existing species with approved data
         await supabase.from('species').update({
           common_name: approvedCommonName,
           family: approvedFamily ?? undefined,
@@ -276,6 +245,7 @@ export async function POST(req: NextRequest) {
         }).eq('id', speciesId);
         steps.push('species_reused');
       } else {
+        // Create new species
         const slug = normalizedSci.replace(/\s+/g, '-').replace(/[^a-z0-9-]/g, '');
         const { data: newSpecies, error: speciesError } = await supabase
           .from('species')
@@ -292,20 +262,21 @@ export async function POST(req: NextRequest) {
           .single();
 
         if (speciesError) {
-          criticalErrors.push(`species_create: ${speciesError.message}`);
+          errors.push(`species_create: ${speciesError.message}`);
         } else {
           speciesId = newSpecies?.id ?? null;
           steps.push('species_created');
         }
       }
     } catch (e) {
-      criticalErrors.push(`species_exception: ${e}`);
+      errors.push(`species_exception: ${e}`);
     }
   }
 
-  // ── Critical Step 5: Write asset_species row ───────────────────────────────
+  // ── Step 5: Write asset_species row ────────────────────────────────────────
   if (assetId && speciesId) {
     try {
+      // Remove any existing primary species link for this asset
       await supabase
         .from('asset_species')
         .delete()
@@ -322,14 +293,14 @@ export async function POST(req: NextRequest) {
         verified_at: new Date().toISOString(),
         status: 'validated',
       });
-      if (error) criticalErrors.push(`asset_species: ${error.message}`);
+      if (error) errors.push(`asset_species: ${error.message}`);
       else steps.push('asset_species_written');
     } catch (e) {
-      criticalErrors.push(`asset_species_exception: ${e}`);
+      errors.push(`asset_species_exception: ${e}`);
     }
   }
 
-  // ── Critical Step 6: Update assets.species_id + search_aliases + validated_metadata ─
+  // ── Step 6: Update assets.species_id + search_aliases + validated_metadata ─
   if (assetId) {
     try {
       const allLocalNames = [
@@ -377,6 +348,7 @@ export async function POST(req: NextRequest) {
 
       if (speciesId) assetUpdate.species_id = speciesId;
 
+      // Only propagate approved fields to asset columns
       const approvedCategory = getApprovedValue('category', null);
       const approvedPackaging = getApprovedValue('packaging', null);
       const approvedDescription = getApprovedValue('description', null);
@@ -388,45 +360,14 @@ export async function POST(req: NextRequest) {
       if (approvedProductType) assetUpdate.product_form = approvedProductType;
 
       const { error } = await supabase.from('assets').update(assetUpdate).eq('id', assetId);
-      if (error) criticalErrors.push(`asset_update: ${error.message}`);
+      if (error) errors.push(`asset_update: ${error.message}`);
       else steps.push('asset_updated_with_aliases');
     } catch (e) {
-      criticalErrors.push(`asset_update_exception: ${e}`);
+      errors.push(`asset_update_exception: ${e}`);
     }
   }
 
-  // ── If any critical step failed, return error WITHOUT advancing ────────────
-  if (criticalErrors.length > 0) {
-    return NextResponse.json({
-      success: false,
-      steps,
-      errors: criticalErrors,
-      critical_failure: true,
-      message: `CONFIRM IDENTIFICATION failed: ${criticalErrors.join('; ')}. Asset NOT marked as validated. Please retry.`,
-    }, { status: 500 });
-  }
-
-  // ── Critical Step 7: Update openai_pilot_job_assets review_status ──────────
-  if (batchJobId && publicAssetId) {
-    try {
-      const { error } = await supabase
-        .from('openai_pilot_job_assets')
-        .update({
-          review_status: 'validated',
-          reviewed_at: new Date().toISOString(),
-          propagation_status: 'completed',
-          propagation_completed_at: new Date().toISOString(),
-        })
-        .eq('batch_job_id', batchJobId)
-        .eq('public_asset_id', publicAssetId);
-      if (error) nonCriticalErrors.push(`job_asset_update: ${error.message}`);
-      else steps.push('job_asset_updated');
-    } catch (e) {
-      nonCriticalErrors.push(`job_asset_update_exception: ${e}`);
-    }
-  }
-
-  // ── Non-critical Step 8: Write species_names ───────────────────────────────
+  // ── Step 7: Write species_names (approved names and aliases) ───────────────
   if (speciesId) {
     const namesToWrite: Array<{ name: string; language_code: string; name_type: string }> = [];
 
@@ -447,6 +388,7 @@ export async function POST(req: NextRequest) {
     for (const nameEntry of namesToWrite) {
       if (!nameEntry.name?.trim()) continue;
       try {
+        // Check if this name already exists for this species
         const { data: existing } = await supabase
           .from('species_names')
           .select('id')
@@ -479,59 +421,25 @@ export async function POST(req: NextRequest) {
     steps.push('species_names_written');
   }
 
-  // ── Non-critical Step 9: Write propagation log ─────────────────────────────
-  if (assetId) {
-    const propagationTargets = [
-      { key: 'assets', table: 'assets' },
-      { key: 'asset_species', table: 'asset_species' },
-      { key: 'species_center', table: 'species' },
-      { key: 'search_index', table: 'assets' },
-      { key: 'marketplace', table: 'assets' },
-      { key: 'library', table: 'assets' },
-    ];
-
-    for (const target of propagationTargets) {
-      try {
-        const { data: existingLog } = await supabase
-          .from('sie_propagation_log')
-          .select('id')
-          .eq('asset_id', assetId)
-          .eq('target_system', target.key)
-          .maybeSingle();
-
-        if (!existingLog) {
-          await supabase.from('sie_propagation_log').insert({
-            job_id: jobId,
-            asset_id: assetId,
-            target_system: target.key,
-            target_table: target.table,
-            status: 'completed',
-            records_updated: 1,
-            propagated_at: new Date().toISOString(),
-            propagation_status: 'completed',
-            species_id: speciesId ?? null,
-          });
-        } else {
-          await supabase.from('sie_propagation_log')
-            .update({ status: 'completed', propagation_status: 'completed', propagated_at: new Date().toISOString() })
-            .eq('id', existingLog.id);
-        }
-      } catch { /* non-fatal */ }
-    }
-    steps.push('propagation_logged');
-  }
-
-  // ── Non-critical Step 10: Update openai_pilot_results propagation_status ───
-  if (resultId) {
+  // ── Step 8: Update openai_pilot_job_assets review_status ──────────────────
+  if (batchJobId && publicAssetId) {
     try {
-      await supabase.from('openai_pilot_results').update({
-        propagation_status: 'completed',
-        propagation_completed_at: new Date().toISOString(),
-      }).eq('id', resultId);
-    } catch { /* non-fatal */ }
+      const { error } = await supabase
+        .from('openai_pilot_job_assets')
+        .update({
+          review_status: 'validated',
+          reviewed_at: new Date().toISOString(),
+        })
+        .eq('batch_job_id', batchJobId)
+        .eq('public_asset_id', publicAssetId);
+      if (error) errors.push(`job_asset_update: ${error.message}`);
+      else steps.push('job_asset_updated');
+    } catch (e) {
+      errors.push(`job_asset_update_exception: ${e}`);
+    }
   }
 
-  // ── Non-critical Step 11: Log validation history ───────────────────────────
+  // ── Step 9: Log validation history ────────────────────────────────────────
   try {
     const fieldEntries = Object.entries(fieldDecisions);
     if (fieldEntries.length > 0) {
@@ -567,27 +475,26 @@ export async function POST(req: NextRequest) {
     }
     steps.push('history_logged');
   } catch (e) {
-    nonCriticalErrors.push(`history_log_exception: ${e}`);
+    errors.push(`history_log_exception: ${e}`);
   }
 
-  // ── Final: Update sie_jobs propagation_status ──────────────────────────────
+  // ── Step 10: Update sie_jobs propagation_status ────────────────────────────
   try {
     await supabase.from('sie_jobs').update({
-      propagation_status: nonCriticalErrors.length === 0 ? 'completed' : 'partial',
+      propagation_status: errors.length === 0 ? 'completed' : 'partial',
       propagated_at: new Date().toISOString(),
     }).eq('id', jobId);
+    steps.push('propagation_logged');
   } catch { /* non-fatal */ }
 
-  // ── All critical steps succeeded — return success ──────────────────────────
   return NextResponse.json({
-    success: true,
+    success: errors.length === 0,
     steps,
-    errors: nonCriticalErrors,
+    errors,
     speciesId,
     searchAliasesWritten: assetId ? true : false,
-    propagationTargets: ['assets', 'asset_species', 'species_center', 'search_index', 'marketplace', 'library'],
-    message: nonCriticalErrors.length === 0
-      ? `Identification confirmed and fully propagated: ${approvedCommonName} (${approvedScientificName ?? '—'})`
-      : `Identification confirmed: ${approvedCommonName}. ${nonCriticalErrors.length} non-critical warning(s).`,
+    message: errors.length === 0
+      ? `Identification confirmed: ${approvedCommonName} (${approvedScientificName ?? '—'})`
+      : `Confirmed with ${errors.length} non-fatal error(s): ${errors.join('; ')}`,
   });
 }
