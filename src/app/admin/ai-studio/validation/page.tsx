@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
@@ -248,8 +248,12 @@ function AssetPreview({ preview }: { preview: AssetPreviewData | null }) {
 function AIStudioValidationPageInner() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
+  const pathname = usePathname();
   const searchParams = useSearchParams();
-  const focusJobId = searchParams.get('job');
+
+  // URL params — source of truth for persistence
+  const urlJobId = searchParams.get('job');
+  const urlPosition = searchParams.get('position');
 
   // ── All pilot batch jobs (job selector) ───────────────────────────────────
   const [allBatchJobs, setAllBatchJobs] = useState<SIEJob[]>([]);
@@ -258,9 +262,10 @@ function AIStudioValidationPageInner() {
   // ── Batch mode state ──────────────────────────────────────────────────────
   const [batchJob, setBatchJob] = useState<SIEJob | null>(null);
   const [batchAssets, setBatchAssets] = useState<BatchAsset[]>([]);
+  // batchPosition is the index within the FULL (unfiltered) batchAssets array
   const [batchPosition, setBatchPosition] = useState(0);
-  const [batchFilter, setBatchFilter] = useState<'all' | 'unreviewed' | 'validated' | 'skipped' | 'unknown'>('unreviewed');
-  const [batchMode, setBatchMode] = useState(false);
+  const [batchFilter, setBatchFilter] = useState<'all' | 'unreviewed' | 'validated' | 'skipped' | 'unknown'>('all');
+  const [batchMode, setBatchMode] = useState(true); // default true — batch mode is primary
   const [autoAdvance, setAutoAdvance] = useState(true);
 
   // ── Legacy job list state (for non-batch sie_jobs) ────────────────────────
@@ -296,6 +301,9 @@ function AIStudioValidationPageInner() {
   const [showPilotMetadata, setShowPilotMetadata] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
 
+  // Track if initial load has run (to avoid double-loading)
+  const initialLoadDone = useRef(false);
+
   useEffect(() => {
     if (!loading && !user) { router.replace('/auth?next=/admin/ai-studio/validation'); return; }
     if (!loading && profile && !['administrator', 'super_admin', 'reviewer'].includes(profile.role)) {
@@ -303,10 +311,18 @@ function AIStudioValidationPageInner() {
     }
   }, [user, profile, loading, router]);
 
+  // ── Update URL to persist job + position ─────────────────────────────────
+  const updateUrl = useCallback((jobId: string | null, position: number) => {
+    const params = new URLSearchParams();
+    if (jobId) params.set('job', jobId);
+    if (position > 0) params.set('position', String(position));
+    const newUrl = `${pathname}?${params.toString()}`;
+    router.replace(newUrl, { scroll: false });
+  }, [pathname, router]);
+
   // ── Load ALL batch jobs (job selector) ────────────────────────────────────
   const loadAllBatchJobs = useCallback(async () => {
     const supabase = createClient();
-    // Load all pilot batch jobs ordered by most recent first
     const { data: pilotJobs } = await supabase
       .from('sie_jobs')
       .select('*')
@@ -323,15 +339,13 @@ function AIStudioValidationPageInner() {
     // Priority 3: most recent job overall
     let targetJobId: string | null = null;
 
-    if (focusJobId) {
-      const urlJob = pilotJobs.find((j: SIEJob) => j.id === focusJobId);
+    if (urlJobId) {
+      const urlJob = pilotJobs.find((j: SIEJob) => j.id === urlJobId);
       if (urlJob) targetJobId = urlJob.id;
     }
 
     if (!targetJobId) {
-      // Find most recent job with pending (unreviewed) assets
       for (const job of pilotJobs as SIEJob[]) {
-        // Check openai_pilot_job_assets first
         const { count: unreviewedCount } = await supabase
           .from('openai_pilot_job_assets')
           .select('*', { count: 'exact', head: true })
@@ -342,23 +356,9 @@ function AIStudioValidationPageInner() {
           targetJobId = job.id;
           break;
         }
-
-        // Fallback: check openai_pilot_results for this job
-        const { count: pendingResultsCount } = await supabase
-          .from('openai_pilot_results')
-          .select('*', { count: 'exact', head: true })
-          .eq('job_id', job.id)
-          .eq('human_validated', false)
-          .eq('requires_human_review', true);
-
-        if ((pendingResultsCount ?? 0) > 0) {
-          targetJobId = job.id;
-          break;
-        }
       }
     }
 
-    // If no job with pending reviews, default to most recent
     if (!targetJobId && pilotJobs.length > 0) {
       targetJobId = (pilotJobs[0] as SIEJob).id;
     }
@@ -366,35 +366,44 @@ function AIStudioValidationPageInner() {
     if (targetJobId) {
       setSelectedBatchJobId(targetJobId);
     }
-  }, [focusJobId]);
+  }, [urlJobId]);
 
   // ── Load batch assets when selected batch job changes ─────────────────────
   const loadBatchJobAssets = useCallback(async (jobId: string) => {
     const supabase = createClient();
 
-    // Find the job record
     const targetJob = allBatchJobs.find((j) => j.id === jobId);
     if (!targetJob) return;
 
     setBatchJob(targetJob);
-    setBatchPosition(0);
-    setBatchFilter('unreviewed');
+    setBatchMode(true);
 
-    // Try loading from openai_pilot_job_assets first
-    const { data: jobAssets } = await supabase
+    // Load from openai_pilot_job_assets — the persistent source of truth
+    const { data: jobAssets, error: jaError } = await supabase
       .from('openai_pilot_job_assets')
       .select('*')
       .eq('batch_job_id', jobId)
       .order('review_position', { ascending: true });
 
-    if (jobAssets && jobAssets.length > 0) {
+    if (!jaError && jobAssets && jobAssets.length > 0) {
       setBatchAssets(jobAssets as BatchAsset[]);
-      setBatchMode(true);
+
+      // Restore position from URL or find first unreviewed
+      const urlPos = urlPosition ? parseInt(urlPosition, 10) : null;
+      if (urlPos && urlPos >= 1 && urlPos <= jobAssets.length) {
+        setBatchPosition(urlPos - 1); // URL is 1-based, state is 0-based
+      } else {
+        // Find first unreviewed asset
+        const firstUnreviewedIdx = (jobAssets as BatchAsset[]).findIndex(
+          (a) => a.review_status === 'unreviewed'
+        );
+        setBatchPosition(firstUnreviewedIdx >= 0 ? firstUnreviewedIdx : 0);
+      }
       return;
     }
 
     // Fallback: batch was imported before openai_pilot_job_assets was populated
-    // Build synthetic BatchAsset entries from openai_pilot_results
+    // Build synthetic BatchAsset entries from openai_pilot_results and insert them
     const { data: pilotResults } = await supabase
       .from('openai_pilot_results')
       .select('id, asset_id, public_asset_id, review_status, human_validated, requires_human_review')
@@ -402,14 +411,13 @@ function AIStudioValidationPageInner() {
       .order('created_at', { ascending: true });
 
     if (pilotResults && pilotResults.length > 0) {
-      // Create openai_pilot_job_assets entries for this batch so future loads work correctly
       const newAssets: BatchAsset[] = [];
       let position = 1;
+
       for (const result of pilotResults) {
-        // Determine review_status from human_validated flag
         const reviewStatus = result.human_validated ? 'validated' : 'unreviewed';
 
-        // Insert into openai_pilot_job_assets
+        // Try to insert — ignore conflicts
         const { data: inserted } = await supabase
           .from('openai_pilot_job_assets')
           .insert({
@@ -426,25 +434,48 @@ function AIStudioValidationPageInner() {
         if (inserted) {
           newAssets.push(inserted as BatchAsset);
         } else {
-          // Insert failed (maybe already exists), create synthetic entry
-          newAssets.push({
-            id: `synthetic-${result.id}`,
-            batch_job_id: jobId,
-            asset_job_id: null,
-            asset_id: result.asset_id,
-            public_asset_id: result.public_asset_id,
-            result_id: result.id,
-            review_position: position,
-            review_status: reviewStatus,
-            reviewed_at: null,
-          });
+          // Insert failed (conflict) — fetch the existing row
+          const { data: existing } = await supabase
+            .from('openai_pilot_job_assets')
+            .select('*')
+            .eq('batch_job_id', jobId)
+            .eq('public_asset_id', result.public_asset_id)
+            .single();
+
+          if (existing) {
+            newAssets.push(existing as BatchAsset);
+          } else {
+            // Last resort: synthetic entry (not persisted)
+            newAssets.push({
+              id: `synthetic-${result.id}`,
+              batch_job_id: jobId,
+              asset_job_id: null,
+              asset_id: result.asset_id,
+              public_asset_id: result.public_asset_id,
+              result_id: result.id,
+              review_position: position,
+              review_status: reviewStatus,
+              reviewed_at: null,
+            });
+          }
         }
         position++;
       }
+
+      // Sort by review_position
+      newAssets.sort((a, b) => a.review_position - b.review_position);
       setBatchAssets(newAssets);
-      setBatchMode(true);
+
+      // Restore position from URL or find first unreviewed
+      const urlPos = urlPosition ? parseInt(urlPosition, 10) : null;
+      if (urlPos && urlPos >= 1 && urlPos <= newAssets.length) {
+        setBatchPosition(urlPos - 1);
+      } else {
+        const firstUnreviewedIdx = newAssets.findIndex((a) => a.review_status === 'unreviewed');
+        setBatchPosition(firstUnreviewedIdx >= 0 ? firstUnreviewedIdx : 0);
+      }
     }
-  }, [allBatchJobs]);
+  }, [allBatchJobs, urlPosition]);
 
   // ── When selectedBatchJobId changes, load its assets ─────────────────────
   useEffect(() => {
@@ -461,7 +492,7 @@ function AIStudioValidationPageInner() {
     let query = supabase
       .from('sie_jobs')
       .select('*', { count: 'exact' })
-      .is('pilot_job_name', null) // exclude batch anchor jobs from the list
+      .is('pilot_job_name', null)
       .order('created_at', { ascending: false })
       .range(jobPage * PAGE_SIZE, (jobPage + 1) * PAGE_SIZE - 1);
 
@@ -477,25 +508,27 @@ function AIStudioValidationPageInner() {
     setJobTotal(count ?? 0);
     setFetching(false);
 
-    if (focusJobId && !selectedJob) {
-      const target = jobList.find((j: SIEJob) => j.id === focusJobId);
-      if (target) {
-        setSelectedJob(target);
-      } else {
-        const { data: specificJob } = await supabase
-          .from('sie_jobs')
-          .select('*')
-          .eq('id', focusJobId)
-          .single();
-        if (specificJob) setSelectedJob(specificJob);
-      }
-    } else if (jobList.length > 0 && !selectedJob && !batchMode) {
+    if (jobList.length > 0 && !selectedJob && !batchMode) {
       setSelectedJob(jobList[0]);
     }
-  }, [profile, jobPage, selectedJob, jobStatusFilter, focusJobId, batchMode]);
+  }, [profile, jobPage, selectedJob, jobStatusFilter, batchMode]);
 
-  // ── Fetch batch stats ─────────────────────────────────────────────────────
-  const fetchBatchStats = useCallback(async () => {
+  // ── Fetch batch stats from openai_pilot_job_assets ────────────────────────
+  const fetchBatchStats = useCallback(async (assets?: BatchAsset[]) => {
+    const source = assets ?? batchAssets;
+    if (source.length === 0 && !batchJob) return;
+
+    if (source.length > 0) {
+      // Compute from local state (fast, always in sync)
+      const total = source.length;
+      const validated = source.filter((a) => a.review_status === 'validated').length;
+      const skipped = source.filter((a) => a.review_status === 'skipped').length;
+      const unknown = source.filter((a) => a.review_status === 'unknown').length;
+      setValidationStats({ total, validated, skipped, unknown });
+      return;
+    }
+
+    // Fallback: query DB
     if (!batchJob) return;
     const supabase = createClient();
     const { data } = await supabase
@@ -509,7 +542,7 @@ function AIStudioValidationPageInner() {
     const skipped = data.filter((a) => a.review_status === 'skipped').length;
     const unknown = data.filter((a) => a.review_status === 'unknown').length;
     setValidationStats({ total, validated, skipped, unknown });
-  }, [batchJob]);
+  }, [batchJob, batchAssets]);
 
   // ── Fetch validation stats (legacy) ──────────────────────────────────────
   const fetchValidationStats = useCallback(async () => {
@@ -530,7 +563,8 @@ function AIStudioValidationPageInner() {
   }, [batchJob, fetchBatchStats]);
 
   useEffect(() => {
-    if (profile) {
+    if (profile && !initialLoadDone.current) {
+      initialLoadDone.current = true;
       loadAllBatchJobs();
       fetchJobs();
     }
@@ -538,15 +572,29 @@ function AIStudioValidationPageInner() {
 
   useEffect(() => { fetchValidationStats(); }, [fetchValidationStats]);
 
-  // ── Current batch asset (derived) — only show non-validated assets ────────
+  // ── Recompute stats whenever batchAssets changes ──────────────────────────
+  useEffect(() => {
+    if (batchAssets.length > 0) {
+      fetchBatchStats(batchAssets);
+    }
+  }, [batchAssets]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Current batch asset (derived from full list, not filtered) ────────────
+  // Navigation uses the FULL list ordered by review_position.
+  // The filter tabs are for display only.
   const filteredBatchAssets = batchAssets.filter((a) => {
     if (batchFilter === 'all') return true;
     return a.review_status === batchFilter;
   });
 
-  const currentBatchAsset = batchMode && filteredBatchAssets.length > 0
-    ? filteredBatchAssets[batchPosition] ?? null
+  // Current asset is always from the FULL list by batchPosition
+  const currentBatchAsset = batchMode && batchAssets.length > 0
+    ? batchAssets[batchPosition] ?? null
     : null;
+
+  // Display position within the full list (1-based)
+  const batchDisplayPos = batchAssets.length > 0 ? batchPosition + 1 : 0;
+  const batchTotal = batchAssets.length;
 
   // ── Effective "current job" — either from batch or legacy list ────────────
   const effectiveAssetId = batchMode ? currentBatchAsset?.asset_id ?? null : selectedJob?.asset_id ?? null;
@@ -784,8 +832,12 @@ function AIStudioValidationPageInner() {
       setConfirmDialogOpen(false);
       setConfirmSuccess(null);
       setConfirmError(null);
+      // Update URL with current job + position (1-based)
+      if (selectedBatchJobId) {
+        updateUrl(selectedBatchJobId, batchPosition + 1);
+      }
     }
-  }, [batchMode, currentBatchAsset, fetchCandidates, fetchAssetPreview, fetchHistory, batchJob]);
+  }, [batchMode, currentBatchAsset, fetchCandidates, fetchAssetPreview, fetchHistory, batchJob, selectedBatchJobId, batchPosition, updateUrl]);
 
   // ── Load asset when legacy job changes ────────────────────────────────────
   useEffect(() => {
@@ -803,23 +855,36 @@ function AIStudioValidationPageInner() {
     }
   }, [selectedJob, batchMode, fetchCandidates, fetchHistory, fetchAssetPreview]);
 
-  // ── Batch navigation ──────────────────────────────────────────────────────
+  // ── Batch navigation — uses FULL list (not filtered) ─────────────────────
   const goToBatchPrev = useCallback(() => {
     setBatchPosition((p) => Math.max(0, p - 1));
   }, []);
 
   const goToBatchNext = useCallback(() => {
-    setBatchPosition((p) => Math.min(filteredBatchAssets.length - 1, p + 1));
-  }, [filteredBatchAssets.length]);
+    setBatchPosition((p) => Math.min(batchAssets.length - 1, p + 1));
+  }, [batchAssets.length]);
 
-  const goToNextUnreviewed = useCallback(() => {
-    const nextIdx = filteredBatchAssets.findIndex((a, i) => i > batchPosition && a.review_status === 'unreviewed');
+  // Auto-advance: find next unreviewed in FULL list after current position
+  const goToNextUnreviewed = useCallback((currentPos: number, updatedAssets: BatchAsset[]) => {
+    // Search forward from currentPos + 1
+    const nextIdx = updatedAssets.findIndex(
+      (a, i) => i > currentPos && a.review_status === 'unreviewed'
+    );
     if (nextIdx >= 0) {
       setBatchPosition(nextIdx);
     } else {
-      setBatchPosition((p) => Math.min(filteredBatchAssets.length - 1, p + 1));
+      // No more unreviewed after current — try from beginning
+      const firstIdx = updatedAssets.findIndex(
+        (a, i) => i !== currentPos && a.review_status === 'unreviewed'
+      );
+      if (firstIdx >= 0) {
+        setBatchPosition(firstIdx);
+      } else {
+        // All reviewed — stay at current position
+        setBatchPosition(currentPos);
+      }
     }
-  }, [filteredBatchAssets, batchPosition]);
+  }, []);
 
   // ── Legacy navigation ─────────────────────────────────────────────────────
   const currentJobIndex = jobs.findIndex((j) => j.id === selectedJob?.id);
@@ -878,6 +943,10 @@ function AIStudioValidationPageInner() {
 
     const jobId = effectiveJobId ?? batchJob?.id;
     if (!jobId) return;
+
+    // Capture current position before any state updates
+    const currentPos = batchPosition;
+    const currentAsset = currentBatchAsset;
 
     setActionLoading(true);
     setConfirmDialogOpen(false);
@@ -950,20 +1019,31 @@ function AIStudioValidationPageInner() {
         setPropagationDone(done);
         setConfirmSuccess(result.message ?? 'Identification confirmed');
 
-        // Update batch asset status locally — mark as validated and remove from unreviewed filter
-        if (batchMode && currentBatchAsset) {
-          setBatchAssets((prev) =>
-            prev.map((a) =>
-              a.id === currentBatchAsset.id ? { ...a, review_status: 'validated', reviewed_at: new Date().toISOString() } : a
-            )
+        // Update batch asset status locally — mark current asset as validated
+        let updatedAssets = batchAssets;
+        if (batchMode && currentAsset) {
+          updatedAssets = batchAssets.map((a) =>
+            a.id === currentAsset.id
+              ? { ...a, review_status: 'validated', reviewed_at: new Date().toISOString() }
+              : a
           );
+          setBatchAssets(updatedAssets);
+
           // Also update openai_pilot_results human_validated flag
-          if (currentBatchAsset.result_id) {
+          if (currentAsset.result_id) {
             const supabase = createClient();
             await supabase
               .from('openai_pilot_results')
               .update({ human_validated: true, review_status: 'validated' })
-              .eq('id', currentBatchAsset.result_id);
+              .eq('id', currentAsset.result_id);
+
+            // Also update openai_pilot_job_assets in DB
+            if (!currentAsset.id.startsWith('synthetic-')) {
+              await supabase
+                .from('openai_pilot_job_assets')
+                .update({ review_status: 'validated', reviewed_at: new Date().toISOString() })
+                .eq('id', currentAsset.id);
+            }
           }
         }
 
@@ -973,13 +1053,16 @@ function AIStudioValidationPageInner() {
         setComment('');
         setFieldDecisions({});
         setEditValues({});
-        fetchValidationStats();
+
         if (effectiveJobId) fetchHistory(effectiveJobId);
 
         if (autoAdvance) {
           setTimeout(() => {
-            if (batchMode) goToNextUnreviewed();
-            else goToNext();
+            if (batchMode) {
+              goToNextUnreviewed(currentPos, updatedAssets);
+            } else {
+              goToNext();
+            }
           }, 1200);
         }
       } else {
@@ -997,14 +1080,16 @@ function AIStudioValidationPageInner() {
   const handleSkip = async () => {
     if (batchMode && currentBatchAsset) {
       const supabase = createClient();
-      await supabase
-        .from('openai_pilot_job_assets')
-        .update({ review_status: 'skipped', reviewed_at: new Date().toISOString() })
-        .eq('id', currentBatchAsset.id);
-      setBatchAssets((prev) =>
-        prev.map((a) => a.id === currentBatchAsset.id ? { ...a, review_status: 'skipped' } : a)
+      if (!currentBatchAsset.id.startsWith('synthetic-')) {
+        await supabase
+          .from('openai_pilot_job_assets')
+          .update({ review_status: 'skipped', reviewed_at: new Date().toISOString() })
+          .eq('id', currentBatchAsset.id);
+      }
+      let updatedAssets = batchAssets.map((a) =>
+        a.id === currentBatchAsset.id ? { ...a, review_status: 'skipped' } : a
       );
-      fetchBatchStats();
+      setBatchAssets(updatedAssets);
     }
     goToNext();
   };
@@ -1034,14 +1119,16 @@ function AIStudioValidationPageInner() {
     }
 
     if (batchMode && currentBatchAsset) {
-      await supabase
-        .from('openai_pilot_job_assets')
-        .update({ review_status: 'unknown', reviewed_at: new Date().toISOString() })
-        .eq('id', currentBatchAsset.id);
-      setBatchAssets((prev) =>
-        prev.map((a) => a.id === currentBatchAsset.id ? { ...a, review_status: 'unknown' } : a)
+      if (!currentBatchAsset.id.startsWith('synthetic-')) {
+        await supabase
+          .from('openai_pilot_job_assets')
+          .update({ review_status: 'unknown', reviewed_at: new Date().toISOString() })
+          .eq('id', currentBatchAsset.id);
+      }
+      let updatedAssets = batchAssets.map((a) =>
+        a.id === currentBatchAsset.id ? { ...a, review_status: 'unknown' } : a
       );
-      fetchBatchStats();
+      setBatchAssets(updatedAssets);
     }
 
     setActionLoading(false);
@@ -1101,8 +1188,6 @@ function AIStudioValidationPageInner() {
   const isMockEngine = !selectedCandidate?.is_real_ai;
 
   // Batch navigation state
-  const batchTotal = filteredBatchAssets.length;
-  const batchDisplayPos = batchTotal > 0 ? batchPosition + 1 : 0;
   const isFirstBatch = batchPosition === 0;
   const isLastBatch = batchPosition >= batchTotal - 1;
 
@@ -1122,7 +1207,7 @@ function AIStudioValidationPageInner() {
   const currentReviewStatus = batchMode
     ? currentBatchAsset?.review_status ?? 'unreviewed' : selectedJob?.job_status ?? '—';
 
-  // Pending count for selected batch
+  // Stats derived from batchAssets (always in sync)
   const pendingCount = batchAssets.filter((a) => a.review_status === 'unreviewed').length;
   const isJobComplete = batchJob && pendingCount === 0 && batchAssets.length > 0;
 
@@ -1171,9 +1256,12 @@ function AIStudioValidationPageInner() {
                 <select
                   value={selectedBatchJobId ?? ''}
                   onChange={(e) => {
-                    setSelectedBatchJobId(e.target.value);
+                    const newJobId = e.target.value;
+                    setSelectedBatchJobId(newJobId);
                     setBatchPosition(0);
-                    setBatchFilter('unreviewed');
+                    setBatchFilter('all');
+                    setBatchAssets([]);
+                    updateUrl(newJobId, 1);
                   }}
                   className="w-full appearance-none bg-muted/40 border border-border rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-violet-300 cursor-pointer"
                 >
@@ -1192,7 +1280,7 @@ function AIStudioValidationPageInner() {
               {batchJob && (
                 <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
                   <span className="bg-muted/60 border border-border px-2 py-0.5 rounded-full font-mono">
-                    {batchAssets.length} assets total
+                    {validationStats.total} assets total
                   </span>
                   <span className={`px-2 py-0.5 rounded-full font-medium border ${pendingCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
                     {pendingCount > 0 ? `${pendingCount} pending review` : '✓ All reviewed'}
@@ -1200,6 +1288,11 @@ function AIStudioValidationPageInner() {
                   <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
                     {validationStats.validated} validated
                   </span>
+                  {validationStats.skipped > 0 && (
+                    <span className="bg-amber-50 border border-amber-200 text-amber-700 px-2 py-0.5 rounded-full font-medium">
+                      {validationStats.skipped} skipped
+                    </span>
+                  )}
                   {isJobComplete && (
                     <span className="bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full font-medium">
                       Job complete — consultable only
@@ -1222,7 +1315,7 @@ function AIStudioValidationPageInner() {
                   REAL AI — OPENAI VISION
                 </span>
                 <span className="text-xs text-emerald-700 font-mono">
-                  {batchAssets.length} assets · {batchJob.ai_model ?? 'gpt-5-mini-2025-08-07'}
+                  {validationStats.total} assets · {batchJob.ai_model ?? 'gpt-5-mini-2025-08-07'}
                 </span>
               </div>
               <div className="flex items-center gap-3 text-xs text-emerald-700">
@@ -1243,10 +1336,10 @@ function AIStudioValidationPageInner() {
                 {(['all', 'unreviewed', 'validated', 'skipped', 'unknown'] as const).map((f) => (
                   <button
                     key={f}
-                    onClick={() => { setBatchFilter(f); setBatchPosition(0); }}
+                    onClick={() => { setBatchFilter(f); }}
                     className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-all capitalize ${batchFilter === f ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}>
                     {f} {f === 'all' ? `(${batchAssets.length})` :
-                         f === 'unreviewed' ? `(${batchAssets.filter((a) => a.review_status === 'unreviewed').length})` :
+                         f === 'unreviewed' ? `(${pendingCount})` :
                          f === 'validated' ? `(${validationStats.validated})` :
                          f === 'skipped' ? `(${validationStats.skipped})` :
                          `(${validationStats.unknown})`}
@@ -1384,7 +1477,7 @@ function AIStudioValidationPageInner() {
                   <>
                     <div className="flex items-center justify-between mb-2">
                       <span className="text-sm font-semibold text-foreground">
-                        Batch ({batchTotal})
+                        Batch ({validationStats.total})
                       </span>
                       <span className="text-xs text-muted-foreground">
                         {batchDisplayPos}/{batchTotal}
@@ -1428,23 +1521,28 @@ function AIStudioValidationPageInner() {
                 </div>
               ) : batchMode ? (
                 <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
-                  {filteredBatchAssets.map((ba, idx) => (
-                    <div key={ba.id}
-                      className={`flex items-start gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer ${idx === batchPosition ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
-                      onClick={() => setBatchPosition(idx)}>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-xs font-medium text-foreground truncate">
-                          {ba.public_asset_id}
-                        </p>
-                        <div className="flex items-center gap-1.5 mt-1">
-                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${REVIEW_STATUS_COLORS[ba.review_status] ?? 'bg-gray-100 text-gray-600'}`}>
-                            {ba.review_status}
-                          </span>
-                          <span className="text-[10px] text-muted-foreground">#{ba.review_position}</span>
+                  {filteredBatchAssets.map((ba) => {
+                    // Find the index in the FULL list for correct navigation
+                    const fullIdx = batchAssets.findIndex((a) => a.id === ba.id);
+                    const isActive = fullIdx === batchPosition;
+                    return (
+                      <div key={ba.id}
+                        className={`flex items-start gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer ${isActive ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
+                        onClick={() => setBatchPosition(fullIdx)}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-medium text-foreground truncate">
+                            {ba.public_asset_id}
+                          </p>
+                          <div className="flex items-center gap-1.5 mt-1">
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${REVIEW_STATUS_COLORS[ba.review_status] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {ba.review_status}
+                            </span>
+                            <span className="text-[10px] text-muted-foreground">#{ba.review_position}</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               ) : jobs.length === 0 ? (
                 <div className="py-8 text-center px-4">
@@ -1489,11 +1587,14 @@ function AIStudioValidationPageInner() {
                   <Target size={32} className="text-muted-foreground mx-auto mb-3" />
                   <p className="text-sm text-muted-foreground">
                     {batchMode
-                      ? (batchFilter === 'unreviewed' && batchAssets.filter((a) => a.review_status === 'unreviewed').length === 0
-                          ? 'All assets in this batch have been reviewed!' :'No assets in this filter')
+                      ? (batchAssets.length === 0
+                          ? 'Loading batch assets...'
+                          : batchFilter !== 'all' && filteredBatchAssets.length === 0
+                          ? `No assets with status "${batchFilter}"`
+                          : 'All assets in this batch have been reviewed!')
                       : 'Select a job to start validation'}
                   </p>
-                  {batchMode && batchFilter === 'unreviewed' && batchAssets.filter((a) => a.review_status === 'unreviewed').length === 0 && (
+                  {batchMode && batchAssets.length > 0 && pendingCount === 0 && (
                     <button
                       onClick={() => setBatchFilter('all')}
                       className="text-xs text-blue-600 underline mt-2 block mx-auto">
