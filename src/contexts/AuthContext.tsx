@@ -101,6 +101,23 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signUp = async (email: string, password: string, metadata: Record<string, string> = {}) => {
+    // Build emailRedirectTo preserving any checkout intent from the current URL
+    let callbackUrl = `${window.location.origin}/auth/callback`;
+    if (typeof window !== 'undefined') {
+      const sp = new URLSearchParams(window.location.search);
+      const plan = sp.get('plan');
+      const cycle = sp.get('cycle');
+      const checkoutIntent = sp.get('checkout_intent');
+      const returnTo = sp.get('return_to');
+      const callbackParams = new URLSearchParams();
+      if (checkoutIntent) callbackParams.set('checkout_intent', checkoutIntent);
+      if (plan) callbackParams.set('plan', plan);
+      if (cycle) callbackParams.set('cycle', cycle);
+      if (returnTo) callbackParams.set('next', returnTo);
+      const qs = callbackParams.toString();
+      if (qs) callbackUrl += `?${qs}`;
+    }
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -109,7 +126,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
           full_name: metadata?.fullName || '',
           avatar_url: metadata?.avatarUrl || '',
         },
-        emailRedirectTo: `${window.location.origin}/auth/callback`,
+        emailRedirectTo: callbackUrl,
       },
     });
     if (error) throw error;

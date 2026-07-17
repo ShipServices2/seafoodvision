@@ -60,8 +60,8 @@ export interface CancelSubscriptionParams {
 export interface SubscriptionDetails {
   externalSubscriptionId: string;
   status: SubscriptionStatus;
-  currentPeriodStart: Date;
-  currentPeriodEnd: Date;
+  currentPeriodStart: Date | null;
+  currentPeriodEnd: Date | null;
   cancelAtPeriodEnd: boolean;
 }
 
@@ -98,6 +98,12 @@ export interface PaymentProviderConfig {
   environment: PaymentEnvironment;
   isConfigured: boolean;
   missingKeys: string[];
+  /** True when API key is present and provider is enabled — checkout can proceed */
+  isCheckoutReady?: boolean;
+  /** True when webhook secret is configured — webhook verification can proceed */
+  isWebhookReady?: boolean;
+  /** Alias for isWebhookReady — for diagnostic display */
+  webhookSecretConfigured?: boolean;
 }
 
 // ─── Order ───────────────────────────────────────────────────

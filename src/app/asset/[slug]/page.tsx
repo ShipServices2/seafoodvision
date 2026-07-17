@@ -1,18 +1,19 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { fetchAssetBySlug, getAssetPreviewFile } from '@/lib/supabase/assetService';
 import type { AssetRow } from '@/lib/supabase/assetService';
 import Link from 'next/link';
-import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Globe2, Hash, Layers, Thermometer, Ruler } from 'lucide-react';
+import { ChevronRight, Heart, Plus, Share2, ShieldCheck, Camera, CheckCircle2, AlertCircle, Globe2, Hash, Layers, Thermometer, Ruler, ShoppingCart, Lock, Info, XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '@/components/ui/Badge';
 import AssetPreview from '@/app/asset-detail/components/AssetPreview';
 import SimilarAssets from '@/app/asset-detail/components/SimilarAssets';
 import CollectionModal from '@/app/asset-detail/components/CollectionModal';
+import { useAuth } from '@/contexts/AuthContext';
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -26,15 +27,114 @@ function formatDimensions(w: number | null, h: number | null): string {
   return `${w.toLocaleString()} × ${h.toLocaleString()} px`;
 }
 
+// License options shown when asset is commercially available
+const LICENSE_OPTIONS = [
+  {
+    code: 'standard',
+    name: 'Standard License',
+    unitProductCode: 'image_standard',
+    description: 'Web, social media, editorial use up to 500k impressions',
+    price: '29€',
+  },
+  {
+    code: 'extended',
+    name: 'Extended License',
+    unitProductCode: 'image_extended',
+    description: 'Unlimited digital use, print, merchandise',
+    price: '149€',
+  },
+];
+
+interface CommercialCriterion {
+  key: string;
+  label: string;
+  passed: boolean;
+  value: string;
+  required: boolean;
+}
+
+function getCommercialCriteria(asset: AssetRow): CommercialCriterion[] {
+  const hasOriginalFile = (asset.asset_files ?? []).some((f) => f.file_level === 'original');
+
+  return [
+    {
+      key: 'asset_approved',
+      label: 'Asset approved',
+      passed: asset.review_status === 'approved',
+      value: asset.review_status ?? 'unknown',
+      required: true,
+    },
+    {
+      key: 'species_validated',
+      label: 'Species validated',
+      passed: !!asset.species_id,
+      value: asset.species?.common_name ?? (asset.species_id ? 'linked' : 'not linked'),
+      required: false,
+    },
+    {
+      key: 'rights_validated',
+      label: 'Rights validated',
+      passed: !!(asset.rights_info && asset.rights_info.length > 0),
+      value: asset.rights_info ?? 'not set',
+      required: false,
+    },
+    {
+      key: 'privacy_cleared',
+      label: 'Privacy cleared',
+      passed: !asset.restrictions || asset.restrictions.toLowerCase() !== 'privacy',
+      value: asset.restrictions ?? 'none',
+      required: false,
+    },
+    {
+      key: 'commercial_status',
+      label: 'Commercial status',
+      passed: asset.license_type !== 'editorial' && !asset.is_demo,
+      value: asset.is_demo ? 'demo (not for sale)' : (asset.license_type ?? 'not set'),
+      required: true,
+    },
+    {
+      key: 'commercial_use',
+      label: 'Commercial use permitted',
+      passed: asset.commercial_use === true,
+      value: asset.commercial_use ? 'yes' : 'no',
+      required: true,
+    },
+    {
+      key: 'original_file',
+      label: 'Original file available',
+      passed: hasOriginalFile,
+      value: hasOriginalFile ? 'yes' : 'not found in asset_files',
+      required: true,
+    },
+    {
+      key: 'active_license',
+      label: 'Active license type',
+      passed: !!asset.license_type && asset.license_type !== 'none',
+      value: asset.license_type ?? 'not set',
+      required: true,
+    },
+  ];
+}
+
+function isCommerciallyReady(criteria: CommercialCriterion[]): { ok: boolean; blockers: CommercialCriterion[] } {
+  const blockers = criteria.filter((c) => c.required && !c.passed);
+  return { ok: blockers.length === 0, blockers };
+}
+
 export default function AssetSlugPage() {
   const params = useParams();
+  const router = useRouter();
   const slug = params?.slug as string;
+  const { user } = useAuth();
 
   const [asset, setAsset] = useState<AssetRow | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [favorited, setFavorited] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+  const [selectedLicense, setSelectedLicense] = useState<string | null>(null);
+  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [showBlockers, setShowBlockers] = useState(false);
 
   useEffect(() => {
     if (!slug) { setNotFound(true); setLoading(false); return; }
@@ -57,6 +157,58 @@ export default function AssetSlugPage() {
     toast.success('Link copied to clipboard');
   };
 
+  async function handleBuyLicense() {
+    if (!asset || !selectedLicense) return;
+
+    const licenseOption = LICENSE_OPTIONS.find((l) => l.code === selectedLicense);
+    if (!licenseOption) return;
+
+    // If not logged in, redirect to sign-in with checkout intent
+    if (!user) {
+      const intentParams = new URLSearchParams({
+        return_to: '/checkout/resume',
+        checkout_intent: '1',
+        asset_id: asset.id,
+        license_type: licenseOption.code,
+        unit_product: licenseOption.unitProductCode,
+      });
+      router.push(`/auth/sign-in?${intentParams.toString()}`);
+      return;
+    }
+
+    setCheckoutLoading(true);
+    try {
+      const res = await fetch('/api/payments/dodo/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetId: asset.id,
+          licenseTypeCode: licenseOption.code,
+          unitProductCode: licenseOption.unitProductCode,
+        }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        throw new Error(data.error ?? 'Checkout failed');
+      }
+
+      const { checkoutUrl } = data as { checkoutUrl: string };
+
+      if (checkoutUrl.startsWith('http')) {
+        window.location.href = checkoutUrl;
+      } else {
+        router.push(checkoutUrl);
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Could not start checkout';
+      toast.error(msg);
+    } finally {
+      setCheckoutLoading(false);
+    }
+  }
+
   const keywords = asset?.asset_keywords?.map((ak) => ak.keywords?.term).filter(Boolean) || [];
   const speciesName = asset?.species?.common_name || asset?.category || '';
   const scientificName = asset?.species?.scientific_name || '';
@@ -66,6 +218,9 @@ export default function AssetSlugPage() {
   };
   const emoji = categoryEmoji[asset?.category || ''] || '🐠';
   const bgColor = 'from-blue-200 via-blue-100 to-slate-100';
+
+  const criteria = asset ? getCommercialCriteria(asset) : [];
+  const { ok: isReady, blockers } = isCommerciallyReady(criteria);
 
   return (
     <div className="min-h-screen bg-background">
@@ -188,19 +343,129 @@ export default function AssetSlugPage() {
                   </div>
                 </div>
 
+                {/* License / Purchase panel */}
                 <div className="bg-card rounded-xl border border-border p-5 flex flex-col gap-3">
-                  <div className="relative">
-                    <button disabled className="w-full btn-primary opacity-60 cursor-not-allowed justify-center">
-                      <Download size={15} />
-                      License this image
-                    </button>
-                    <div className="absolute -top-2 right-2">
-                      <Badge variant="coming-soon" label="Coming Soon" size="sm" showIcon={false} />
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground text-center leading-relaxed">
-                    Commercial licensing is not yet active. This is a preview platform.
-                  </p>
+                  {isReady ? (
+                    <>
+                      <div className="flex items-center gap-2 mb-1">
+                        <ShoppingCart size={15} className="text-secondary" />
+                        <h2 className="text-sm font-semibold text-foreground">License this image</h2>
+                      </div>
+
+                      {/* License selector */}
+                      <div className="flex flex-col gap-2">
+                        {LICENSE_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.code}
+                            onClick={() => setSelectedLicense(opt.code)}
+                            className={`w-full text-left rounded-xl border p-3 transition-all duration-150 ${
+                              selectedLicense === opt.code
+                                ? 'border-secondary bg-secondary/5 ring-1 ring-secondary/20' :'border-border hover:border-secondary/40 hover:bg-muted/40'
+                            }`}
+                          >
+                            <div className="flex items-center justify-between mb-0.5">
+                              <span className="text-sm font-semibold text-foreground">{opt.name}</span>
+                              <span className="text-sm font-bold text-secondary font-mono-data">{opt.price}</span>
+                            </div>
+                            <p className="text-xs text-muted-foreground leading-relaxed">{opt.description}</p>
+                          </button>
+                        ))}
+                      </div>
+
+                      <button
+                        onClick={handleBuyLicense}
+                        disabled={!selectedLicense || checkoutLoading}
+                        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-all duration-150 ${
+                          selectedLicense && !checkoutLoading
+                            ? 'bg-secondary text-white hover:bg-secondary/90' :'bg-muted text-muted-foreground cursor-not-allowed'
+                        }`}
+                      >
+                        {checkoutLoading ? (
+                          <>
+                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                            Creating order…
+                          </>
+                        ) : (
+                          <>
+                            {user ? <ShoppingCart size={15} /> : <Lock size={15} />}
+                            {user ? 'Buy License' : 'Sign in to Buy'}
+                          </>
+                        )}
+                      </button>
+
+                      <p className="text-xs text-muted-foreground text-center leading-relaxed">
+                        Secure checkout via Dodo Payments. License terms apply.{' '}
+                        <Link href="/licensing" className="text-secondary hover:underline">View terms</Link>
+                      </p>
+                    </>
+                  ) : (
+                    <>
+                      <div className="flex items-center gap-2 mb-1">
+                        <Info size={15} className="text-muted-foreground" />
+                        <h2 className="text-sm font-semibold text-foreground">Licensing</h2>
+                      </div>
+
+                      {/* Commercial readiness blockers panel */}
+                      <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                        <div className="flex items-center gap-2 mb-2">
+                          <AlertCircle size={14} className="text-amber-600 shrink-0" />
+                          <span className="text-xs font-semibold text-amber-700">Commercial readiness blockers</span>
+                        </div>
+                        <div className="flex flex-col gap-1.5">
+                          {blockers.map((b) => (
+                            <div key={b.key} className="flex items-start gap-2">
+                              <XCircle size={12} className="text-red-400 mt-0.5 shrink-0" />
+                              <span className="text-xs text-amber-800">
+                                <span className="font-medium">{b.label}:</span>{' '}
+                                <span className="font-mono">{b.value}</span>
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Full criteria toggle */}
+                      <button
+                        onClick={() => setShowBlockers(!showBlockers)}
+                        className="text-xs text-muted-foreground hover:text-foreground transition-colors text-left flex items-center gap-1"
+                      >
+                        <Info size={11} />
+                        {showBlockers ? 'Hide' : 'Show'} full readiness checklist
+                      </button>
+
+                      {showBlockers && (
+                        <div className="bg-muted/40 rounded-xl p-3 flex flex-col gap-1.5">
+                          {criteria.map((c) => (
+                            <div key={c.key} className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5 min-w-0">
+                                {c.passed ? (
+                                  <CheckCircle2 size={12} className="text-green-500 shrink-0" />
+                                ) : (
+                                  <XCircle size={12} className={`shrink-0 ${c.required ? 'text-red-400' : 'text-amber-400'}`} />
+                                )}
+                                <span className="text-xs text-foreground truncate">{c.label}</span>
+                                {c.required && !c.passed && (
+                                  <span className="text-xs text-red-500 shrink-0">*</span>
+                                )}
+                              </div>
+                              <span className="text-xs font-mono text-muted-foreground shrink-0 max-w-[120px] truncate text-right">{c.value}</span>
+                            </div>
+                          ))}
+                          <p className="text-xs text-muted-foreground mt-1">* Required for purchase</p>
+                        </div>
+                      )}
+
+                      {/* Disabled buy button */}
+                      <button
+                        disabled
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold bg-muted text-muted-foreground cursor-not-allowed"
+                      >
+                        <Lock size={15} />
+                        Buy License — not available
+                      </button>
+                    </>
+                  )}
+
                   <div className="section-divider" />
                   <div className="flex gap-2">
                     <button onClick={handleFavorite}

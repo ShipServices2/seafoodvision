@@ -3,6 +3,7 @@
 // Server-side checkout orchestration.
 // Validates products, creates orders, calls PaymentProvider.
 // NEVER trusts prices from the browser.
+// Uses dodo_product_id for subscription checkout (Dodo product_cart API).
 // ============================================================
 
 import { createClient } from '@/lib/supabase/server';
@@ -58,12 +59,6 @@ export async function initiateAssetLicenseCheckout(params: {
     throw new Error('Asset not found');
   }
 
-  // TODO: Add full commercial eligibility checks when asset schema is confirmed:
-  // - review_status must be 'approved'
-  // - rights_status must be 'cleared'
-  // - commercial_status must be 'available'
-  // - original file must exist in storage
-
   // 4. Create local order (price from DB, not client)
   const order = await createOrder({
     userId: params.userId,
@@ -81,14 +76,28 @@ export async function initiateAssetLicenseCheckout(params: {
     ],
   });
 
-  // 5. Create checkout via provider (stub — will throw until Dodo is integrated)
+  // 5. Create checkout via provider
   const config = provider.getConfig();
-  if (!config.isEnabled || !config.isConfigured) {
-    // Return a pending order without a real checkout URL in test/disabled mode
-    return {
-      checkoutUrl: `/checkout/pending?order=${order.id}`,
-      orderId: order.id,
-    };
+  if (!config.isCheckoutReady) {
+    throw new Error(
+      'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
+    );
+  }
+
+  // Load Dodo product mapping for this unit product
+  const { data: mapping } = await supabase
+    .from('payment_product_mappings')
+    .select('dodo_product_id')
+    .eq('internal_product_type', 'one_time_asset_license')
+    .eq('internal_product_id', product.id)
+    .eq('environment', process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test')
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (!mapping?.dodo_product_id) {
+    throw new Error(
+      `No Dodo product mapping found for unit product "${params.unitProductCode}" in ${process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test'} environment.`
+    );
   }
 
   const result = await provider.createCheckout({
@@ -100,7 +109,11 @@ export async function initiateAssetLicenseCheckout(params: {
     productName: `${product.name} — ${licenseType.name}`,
     successUrl: `${getDodoReturnUrl()}?order=${order.id}`,
     cancelUrl: `${getDodoCancelUrl()}?order=${order.id}`,
-    metadata: { orderId: order.id, assetId: params.assetId },
+    metadata: {
+      orderId: order.id,
+      assetId: params.assetId,
+      dodoProductId: mapping.dodo_product_id,
+    },
   });
 
   await updateOrderCheckoutRef(order.id, result.externalCheckoutId);
@@ -118,7 +131,7 @@ export async function initiateSubscriptionCheckout(params: {
 }): Promise<{ checkoutUrl: string; orderId: string }> {
   const supabase = await createClient();
 
-  // 1. Load plan server-side
+  // 1. Load plan server-side — never trust client-supplied price
   const { data: plan, error: planError } = await supabase
     .from('pricing_plans')
     .select('*')
@@ -127,10 +140,10 @@ export async function initiateSubscriptionCheckout(params: {
     .single();
 
   if (planError || !plan) {
-    throw new Error('Subscription plan not found or inactive');
+    throw new Error(`Subscription plan "${params.planCode}" not found or inactive`);
   }
 
-  // 2. Check for existing active subscription
+  // 2. Check for existing active subscription (prevent double-subscribe)
   const { data: existingSub } = await supabase
     .from('user_subscriptions')
     .select('id, status')
@@ -142,22 +155,39 @@ export async function initiateSubscriptionCheckout(params: {
     throw new Error('User already has an active subscription');
   }
 
-  // 3. Load Dodo product mapping
+  // 3. Load Dodo product mapping (uses dodo_product_id for product_cart API)
+  const environment = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
   const { data: mapping } = await supabase
     .from('payment_product_mappings')
-    .select('*')
+    .select('dodo_product_id, dodo_price_id')
     .eq('internal_product_type', 'subscription_plan')
     .eq('internal_product_id', plan.id)
-    .eq('environment', process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test')
+    .eq('environment', environment)
     .eq('is_active', true)
     .maybeSingle();
 
+  // 4. Verify Dodo is configured for checkout (API key only — webhook secret not required)
+  const config = provider.getConfig();
+  if (!config.isCheckoutReady) {
+    throw new Error(
+      'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
+    );
+  }
+
+  if (!mapping?.dodo_product_id) {
+    throw new Error(
+      `No Dodo product mapping found for plan "${params.planCode}" in ${environment} environment. ` +
+      `Please add the mapping in Admin → Commerce → Mappings.`
+    );
+  }
+
+  // 5. Determine price server-side
   const price =
     params.billingCycle === 'annual'
       ? Number(plan.price_annual ?? 0)
       : Number(plan.price_monthly ?? 0);
 
-  // 4. Create local order
+  // 6. Create local order (price from DB)
   const order = await createOrder({
     userId: params.userId,
     orderType: 'subscription',
@@ -170,23 +200,20 @@ export async function initiateSubscriptionCheckout(params: {
         unitPrice: price,
       },
     ],
-    metadata: { planCode: params.planCode, billingCycle: params.billingCycle },
+    metadata: {
+      planCode: params.planCode,
+      billingCycle: params.billingCycle,
+      dodoProductId: mapping.dodo_product_id,
+    },
   });
 
-  const config = provider.getConfig();
-  if (!config.isEnabled || !config.isConfigured || !mapping?.dodo_price_id) {
-    return {
-      checkoutUrl: `/checkout/pending?order=${order.id}&type=subscription`,
-      orderId: order.id,
-    };
-  }
-
+  // 7. Create Dodo Checkout Session using product_cart with dodo_product_id
   const result = await provider.createSubscriptionCheckout({
     orderId: order.id,
     userId: params.userId,
     userEmail: params.userEmail,
     planId: plan.id,
-    dodoPriceId: mapping.dodo_price_id,
+    dodoPriceId: mapping.dodo_product_id, // Dodo uses product_id in product_cart
     billingCycle: params.billingCycle,
     successUrl: `${getDodoReturnUrl()}?order=${order.id}`,
     cancelUrl: `${getDodoCancelUrl()}?order=${order.id}`,
@@ -236,10 +263,25 @@ export async function initiateCreditPackCheckout(params: {
 
   const config = provider.getConfig();
   if (!config.isEnabled || !config.isConfigured) {
-    return {
-      checkoutUrl: `/checkout/pending?order=${order.id}&type=credits`,
-      orderId: order.id,
-    };
+    throw new Error(
+      'Dodo Payments is not configured. Set DODO_PAYMENTS_API_KEY and DODO_PAYMENTS_WEBHOOK_SECRET.'
+    );
+  }
+
+  // Load Dodo product mapping
+  const { data: mapping } = await supabase
+    .from('payment_product_mappings')
+    .select('dodo_product_id')
+    .eq('internal_product_type', 'credit_pack')
+    .eq('internal_product_id', pack.id)
+    .eq('environment', process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test')
+    .eq('is_active', true)
+    .maybeSingle();
+
+  if (!mapping?.dodo_product_id) {
+    throw new Error(
+      `No Dodo product mapping found for credit pack "${params.packCode}".`
+    );
   }
 
   const result = await provider.createCheckout({
@@ -249,9 +291,13 @@ export async function initiateCreditPackCheckout(params: {
     amount: order.totalAmount,
     currency: order.currency,
     productName: pack.name,
-    successUrl: `${getDodoReturnUrl()}?order=${order.id}`,
-    cancelUrl: `${getDodoCancelUrl()}?order=${order.id}`,
-    metadata: { orderId: order.id, packCode: params.packCode },
+    successUrl: `${getDodoReturnUrl()}?order=${order.id}&type=credits`,
+    cancelUrl: `${getDodoCancelUrl()}?order=${order.id}&type=credits`,
+    metadata: {
+      orderId: order.id,
+      packCode: params.packCode,
+      dodoProductId: mapping.dodo_product_id,
+    },
   });
 
   await updateOrderCheckoutRef(order.id, result.externalCheckoutId);

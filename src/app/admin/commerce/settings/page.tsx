@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Settings, Save, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Settings, Save, AlertCircle, CheckCircle2, RefreshCw, XCircle } from 'lucide-react';
 
 interface Setting {
   id: string;
@@ -20,7 +20,48 @@ interface Setting {
   is_public: boolean;
 }
 
+interface DodoDiagnostic {
+  apiKeyConfigured: boolean;
+  webhookSecretConfigured: boolean;
+  returnUrlConfigured: boolean;
+  cancelUrlConfigured: boolean;
+  environment: string;
+  returnUrl: string;
+  cancelUrl: string;
+  providerEnabled: boolean;
+  checkoutRouteAvailable: boolean;
+  webhookUrl: string;
+  subscriptionMappingsConfigured: number;
+  subscriptionMappingsExpected: number;
+  mappedProductIds: string[];
+}
+
 const CATEGORY_ORDER = ['general', 'payments', 'downloads', 'tax', 'promotions', 'subscriptions'];
+
+function DiagnosticRow({ label, value, ok }: { label: string; value: string; ok: boolean }) {
+  return (
+    <div className="flex items-center justify-between py-2.5 border-b border-border last:border-0">
+      <span className="text-sm text-muted-foreground">{label}</span>
+      <div className="flex items-center gap-2">
+        {ok ? (
+          <CheckCircle2 className="w-4 h-4 text-green-500 shrink-0" />
+        ) : (
+          <XCircle className="w-4 h-4 text-red-400 shrink-0" />
+        )}
+        <span className={`text-sm font-medium ${ok ? 'text-green-700' : 'text-red-600'}`}>{value}</span>
+      </div>
+    </div>
+  );
+}
+
+function DiagnosticInfoRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-start justify-between py-2.5 border-b border-border last:border-0 gap-4">
+      <span className="text-sm text-muted-foreground shrink-0">{label}</span>
+      <span className="text-sm font-mono text-foreground text-right break-all">{value}</span>
+    </div>
+  );
+}
 
 export default function AdminCommerceSettingsPage() {
   const { user, profile, loading } = useAuth();
@@ -31,6 +72,10 @@ export default function AdminCommerceSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [diagnostic, setDiagnostic] = useState<DodoDiagnostic | null>(null);
+  const [diagLoading, setDiagLoading] = useState(false);
+  const [diagError, setDiagError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/auth?next=/admin/commerce/settings');
@@ -54,6 +99,30 @@ export default function AdminCommerceSettingsPage() {
       });
   }, [user]);
 
+  const fetchDiagnostic = async () => {
+    setDiagLoading(true);
+    setDiagError(null);
+    try {
+      const res = await fetch('/api/payments/dodo/diagnostic');
+      if (!res.ok) {
+        const d = await res.json();
+        throw new Error(d.error ?? 'Diagnostic failed');
+      }
+      const data = await res.json();
+      setDiagnostic(data);
+    } catch (err) {
+      setDiagError(err instanceof Error ? err.message : 'Diagnostic failed');
+    } finally {
+      setDiagLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user && profile && ['administrator', 'super_admin'].includes(profile.role ?? '')) {
+      fetchDiagnostic();
+    }
+  }, [user, profile]);
+
   const handleSave = async () => {
     setSaving(true);
     setError(null);
@@ -74,11 +143,9 @@ export default function AdminCommerceSettingsPage() {
     return acc;
   }, {});
 
-  const isEnabled = process.env.NEXT_PUBLIC_DODO_PAYMENTS_ENABLED === 'true';
-  const hasApiKey = !!process.env.DODO_PAYMENTS_API_KEY;
-  const hasWebhookSecret = !!process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
-
   if (loading) return null;
+
+  const isFullyConfigured = diagnostic?.apiKeyConfigured && diagnostic?.webhookSecretConfigured && diagnostic?.providerEnabled;
 
   return (
     <div className="min-h-screen bg-background">
@@ -120,31 +187,123 @@ export default function AdminCommerceSettingsPage() {
           </div>
         )}
 
-        {/* Payment Provider Status */}
+        {/* Dodo Payments Diagnostic Panel */}
         <div className="bg-card border border-border rounded-xl p-5 mb-6">
-          <h2 className="font-semibold text-foreground mb-3">Payment Provider</h2>
-          <div className="flex items-center justify-between p-4 bg-muted/50 rounded-xl border border-border">
-            <div>
-              <p className="font-medium text-foreground">Dodo Payments</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                {isEnabled && hasApiKey && hasWebhookSecret
-                  ? 'Configured — test mode' :'Not Configured'}
-              </p>
-            </div>
-            <span className={`inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border ${
-              isEnabled && hasApiKey ? 'text-amber-600 bg-amber-50 border-amber-200' : 'text-muted-foreground bg-muted border-border'
-            }`}>
-              {isEnabled && hasApiKey ? (
-                <><CheckCircle2 className="w-3.5 h-3.5" /> Test Mode</>
-              ) : (
-                <><AlertCircle className="w-3.5 h-3.5" /> Not Configured</>
-              )}
-            </span>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="font-semibold text-foreground">Dodo Payments — Configuration Diagnostic</h2>
+            <button
+              onClick={fetchDiagnostic}
+              disabled={diagLoading}
+              className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${diagLoading ? 'animate-spin' : ''}`} />
+              Refresh
+            </button>
           </div>
-          <p className="text-xs text-muted-foreground mt-3">
-            Configure <code className="bg-muted px-1 rounded">DODO_PAYMENTS_API_KEY</code> and <code className="bg-muted px-1 rounded">DODO_PAYMENTS_WEBHOOK_SECRET</code> in your <code className="bg-muted px-1 rounded">.env</code> file.
-            Production mode is not yet enabled in Phase 7.2.
-          </p>
+
+          {diagError && (
+            <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 rounded-lg px-3 py-2 text-xs mb-3">
+              <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+              {diagError}
+            </div>
+          )}
+
+          {diagLoading && !diagnostic && (
+            <div className="flex items-center justify-center py-6">
+              <div className="w-6 h-6 border-2 border-border border-t-secondary rounded-full animate-spin" />
+            </div>
+          )}
+
+          {diagnostic && (
+            <>
+              {/* Overall status badge */}
+              <div className={`flex items-center gap-2 px-4 py-3 rounded-xl mb-4 ${
+                isFullyConfigured
+                  ? 'bg-green-50 border border-green-200' : 'bg-amber-50 border border-amber-200'
+              }`}>
+                {isFullyConfigured ? (
+                  <CheckCircle2 className="w-4 h-4 text-green-600 shrink-0" />
+                ) : (
+                  <AlertCircle className="w-4 h-4 text-amber-600 shrink-0" />
+                )}
+                <span className={`text-sm font-medium ${isFullyConfigured ? 'text-green-700' : 'text-amber-700'}`}>
+                  {isFullyConfigured
+                    ? `Dodo Payments configured — ${diagnostic.environment} mode`
+                    : 'Dodo Payments not fully configured — checkout will not work'}
+                </span>
+              </div>
+
+              {/* Config checks */}
+              <div className="bg-muted/30 rounded-xl px-4 mb-4">
+                <DiagnosticRow
+                  label="DODO_PAYMENTS_API_KEY configured"
+                  value={diagnostic.apiKeyConfigured ? 'yes' : 'no'}
+                  ok={diagnostic.apiKeyConfigured}
+                />
+                <DiagnosticRow
+                  label="DODO_PAYMENTS_WEBHOOK_SECRET configured"
+                  value={diagnostic.webhookSecretConfigured ? 'yes' : 'no'}
+                  ok={diagnostic.webhookSecretConfigured}
+                />
+                <DiagnosticRow
+                  label="DODO_PAYMENTS_RETURN_URL configured"
+                  value={diagnostic.returnUrlConfigured ? 'yes' : 'no'}
+                  ok={diagnostic.returnUrlConfigured}
+                />
+                <DiagnosticRow
+                  label="DODO_PAYMENTS_CANCEL_URL configured"
+                  value={diagnostic.cancelUrlConfigured ? 'yes' : 'no'}
+                  ok={diagnostic.cancelUrlConfigured}
+                />
+                <DiagnosticRow
+                  label="Dodo Payments enabled"
+                  value={diagnostic.providerEnabled ? 'yes' : 'no'}
+                  ok={diagnostic.providerEnabled}
+                />
+                <DiagnosticRow
+                  label="Checkout route available"
+                  value={diagnostic.checkoutRouteAvailable ? 'yes' : 'no'}
+                  ok={diagnostic.checkoutRouteAvailable}
+                />
+                <DiagnosticRow
+                  label="Subscription mappings (test mode)"
+                  value={`${diagnostic.subscriptionMappingsConfigured} / ${diagnostic.subscriptionMappingsExpected}`}
+                  ok={diagnostic.subscriptionMappingsConfigured >= diagnostic.subscriptionMappingsExpected}
+                />
+              </div>
+
+              {/* Info rows */}
+              <div className="bg-muted/30 rounded-xl px-4 mb-4">
+                <DiagnosticInfoRow label="DODO_PAYMENTS_ENVIRONMENT" value={diagnostic.environment} />
+                <DiagnosticInfoRow label="Return URL" value={diagnostic.returnUrl} />
+                <DiagnosticInfoRow label="Cancel URL" value={diagnostic.cancelUrl} />
+                <DiagnosticInfoRow label="Webhook URL" value={diagnostic.webhookUrl} />
+              </div>
+
+              {/* Mapped product IDs */}
+              {diagnostic.mappedProductIds.length > 0 && (
+                <div className="bg-muted/30 rounded-xl px-4 py-3 mb-4">
+                  <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">
+                    Mapped Dodo Product IDs ({diagnostic.environment})
+                  </p>
+                  {diagnostic.mappedProductIds.map((pid) => (
+                    <div key={pid} className="flex items-center gap-2 py-1">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                      <code className="text-xs text-foreground">{pid}</code>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {!diagnostic.apiKeyConfigured && (
+                <p className="text-xs text-muted-foreground mt-3">
+                  Set <code className="bg-muted px-1 rounded">DODO_PAYMENTS_API_KEY</code> and{' '}
+                  <code className="bg-muted px-1 rounded">DODO_PAYMENTS_WEBHOOK_SECRET</code> in your{' '}
+                  <code className="bg-muted px-1 rounded">.env</code> file. Secrets are never displayed here.
+                </p>
+              )}
+            </>
+          )}
         </div>
 
         {/* Webhook endpoint */}
@@ -155,6 +314,10 @@ export default function AdminCommerceSettingsPage() {
               {process.env.NEXT_PUBLIC_SITE_URL ?? 'https://your-domain.com'}/api/webhooks/dodo-payments
             </code>
           </div>
+          <p className="text-xs text-muted-foreground mt-2">
+            Register this URL in your Dodo Payments dashboard to receive payment events.
+            The route accepts POST only and verifies the Dodo signature header.
+          </p>
         </div>
 
         {/* Database settings */}
@@ -227,7 +390,7 @@ export default function AdminCommerceSettingsPage() {
               </div>
             ))}
           </div>
-          <p className="text-xs text-muted-foreground mt-3">These modules will integrate with the marketplace once implemented. No AI features in Phase 7.2.</p>
+          <p className="text-xs text-muted-foreground mt-3">These modules will integrate with the marketplace once implemented.</p>
         </div>
       </main>
       <Footer />

@@ -1,10 +1,15 @@
 // ============================================================
-// SEAFOOD VISION — DodoPaymentsProvider (STUB)
-// All methods are TODO — will be implemented with the official
-// Dodo Payments API once the infrastructure is validated.
-// DO NOT implement Stripe. DO NOT add Stripe references.
+// SEAFOOD VISION — DodoPaymentsProvider
+// Official Dodo Payments TypeScript SDK integration.
+// Server-side only. Never expose API key to frontend.
+//
+// VARIABLE MAPPING (server-side):
+//   DODO_PAYMENTS_API_KEY        → bearerToken (FOUND/MISSING)
+//   DODO_PAYMENTS_WEBHOOK_SECRET → webhookKey  (FOUND/MISSING)
+//   DODO_PAYMENTS_ENVIRONMENT    → environment (FOUND, defaults to 'test')
 // ============================================================
 
+import DodoPayments from 'dodopayments';
 import type { PaymentProvider } from '../PaymentProvider';
 import type {
   CreateCheckoutParams,
@@ -19,54 +24,212 @@ import type {
 } from '../types';
 import { getDodoConfig } from './config';
 
+function createDodoClient(): DodoPayments {
+  const apiKey = process.env.DODO_PAYMENTS_API_KEY;
+  const env = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
+  // The Dodo SDK constructor accepts webhookKey for signature verification.
+  // We read DODO_PAYMENTS_WEBHOOK_SECRET (our env var name) and pass it as webhookKey.
+  const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+
+  return new DodoPayments({
+    bearerToken: apiKey,
+    environment: env === 'production' ? 'live_mode' : 'test_mode',
+    ...(webhookKey ? { webhookKey } : {}),
+  });
+}
+
 export class DodoPaymentsProvider implements PaymentProvider {
   getConfig(): PaymentProviderConfig {
     return getDodoConfig();
   }
 
-  async createCheckout(_params: CreateCheckoutParams): Promise<CheckoutResult> {
-    // TODO: Implement with Dodo Payments Checkout API
-    // POST https://api.dodopayments.com/v1/checkout (or equivalent endpoint)
-    // Use DODO_PAYMENTS_API_KEY (server-side only, never NEXT_PUBLIC_)
-    // Return { checkoutUrl, externalCheckoutId }
-    throw new Error('DodoPaymentsProvider.createCheckout — not yet implemented');
+  async createCheckout(params: CreateCheckoutParams): Promise<CheckoutResult> {
+    const config = getDodoConfig();
+    // Checkout only requires the API key (isCheckoutReady), NOT the webhook secret.
+    if (!config.isCheckoutReady) {
+      throw new Error(
+        'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
+      );
+    }
+
+    const client = createDodoClient();
+
+    // Dodo Payments API uses return_url (not success_url) and cancel_url.
+    // The response contains checkout_url and session_id.
+    const session = await client.checkoutSessions.create({
+      product_cart: [
+        {
+          product_id: params.metadata?.dodoProductId as string ?? params.orderId,
+          quantity: 1,
+        },
+      ],
+      customer: {
+        email: params.userEmail,
+      },
+      return_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+      metadata: {
+        order_id: params.orderId,
+        user_id: params.userId,
+        ...(params.metadata ?? {}),
+      },
+    });
+
+    const checkoutUrl = session.checkout_url ?? '';
+    if (!checkoutUrl) {
+      throw new Error('Dodo Payments did not return a checkout_url. Check your API key and product ID.');
+    }
+
+    return {
+      checkoutUrl,
+      externalCheckoutId: session.session_id,
+    };
   }
 
   async createSubscriptionCheckout(
-    _params: CreateSubscriptionCheckoutParams
+    params: CreateSubscriptionCheckoutParams
   ): Promise<SubscriptionCheckoutResult> {
-    // TODO: Implement with Dodo Payments Subscription Checkout API
-    // Use dodo_price_id from payment_product_mappings
-    // Return { checkoutUrl, externalCheckoutId }
-    throw new Error('DodoPaymentsProvider.createSubscriptionCheckout — not yet implemented');
+    const config = getDodoConfig();
+    // Checkout only requires the API key (isCheckoutReady), NOT the webhook secret.
+    if (!config.isCheckoutReady) {
+      throw new Error(
+        'Dodo Payments is not configured for checkout. Set DODO_PAYMENTS_API_KEY and ensure NEXT_PUBLIC_DODO_PAYMENTS_ENABLED=true.'
+      );
+    }
+
+    const client = createDodoClient();
+
+    // Subscription checkout: use product_id (Dodo Product ID from payment_product_mappings).
+    // Dodo API uses return_url (not success_url).
+    const session = await client.checkoutSessions.create({
+      product_cart: [
+        {
+          product_id: params.dodoPriceId,
+          quantity: 1,
+        },
+      ],
+      customer: {
+        email: params.userEmail,
+      },
+      return_url: params.successUrl,
+      cancel_url: params.cancelUrl,
+      metadata: {
+        order_id: params.orderId,
+        user_id: params.userId,
+        plan_id: params.planId,
+        billing_cycle: params.billingCycle,
+      },
+    });
+
+    const checkoutUrl = session.checkout_url ?? '';
+    if (!checkoutUrl) {
+      throw new Error('Dodo Payments did not return a checkout_url. Check your API key and product ID.');
+    }
+
+    return {
+      checkoutUrl,
+      externalCheckoutId: session.session_id,
+    };
   }
 
-  async getPaymentStatus(_externalPaymentId: string): Promise<PaymentStatusResult> {
-    // TODO: Implement with Dodo Payments Payment Retrieval API
-    // GET https://api.dodopayments.com/v1/payments/{id} (or equivalent)
-    // Map Dodo status → internal PaymentStatus
-    throw new Error('DodoPaymentsProvider.getPaymentStatus — not yet implemented');
+  async getPaymentStatus(externalPaymentId: string): Promise<PaymentStatusResult> {
+    const client = createDodoClient();
+    const payment = await client.payments.retrieve(externalPaymentId);
+    const status = (payment as unknown as { status: string }).status ?? 'unknown';
+
+    return {
+      externalPaymentId,
+      status: mapDodoPaymentStatus(status),
+      rawStatus: status,
+    };
   }
 
-  async getSubscriptionDetails(_externalSubscriptionId: string): Promise<SubscriptionDetails> {
-    // TODO: Implement with Dodo Payments Subscription Retrieval API
-    // Map Dodo subscription status → internal SubscriptionStatus
-    throw new Error('DodoPaymentsProvider.getSubscriptionDetails — not yet implemented');
+  async getSubscriptionDetails(externalSubscriptionId: string): Promise<SubscriptionDetails> {
+    const client = createDodoClient();
+    const sub = await client.subscriptions.retrieve(externalSubscriptionId);
+    const s = sub as unknown as Record<string, unknown>;
+
+    return {
+      externalSubscriptionId,
+      status: mapDodoSubscriptionStatus(String(s.status ?? '')),
+      currentPeriodStart: s.current_period_start ? new Date(s.current_period_start as string) : null,
+      currentPeriodEnd: s.current_period_end ? new Date(s.current_period_end as string) : null,
+      cancelAtPeriodEnd: Boolean(s.cancel_at_period_end ?? false),
+    };
   }
 
-  async cancelSubscription(_params: CancelSubscriptionParams): Promise<void> {
-    // TODO: Implement with Dodo Payments Subscription Cancellation API
-    // Support both immediate cancellation and cancel_at_period_end
-    throw new Error('DodoPaymentsProvider.cancelSubscription — not yet implemented');
+  async cancelSubscription(params: CancelSubscriptionParams): Promise<void> {
+    const client = createDodoClient();
+    await client.subscriptions.update(params.externalSubscriptionId, {
+      status: 'cancelled',
+    } as Parameters<typeof client.subscriptions.update>[1]);
   }
 
   async verifyWebhookSignature(
-    _rawBody: string,
-    _signature: string
+    rawBody: string,
+    _signature: string,
+    headers?: Record<string, string>
   ): Promise<WebhookVerificationResult> {
-    // TODO: Implement HMAC-SHA256 verification using DODO_PAYMENTS_WEBHOOK_SECRET
-    // The raw body must be used as-is (not re-serialized)
-    // Return { isValid: false } on any verification failure
-    throw new Error('DodoPaymentsProvider.verifyWebhookSignature — not yet implemented');
+    const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+    if (!webhookKey) {
+      throw new Error('DODO_PAYMENTS_WEBHOOK_SECRET is not set');
+    }
+
+    // Create a client with the webhook key for signature verification.
+    // The SDK's webhooks.unwrap() uses the webhookKey passed to the constructor.
+    const client = new DodoPayments({
+      bearerToken: process.env.DODO_PAYMENTS_API_KEY,
+      environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') === 'production' ? 'live_mode' : 'test_mode',
+      webhookKey,
+    });
+
+    try {
+      const unwrapped = client.webhooks.unwrap(rawBody, {
+        headers: {
+          'webhook-id': headers?.['webhook-id'] ?? '',
+          'webhook-signature': headers?.['webhook-signature'] ?? '',
+          'webhook-timestamp': headers?.['webhook-timestamp'] ?? '',
+        },
+      });
+
+      const u = unwrapped as unknown as Record<string, unknown>;
+      const eventType = String(u.type ?? u.event_type ?? 'unknown');
+      const externalEventId = headers?.['webhook-id'] ?? String(u.id ?? `evt-${Date.now()}`);
+
+      return {
+        isValid: true,
+        payload: u as Record<string, unknown>,
+        eventType,
+        externalEventId,
+      };
+    } catch {
+      return {
+        isValid: false,
+        payload: {},
+        eventType: 'unknown',
+        externalEventId: 'invalid',
+      };
+    }
+  }
+}
+
+function mapDodoPaymentStatus(status: string): 'pending' | 'succeeded' | 'failed' | 'refunded' | 'cancelled' {
+  switch (status.toLowerCase()) {
+    case 'succeeded': case 'paid': case 'completed': return 'succeeded';
+    case 'failed': case 'declined': return 'failed';
+    case 'refunded': return 'refunded';
+    case 'cancelled': case 'canceled': return 'cancelled';
+    default: return 'pending';
+  }
+}
+
+function mapDodoSubscriptionStatus(status: string): 'active' | 'trialing' | 'past_due' | 'cancelled' | 'expired' | 'pending' {
+  switch (status.toLowerCase()) {
+    case 'active': return 'active';
+    case 'trialing': case 'trial': return 'trialing';
+    case 'past_due': case 'on_hold': return 'past_due';
+    case 'cancelled': case 'canceled': return 'cancelled';
+    case 'expired': return 'expired';
+    default: return 'pending';
   }
 }

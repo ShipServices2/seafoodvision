@@ -1,18 +1,14 @@
 'use client';
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import {
-  Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw,
-  ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock,
-  Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare,
-  ArrowRight, Keyboard, Package, Hash, BookOpen, Search
-} from 'lucide-react';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
+import { Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader2, Eye, BarChart2, List, ChevronDown } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -23,6 +19,7 @@ interface Candidate {
   scientific_name: string | null;
   family: string | null;
   genus: string | null;
+  order_name: string | null;
   ai_score: number;
   similarity_score: number;
   main_reasons: string[];
@@ -31,10 +28,71 @@ interface Candidate {
   description_candidate: string | null;
   category_candidate: string | null;
   packaging_candidate: string | null;
+  product_candidate: string | null;
   keywords_candidate: string[] | null;
   is_selected: boolean;
   is_validated: boolean;
   source_provider: string;
+  asset_id: string | null;
+  provider_mode?: string;
+  confidence_score?: number | null;
+  biological_order?: string | null;
+  visual_evidence?: string[] | null;
+  identification_limits?: string[] | null;
+  reasoning_summary?: string | null;
+  is_real_ai?: boolean;
+  result_id?: string | null;
+}
+
+interface OpenAIPilotCandidate {
+  id: string;
+  rank: number;
+  common_name: string;
+  scientific_name: string | null;
+  family: string | null;
+  genus: string | null;
+  biological_order: string | null;
+  taxonomic_level: string | null;
+  confidence_score: number | null;
+  visual_evidence: string[] | null;
+  identification_limits: string[] | null;
+  source: string | null;
+  provider: string | null;
+  provider_mode: string | null;
+  is_selected: boolean;
+  is_validated: boolean;
+  status: string | null;
+  result_id: string;
+  asset_id: string | null;
+  public_asset_id: string;
+}
+
+interface OpenAIPilotMetadata {
+  id: string;
+  species_name: string | null;
+  scientific_name: string | null;
+  family: string | null;
+  genus: string | null;
+  biological_order: string | null;
+  commercial_names: string[] | null;
+  local_names_fr: string[] | null;
+  local_names_en: string[] | null;
+  local_names_es: string[] | null;
+  local_names_pt: string[] | null;
+  local_names_ar: string[] | null;
+  synonyms: string[] | null;
+  category: string | null;
+  product_form: string | null;
+  conservation_method: string | null;
+  packaging: string | null;
+  keywords: string[] | null;
+  short_description: string | null;
+  vision_confidence: number | null;
+  species_confidence: number | null;
+  commercial_confidence: number | null;
+  metadata_confidence: number | null;
+  global_confidence: number | null;
+  warnings: string[] | null;
 }
 
 interface SIEJob {
@@ -46,14 +104,37 @@ interface SIEJob {
   job_status: string;
   global_confidence: number | null;
   reviewer_comment: string | null;
-  image_url: string | null;
   created_at: string;
   reviewer_id: string | null;
   ai_model: string | null;
+  ai_provider: string | null;
   vision_confidence: number | null;
   species_confidence: number | null;
   commercial_confidence: number | null;
   metadata_confidence: number | null;
+  validation_progress?: number | null;
+  processing_progress?: number | null;
+  pilot_job_name?: string | null;
+  provider_mode?: string | null;
+  total_assets?: number | null;
+}
+
+// Batch asset entry from openai_pilot_job_assets
+interface BatchAsset {
+  id: string; // openai_pilot_job_assets.id
+  batch_job_id: string;
+  asset_job_id: string | null;
+  asset_id: string | null;
+  public_asset_id: string;
+  result_id: string | null;
+  review_position: number;
+  review_status: string;
+  reviewed_at: string | null;
+}
+
+interface AssetPreviewData {
+  storage_bucket: string | null;
+  storage_path: string | null;
 }
 
 interface ValidationEntry {
@@ -66,32 +147,33 @@ interface ValidationEntry {
 }
 
 interface FieldDecision {
-  action: 'approve' | 'reject' | 'replace' | 'unknown';
+  action: 'approve' | 'reject' | 'edit' | 'unknown';
   value?: string;
-  comment?: string;
 }
 
-type ValidationField = 'species' | 'scientific_name' | 'commercial_name' | 'local_names' | 'family' | 'genus' | 'keywords' | 'category' | 'description' | 'packaging' | 'product_type' | 'confidence';
+type ValidationField =
+  | 'species' | 'scientific_name' | 'commercial_name' | 'local_names'
+  | 'family' | 'genus' | 'order_name' | 'keywords' | 'category' | 'description' | 'packaging' | 'product_type' | 'confidence';
 
 const VALIDATION_FIELDS: { key: ValidationField; label: string; icon: React.ElementType }[] = [
-  { key: 'species', label: 'Species', icon: Fish },
+  { key: 'species', label: 'Species (Common Name)', icon: Fish },
   { key: 'scientific_name', label: 'Scientific Name', icon: BookOpen },
   { key: 'commercial_name', label: 'Commercial Name', icon: Tag },
-  { key: 'local_names', label: 'Local Names', icon: Globe },
+  { key: 'local_names', label: 'Local Names (FR/EN/ES/PT/AR)', icon: Globe },
   { key: 'family', label: 'Family', icon: Layers },
   { key: 'genus', label: 'Genus', icon: Hash },
+  { key: 'order_name', label: 'Biological Order', icon: BarChart2 },
   { key: 'keywords', label: 'Keywords', icon: Search },
   { key: 'category', label: 'Category', icon: CheckSquare },
   { key: 'description', label: 'Description', icon: MessageSquare },
   { key: 'packaging', label: 'Packaging', icon: Package },
   { key: 'product_type', label: 'Product Type', icon: Tag },
-  { key: 'confidence', label: 'Confidence', icon: Star },
 ];
 
 const ACTION_CONFIG = {
   approve: { label: 'Approve', icon: CheckCircle2, color: 'text-emerald-600', bg: 'bg-emerald-50 border-emerald-300 hover:bg-emerald-100', active: 'bg-emerald-100 border-emerald-500 ring-1 ring-emerald-400' },
   reject: { label: 'Reject', icon: XCircle, color: 'text-red-500', bg: 'bg-red-50 border-red-300 hover:bg-red-100', active: 'bg-red-100 border-red-500 ring-1 ring-red-400' },
-  replace: { label: 'Replace', icon: Edit3, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-300 hover:bg-blue-100', active: 'bg-blue-100 border-blue-500 ring-1 ring-blue-400' },
+  edit: { label: 'Edit', icon: Edit3, color: 'text-blue-600', bg: 'bg-blue-50 border-blue-300 hover:bg-blue-100', active: 'bg-blue-100 border-blue-500 ring-1 ring-blue-400' },
   unknown: { label: 'Unknown', icon: HelpCircle, color: 'text-gray-500', bg: 'bg-gray-50 border-gray-300 hover:bg-gray-100', active: 'bg-gray-100 border-gray-500 ring-1 ring-gray-400' },
 } as const;
 
@@ -99,16 +181,24 @@ const JOB_STATUS_COLORS: Record<string, string> = {
   proposals_ready: 'bg-blue-100 text-blue-700',
   under_review: 'bg-amber-100 text-amber-700',
   validated: 'bg-emerald-100 text-emerald-700',
+  partially_validated: 'bg-teal-100 text-teal-700',
   rejected: 'bg-red-100 text-red-700',
   unknown: 'bg-gray-100 text-gray-600',
   queued: 'bg-violet-100 text-violet-700',
+  processing: 'bg-blue-100 text-blue-600',
+  failed: 'bg-red-100 text-red-600',
 };
 
-const PAGE_SIZE = 15;
+const REVIEW_STATUS_COLORS: Record<string, string> = {
+  unreviewed: 'bg-gray-100 text-gray-600',
+  validated: 'bg-emerald-100 text-emerald-700',
+  skipped: 'bg-amber-100 text-amber-700',
+  unknown: 'bg-gray-100 text-gray-500',
+};
 
-// ─── Propagation targets ──────────────────────────────────────────────────────
 const PROPAGATION_TARGETS = [
   { key: 'assets', label: 'Assets', icon: Fish },
+  { key: 'asset_species', label: 'Asset Species', icon: Layers },
   { key: 'species_center', label: 'Species Center', icon: Layers },
   { key: 'knowledge_graph', label: 'Knowledge Graph', icon: Globe },
   { key: 'search_index', label: 'Search Index', icon: Search },
@@ -116,33 +206,94 @@ const PROPAGATION_TARGETS = [
   { key: 'library', label: 'Public Library', icon: BookOpen },
 ];
 
+const PAGE_SIZE = 15;
+
+// ─── Signed URL hook ──────────────────────────────────────────────────────────
+function useSignedUrl(bucket: string | null | undefined, path: string | null | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bucket || !path) { setUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(bucket, path, 3600).then((signed) => {
+      if (!cancelled) setUrl(signed);
+    });
+    return () => { cancelled = true; };
+  }, [bucket, path]);
+  return url;
+}
+
+// ─── Asset Preview Component ──────────────────────────────────────────────────
+function AssetPreview({ preview }: { preview: AssetPreviewData | null }) {
+  const [imgError, setImgError] = useState(false);
+  const signedUrl = useSignedUrl(preview?.storage_bucket, preview?.storage_path);
+  const hasImage = !!signedUrl && !imgError;
+
+  return hasImage ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={signedUrl!}
+      alt="Asset preview"
+      className="w-full aspect-square object-cover"
+      onError={() => setImgError(true)}
+    />
+  ) : (
+    <div className="w-full aspect-square bg-muted flex items-center justify-center">
+      <Fish size={48} className="text-muted-foreground" />
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
-export default function AIStudioValidationPage() {
+function AIStudioValidationPageInner() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const focusJobId = searchParams.get('job');
 
+  // ── All pilot batch jobs (job selector) ───────────────────────────────────
+  const [allBatchJobs, setAllBatchJobs] = useState<SIEJob[]>([]);
+  const [selectedBatchJobId, setSelectedBatchJobId] = useState<string | null>(null);
+
+  // ── Batch mode state ──────────────────────────────────────────────────────
+  const [batchJob, setBatchJob] = useState<SIEJob | null>(null);
+  const [batchAssets, setBatchAssets] = useState<BatchAsset[]>([]);
+  const [batchPosition, setBatchPosition] = useState(0);
+  const [batchFilter, setBatchFilter] = useState<'all' | 'unreviewed' | 'validated' | 'skipped' | 'unknown'>('unreviewed');
+  const [batchMode, setBatchMode] = useState(false);
+  const [autoAdvance, setAutoAdvance] = useState(true);
+
+  // ── Legacy job list state (for non-batch sie_jobs) ────────────────────────
   const [jobs, setJobs] = useState<SIEJob[]>([]);
   const [selectedJob, setSelectedJob] = useState<SIEJob | null>(null);
-  const [candidates, setCandidates] = useState<Candidate[]>([]);
-  const [history, setHistory] = useState<ValidationEntry[]>([]);
   const [jobPage, setJobPage] = useState(0);
   const [jobTotal, setJobTotal] = useState(0);
+  const [jobStatusFilter, setJobStatusFilter] = useState('');
+
+  // ── Current asset state ───────────────────────────────────────────────────
+  const [candidates, setCandidates] = useState<Candidate[]>([]);
+  const [history, setHistory] = useState<ValidationEntry[]>([]);
+  const [assetPreview, setAssetPreview] = useState<AssetPreviewData | null>(null);
+  const [assetTitle, setAssetTitle] = useState<string | null>(null);
+  const [assetStatus, setAssetStatus] = useState<string | null>(null);
+
+  // ── UI state ──────────────────────────────────────────────────────────────
   const [fetching, setFetching] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [comment, setComment] = useState('');
   const [fieldDecisions, setFieldDecisions] = useState<Record<string, FieldDecision>>({});
-  const [replaceValues, setReplaceValues] = useState<Record<string, string>>({});
+  const [editValues, setEditValues] = useState<Record<string, string>>({});
+  const [selectedCandidateId, setSelectedCandidateId] = useState<string | null>(null);
   const [lastUndo, setLastUndo] = useState<{ jobId: string; prevStatus: string } | null>(null);
   const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
-  const [showKeyboardHelp, setShowKeyboardHelp] = useState(false);
   const [propagating, setPropagating] = useState(false);
   const [propagationDone, setPropagationDone] = useState<string[]>([]);
-  const [bulkMode, setBulkMode] = useState(false);
-  const [selectedJobIds, setSelectedJobIds] = useState<Set<string>>(new Set());
-  const [bulkAction, setBulkAction] = useState<'approve' | 'reject' | 'unknown' | null>(null);
-  const [bulkProcessing, setBulkProcessing] = useState(false);
-  const [jobStatusFilter, setJobStatusFilter] = useState('');
+  const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
+  const [confirmSuccess, setConfirmSuccess] = useState<string | null>(null);
+  const [confirmError, setConfirmError] = useState<string | null>(null);
+  const [validationStats, setValidationStats] = useState<{ total: number; validated: number; skipped: number; unknown: number }>({ total: 0, validated: 0, skipped: 0, unknown: 0 });
+  const [pilotMetadata, setPilotMetadata] = useState<OpenAIPilotMetadata | null>(null);
+  const [showPilotMetadata, setShowPilotMetadata] = useState(false);
   const commentRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
@@ -152,6 +303,157 @@ export default function AIStudioValidationPage() {
     }
   }, [user, profile, loading, router]);
 
+  // ── Load ALL batch jobs (job selector) ────────────────────────────────────
+  const loadAllBatchJobs = useCallback(async () => {
+    const supabase = createClient();
+    // Load all pilot batch jobs ordered by most recent first
+    const { data: pilotJobs } = await supabase
+      .from('sie_jobs')
+      .select('*')
+      .not('pilot_job_name', 'is', null)
+      .eq('provider_mode', 'real_ai')
+      .order('created_at', { ascending: false });
+
+    if (!pilotJobs || pilotJobs.length === 0) return;
+    setAllBatchJobs(pilotJobs as SIEJob[]);
+
+    // Determine which job to auto-select:
+    // Priority 1: job specified in URL param
+    // Priority 2: most recent job that still has unreviewed assets
+    // Priority 3: most recent job overall
+    let targetJobId: string | null = null;
+
+    if (focusJobId) {
+      const urlJob = pilotJobs.find((j: SIEJob) => j.id === focusJobId);
+      if (urlJob) targetJobId = urlJob.id;
+    }
+
+    if (!targetJobId) {
+      // Find most recent job with pending (unreviewed) assets
+      for (const job of pilotJobs as SIEJob[]) {
+        // Check openai_pilot_job_assets first
+        const { count: unreviewedCount } = await supabase
+          .from('openai_pilot_job_assets')
+          .select('*', { count: 'exact', head: true })
+          .eq('batch_job_id', job.id)
+          .eq('review_status', 'unreviewed');
+
+        if ((unreviewedCount ?? 0) > 0) {
+          targetJobId = job.id;
+          break;
+        }
+
+        // Fallback: check openai_pilot_results for this job
+        const { count: pendingResultsCount } = await supabase
+          .from('openai_pilot_results')
+          .select('*', { count: 'exact', head: true })
+          .eq('job_id', job.id)
+          .eq('human_validated', false)
+          .eq('requires_human_review', true);
+
+        if ((pendingResultsCount ?? 0) > 0) {
+          targetJobId = job.id;
+          break;
+        }
+      }
+    }
+
+    // If no job with pending reviews, default to most recent
+    if (!targetJobId && pilotJobs.length > 0) {
+      targetJobId = (pilotJobs[0] as SIEJob).id;
+    }
+
+    if (targetJobId) {
+      setSelectedBatchJobId(targetJobId);
+    }
+  }, [focusJobId]);
+
+  // ── Load batch assets when selected batch job changes ─────────────────────
+  const loadBatchJobAssets = useCallback(async (jobId: string) => {
+    const supabase = createClient();
+
+    // Find the job record
+    const targetJob = allBatchJobs.find((j) => j.id === jobId);
+    if (!targetJob) return;
+
+    setBatchJob(targetJob);
+    setBatchPosition(0);
+    setBatchFilter('unreviewed');
+
+    // Try loading from openai_pilot_job_assets first
+    const { data: jobAssets } = await supabase
+      .from('openai_pilot_job_assets')
+      .select('*')
+      .eq('batch_job_id', jobId)
+      .order('review_position', { ascending: true });
+
+    if (jobAssets && jobAssets.length > 0) {
+      setBatchAssets(jobAssets as BatchAsset[]);
+      setBatchMode(true);
+      return;
+    }
+
+    // Fallback: batch was imported before openai_pilot_job_assets was populated
+    // Build synthetic BatchAsset entries from openai_pilot_results
+    const { data: pilotResults } = await supabase
+      .from('openai_pilot_results')
+      .select('id, asset_id, public_asset_id, review_status, human_validated, requires_human_review')
+      .eq('job_id', jobId)
+      .order('created_at', { ascending: true });
+
+    if (pilotResults && pilotResults.length > 0) {
+      // Create openai_pilot_job_assets entries for this batch so future loads work correctly
+      const newAssets: BatchAsset[] = [];
+      let position = 1;
+      for (const result of pilotResults) {
+        // Determine review_status from human_validated flag
+        const reviewStatus = result.human_validated ? 'validated' : 'unreviewed';
+
+        // Insert into openai_pilot_job_assets
+        const { data: inserted } = await supabase
+          .from('openai_pilot_job_assets')
+          .insert({
+            batch_job_id: jobId,
+            asset_id: result.asset_id,
+            public_asset_id: result.public_asset_id,
+            result_id: result.id,
+            review_position: position,
+            review_status: reviewStatus,
+          })
+          .select('*')
+          .single();
+
+        if (inserted) {
+          newAssets.push(inserted as BatchAsset);
+        } else {
+          // Insert failed (maybe already exists), create synthetic entry
+          newAssets.push({
+            id: `synthetic-${result.id}`,
+            batch_job_id: jobId,
+            asset_job_id: null,
+            asset_id: result.asset_id,
+            public_asset_id: result.public_asset_id,
+            result_id: result.id,
+            review_position: position,
+            review_status: reviewStatus,
+            reviewed_at: null,
+          });
+        }
+        position++;
+      }
+      setBatchAssets(newAssets);
+      setBatchMode(true);
+    }
+  }, [allBatchJobs]);
+
+  // ── When selectedBatchJobId changes, load its assets ─────────────────────
+  useEffect(() => {
+    if (selectedBatchJobId && allBatchJobs.length > 0) {
+      loadBatchJobAssets(selectedBatchJobId);
+    }
+  }, [selectedBatchJobId, allBatchJobs, loadBatchJobAssets]);
+
+  // ── Fetch legacy jobs list ────────────────────────────────────────────────
   const fetchJobs = useCallback(async () => {
     if (!profile) return;
     setFetching(true);
@@ -159,34 +461,277 @@ export default function AIStudioValidationPage() {
     let query = supabase
       .from('sie_jobs')
       .select('*', { count: 'exact' })
+      .is('pilot_job_name', null) // exclude batch anchor jobs from the list
       .order('created_at', { ascending: false })
       .range(jobPage * PAGE_SIZE, (jobPage + 1) * PAGE_SIZE - 1);
 
     if (jobStatusFilter) {
       query = query.eq('job_status', jobStatusFilter);
     } else {
-      query = query.in('job_status', ['queued', 'proposals_ready', 'under_review', 'validated', 'rejected', 'unknown']);
+      query = query.in('job_status', ['queued', 'proposals_ready', 'under_review', 'validated', 'partially_validated', 'rejected', 'unknown', 'failed']);
     }
 
     const { data, count } = await query;
-    setJobs(data ?? []);
+    const jobList = data ?? [];
+    setJobs(jobList);
     setJobTotal(count ?? 0);
     setFetching(false);
-    if (data && data.length > 0 && !selectedJob) {
-      setSelectedJob(data[0]);
+
+    if (focusJobId && !selectedJob) {
+      const target = jobList.find((j: SIEJob) => j.id === focusJobId);
+      if (target) {
+        setSelectedJob(target);
+      } else {
+        const { data: specificJob } = await supabase
+          .from('sie_jobs')
+          .select('*')
+          .eq('id', focusJobId)
+          .single();
+        if (specificJob) setSelectedJob(specificJob);
+      }
+    } else if (jobList.length > 0 && !selectedJob && !batchMode) {
+      setSelectedJob(jobList[0]);
     }
-  }, [profile, jobPage, selectedJob, jobStatusFilter]);
+  }, [profile, jobPage, selectedJob, jobStatusFilter, focusJobId, batchMode]);
 
-  useEffect(() => { fetchJobs(); }, [fetchJobs]);
-
-  const fetchCandidates = useCallback(async (jobId: string) => {
+  // ── Fetch batch stats ─────────────────────────────────────────────────────
+  const fetchBatchStats = useCallback(async () => {
+    if (!batchJob) return;
     const supabase = createClient();
     const { data } = await supabase
-      .from('sie_species_candidates')
-      .select('*')
-      .eq('job_id', jobId)
-      .order('rank', { ascending: true });
-    setCandidates(data ?? []);
+      .from('openai_pilot_job_assets')
+      .select('review_status')
+      .eq('batch_job_id', batchJob.id);
+
+    if (!data) return;
+    const total = data.length;
+    const validated = data.filter((a) => a.review_status === 'validated').length;
+    const skipped = data.filter((a) => a.review_status === 'skipped').length;
+    const unknown = data.filter((a) => a.review_status === 'unknown').length;
+    setValidationStats({ total, validated, skipped, unknown });
+  }, [batchJob]);
+
+  // ── Fetch validation stats (legacy) ──────────────────────────────────────
+  const fetchValidationStats = useCallback(async () => {
+    if (batchJob) { fetchBatchStats(); return; }
+    const supabase = createClient();
+    const [totalRes, validatedRes] = await Promise.all([
+      supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
+        .in('job_status', ['proposals_ready', 'under_review', 'validated', 'partially_validated']),
+      supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
+        .eq('job_status', 'validated'),
+    ]);
+    setValidationStats({
+      total: totalRes.count ?? 0,
+      validated: validatedRes.count ?? 0,
+      skipped: 0,
+      unknown: 0,
+    });
+  }, [batchJob, fetchBatchStats]);
+
+  useEffect(() => {
+    if (profile) {
+      loadAllBatchJobs();
+      fetchJobs();
+    }
+  }, [profile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => { fetchValidationStats(); }, [fetchValidationStats]);
+
+  // ── Current batch asset (derived) — only show non-validated assets ────────
+  const filteredBatchAssets = batchAssets.filter((a) => {
+    if (batchFilter === 'all') return true;
+    return a.review_status === batchFilter;
+  });
+
+  const currentBatchAsset = batchMode && filteredBatchAssets.length > 0
+    ? filteredBatchAssets[batchPosition] ?? null
+    : null;
+
+  // ── Effective "current job" — either from batch or legacy list ────────────
+  const effectiveAssetId = batchMode ? currentBatchAsset?.asset_id ?? null : selectedJob?.asset_id ?? null;
+  const effectiveJobId = batchMode ? currentBatchAsset?.asset_job_id ?? batchJob?.id ?? null : selectedJob?.id ?? null;
+  const effectivePublicAssetId = batchMode ? currentBatchAsset?.public_asset_id ?? null : selectedJob?.public_asset_id ?? null;
+  const effectiveResultId = batchMode ? currentBatchAsset?.result_id ?? null : null;
+
+  const fetchCandidates = useCallback(async (assetId: string | null, resultId: string | null, jobId: string | null) => {
+    const supabase = createClient();
+    let rows: Candidate[] = [];
+
+    // Primary: load OpenAI pilot candidates if we have a result_id
+    if (resultId) {
+      const { data: pilotCandidates } = await supabase
+        .from('openai_pilot_candidates')
+        .select('*')
+        .eq('result_id', resultId)
+        .order('rank', { ascending: true });
+
+      if (pilotCandidates && pilotCandidates.length > 0) {
+        rows = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
+          id: pc.id,
+          rank: pc.rank,
+          common_name: pc.common_name,
+          scientific_name: pc.scientific_name,
+          family: pc.family,
+          genus: pc.genus,
+          order_name: pc.biological_order,
+          ai_score: Math.round((pc.confidence_score ?? 0) * 100),
+          similarity_score: Math.round((pc.confidence_score ?? 0) * 100),
+          main_reasons: pc.visual_evidence ?? [],
+          product_form: null,
+          commercial_name: null,
+          description_candidate: null,
+          category_candidate: null,
+          packaging_candidate: null,
+          product_candidate: null,
+          keywords_candidate: null,
+          is_selected: pc.is_selected,
+          is_validated: pc.is_validated,
+          source_provider: 'openai',
+          asset_id: pc.asset_id,
+          provider_mode: 'real_ai',
+          confidence_score: pc.confidence_score,
+          biological_order: pc.biological_order,
+          visual_evidence: pc.visual_evidence,
+          identification_limits: pc.identification_limits,
+          is_real_ai: true,
+          result_id: pc.result_id,
+        }));
+      }
+    }
+
+    // Fallback: load from openai_pilot_results by asset_id + job_id
+    if (rows.length === 0 && assetId && jobId) {
+      const { data: pilotResultData } = await supabase
+        .from('openai_pilot_results')
+        .select('id')
+        .eq('asset_id', assetId)
+        .eq('job_id', jobId)
+        .eq('provider_mode', 'real_ai')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pilotResultData?.id) {
+        const { data: pilotCandidates } = await supabase
+          .from('openai_pilot_candidates')
+          .select('*')
+          .eq('result_id', pilotResultData.id)
+          .order('rank', { ascending: true });
+
+        if (pilotCandidates && pilotCandidates.length > 0) {
+          rows = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
+            id: pc.id,
+            rank: pc.rank,
+            common_name: pc.common_name,
+            scientific_name: pc.scientific_name,
+            family: pc.family,
+            genus: pc.genus,
+            order_name: pc.biological_order,
+            ai_score: Math.round((pc.confidence_score ?? 0) * 100),
+            similarity_score: Math.round((pc.confidence_score ?? 0) * 100),
+            main_reasons: pc.visual_evidence ?? [],
+            product_form: null,
+            commercial_name: null,
+            description_candidate: null,
+            category_candidate: null,
+            packaging_candidate: null,
+            product_candidate: null,
+            keywords_candidate: null,
+            is_selected: pc.is_selected,
+            is_validated: pc.is_validated,
+            source_provider: 'openai',
+            asset_id: pc.asset_id,
+            provider_mode: 'real_ai',
+            confidence_score: pc.confidence_score,
+            biological_order: pc.biological_order,
+            visual_evidence: pc.visual_evidence,
+            identification_limits: pc.identification_limits,
+            is_real_ai: true,
+            result_id: pc.result_id,
+          }));
+        }
+      }
+    }
+
+    // Second fallback: load from openai_pilot_results by asset_id only
+    if (rows.length === 0 && assetId) {
+      const { data: pilotResultData } = await supabase
+        .from('openai_pilot_results')
+        .select('id')
+        .eq('asset_id', assetId)
+        .eq('provider_mode', 'real_ai')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      if (pilotResultData?.id) {
+        const { data: pilotCandidates } = await supabase
+          .from('openai_pilot_candidates')
+          .select('*')
+          .eq('result_id', pilotResultData.id)
+          .order('rank', { ascending: true });
+
+        if (pilotCandidates && pilotCandidates.length > 0) {
+          rows = (pilotCandidates as OpenAIPilotCandidate[]).map((pc) => ({
+            id: pc.id,
+            rank: pc.rank,
+            common_name: pc.common_name,
+            scientific_name: pc.scientific_name,
+            family: pc.family,
+            genus: pc.genus,
+            order_name: pc.biological_order,
+            ai_score: Math.round((pc.confidence_score ?? 0) * 100),
+            similarity_score: Math.round((pc.confidence_score ?? 0) * 100),
+            main_reasons: pc.visual_evidence ?? [],
+            product_form: null,
+            commercial_name: null,
+            description_candidate: null,
+            category_candidate: null,
+            packaging_candidate: null,
+            product_candidate: null,
+            keywords_candidate: null,
+            is_selected: pc.is_selected,
+            is_validated: pc.is_validated,
+            source_provider: 'openai',
+            asset_id: pc.asset_id,
+            provider_mode: 'real_ai',
+            confidence_score: pc.confidence_score,
+            biological_order: pc.biological_order,
+            visual_evidence: pc.visual_evidence,
+            identification_limits: pc.identification_limits,
+            is_real_ai: true,
+            result_id: pc.result_id,
+          }));
+        }
+      }
+    }
+
+    // Also load sie_species_candidates (mock or legacy)
+    if (jobId) {
+      const { data: sieData } = await supabase
+        .from('sie_species_candidates')
+        .select('*')
+        .eq('job_id', jobId)
+        .order('rank', { ascending: true });
+
+      const sieMapped = (sieData ?? []).map((r) => ({ ...r, is_real_ai: false, provider_mode: r.provider_mode ?? 'mock' }));
+      rows = [...rows, ...sieMapped];
+    } else if (assetId && rows.length === 0) {
+      const { data: fallbackData } = await supabase
+        .from('sie_species_candidates')
+        .select('*')
+        .eq('asset_id', assetId)
+        .order('rank', { ascending: true })
+        .limit(5);
+      rows = [...rows, ...(fallbackData ?? []).map((r) => ({ ...r, is_real_ai: false, provider_mode: 'mock' }))];
+    }
+
+    setCandidates(rows);
+    const rank1 = rows.find((c) => c.rank === 1);
+    if (rank1) setSelectedCandidateId(rank1.id);
+    else if (rows.length > 0) setSelectedCandidateId(rows[0].id);
+    else setSelectedCandidateId(null);
   }, []);
 
   const fetchHistory = useCallback(async (jobId: string) => {
@@ -200,181 +745,329 @@ export default function AIStudioValidationPage() {
     setHistory(data ?? []);
   }, []);
 
+  const fetchPilotMetadata = useCallback(async (candidateId: string) => {
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('openai_pilot_candidate_metadata')
+      .select('*')
+      .eq('candidate_id', candidateId)
+      .maybeSingle();
+    setPilotMetadata(data ?? null);
+  }, []);
+
+  const fetchAssetPreview = useCallback(async (assetId: string | null) => {
+    if (!assetId) { setAssetPreview(null); setAssetTitle(null); setAssetStatus(null); return; }
+    const supabase = createClient();
+    const { data } = await supabase
+      .from('assets')
+      .select('title, review_status, asset_previews(storage_bucket, storage_path)')
+      .eq('id', assetId)
+      .single();
+    if (data) {
+      setAssetTitle(data.title ?? null);
+      setAssetStatus(data.review_status ?? null);
+      const preview = Array.isArray(data.asset_previews) ? data.asset_previews[0] : data.asset_previews;
+      setAssetPreview(preview ? { storage_bucket: preview.storage_bucket, storage_path: preview.storage_path } : null);
+    }
+  }, []);
+
+  // ── Load asset when batch position changes ────────────────────────────────
   useEffect(() => {
-    if (selectedJob) {
-      fetchCandidates(selectedJob.id);
-      fetchHistory(selectedJob.id);
+    if (batchMode && currentBatchAsset) {
+      fetchCandidates(currentBatchAsset.asset_id, currentBatchAsset.result_id, currentBatchAsset.asset_job_id ?? batchJob?.id ?? null);
+      fetchAssetPreview(currentBatchAsset.asset_id);
+      if (currentBatchAsset.asset_job_id) fetchHistory(currentBatchAsset.asset_job_id);
       setFieldDecisions({});
-      setReplaceValues({});
+      setEditValues({});
       setComment('');
       setPropagationDone([]);
+      setConfirmDialogOpen(false);
+      setConfirmSuccess(null);
+      setConfirmError(null);
     }
-  }, [selectedJob, fetchCandidates, fetchHistory]);
+  }, [batchMode, currentBatchAsset, fetchCandidates, fetchAssetPreview, fetchHistory, batchJob]);
 
-  // ── Navigation: Previous / Next ─────────────────────────────────────────────
+  // ── Load asset when legacy job changes ────────────────────────────────────
+  useEffect(() => {
+    if (!batchMode && selectedJob) {
+      fetchCandidates(selectedJob.asset_id, null, selectedJob.id);
+      fetchHistory(selectedJob.id);
+      fetchAssetPreview(selectedJob.asset_id);
+      setFieldDecisions({});
+      setEditValues({});
+      setComment('');
+      setPropagationDone([]);
+      setConfirmDialogOpen(false);
+      setConfirmSuccess(null);
+      setConfirmError(null);
+    }
+  }, [selectedJob, batchMode, fetchCandidates, fetchHistory, fetchAssetPreview]);
+
+  // ── Batch navigation ──────────────────────────────────────────────────────
+  const goToBatchPrev = useCallback(() => {
+    setBatchPosition((p) => Math.max(0, p - 1));
+  }, []);
+
+  const goToBatchNext = useCallback(() => {
+    setBatchPosition((p) => Math.min(filteredBatchAssets.length - 1, p + 1));
+  }, [filteredBatchAssets.length]);
+
+  const goToNextUnreviewed = useCallback(() => {
+    const nextIdx = filteredBatchAssets.findIndex((a, i) => i > batchPosition && a.review_status === 'unreviewed');
+    if (nextIdx >= 0) {
+      setBatchPosition(nextIdx);
+    } else {
+      setBatchPosition((p) => Math.min(filteredBatchAssets.length - 1, p + 1));
+    }
+  }, [filteredBatchAssets, batchPosition]);
+
+  // ── Legacy navigation ─────────────────────────────────────────────────────
   const currentJobIndex = jobs.findIndex((j) => j.id === selectedJob?.id);
 
   const goToPrev = useCallback(() => {
+    if (batchMode) { goToBatchPrev(); return; }
     if (currentJobIndex > 0) setSelectedJob(jobs[currentJobIndex - 1]);
     else if (jobPage > 0) setJobPage((p) => p - 1);
-  }, [currentJobIndex, jobs, jobPage]);
+  }, [batchMode, goToBatchPrev, currentJobIndex, jobs, jobPage]);
 
   const goToNext = useCallback(() => {
+    if (batchMode) { goToBatchNext(); return; }
     if (currentJobIndex < jobs.length - 1) setSelectedJob(jobs[currentJobIndex + 1]);
     else if ((jobPage + 1) * PAGE_SIZE < jobTotal) setJobPage((p) => p + 1);
-  }, [currentJobIndex, jobs, jobPage, jobTotal]);
+  }, [batchMode, goToBatchNext, currentJobIndex, jobs, jobPage, jobTotal]);
 
-  // ── Keyboard shortcuts ───────────────────────────────────────────────────────
+  // ── Keyboard shortcuts ────────────────────────────────────────────────────
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
-      if (!selectedJob) return;
-
       switch (e.key) {
         case 'ArrowLeft': e.preventDefault(); goToPrev(); break;
         case 'ArrowRight': e.preventDefault(); goToNext(); break;
-        case 'a': case 'A': e.preventDefault(); handleValidate('approve'); break;
-        case 'r': case 'R': e.preventDefault(); handleValidate('reject'); break;
-        case 'u': case 'U': e.preventDefault(); handleValidate('unknown'); break;
         case 'z': if (e.ctrlKey || e.metaKey) { e.preventDefault(); handleUndo(); } break;
-        case '?': setShowKeyboardHelp((v) => !v); break;
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [selectedJob, goToPrev, goToNext]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [goToPrev, goToNext]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Propagation ──────────────────────────────────────────────────────────────
-  const propagateValidation = async (jobId: string, assetId: string | null, topCandidate: Candidate | null) => {
-    if (!assetId || !topCandidate) return;
-    setPropagating(true);
-    const supabase = createClient();
-    const done: string[] = [];
-
-    // 1. Update asset with validated species data
-    try {
-      await supabase.from('assets').update({
-        review_status: 'approved',
-        updated_at: new Date().toISOString(),
-      }).eq('id', assetId);
-      done.push('assets');
-      setPropagationDone([...done]);
-    } catch { /* continue */ }
-
-    // 2. Log to sie_propagation_log
-    try {
-      await supabase.from('sie_propagation_log').insert({
-        job_id: jobId,
-        asset_id: assetId,
-        target_system: 'assets',
-        target_table: 'assets',
-        target_id: assetId,
-        propagation_status: 'completed',
-        status: 'completed',
-        propagated_fields: {
-          species: topCandidate.common_name,
-          scientific_name: topCandidate.scientific_name,
-          family: topCandidate.family,
-          genus: topCandidate.genus,
-          commercial_name: topCandidate.commercial_name,
-          category: topCandidate.category_candidate,
-          keywords: topCandidate.keywords_candidate,
-        },
-        propagated_at: new Date().toISOString(),
-      });
-    } catch { /* continue */ }
-
-    // 3. Update metadata_suggestions to validated
-    try {
-      await supabase.from('metadata_suggestions')
-        .update({ status: 'approved', reviewed_at: new Date().toISOString() })
-        .eq('asset_id', assetId)
-        .eq('field_name', 'species_candidate');
-      done.push('search_index');
-      setPropagationDone([...done]);
-    } catch { /* continue */ }
-
-    // 4. Update sie_jobs propagation status
-    await supabase.from('sie_jobs').update({
-      propagation_status: 'completed',
-      propagated_at: new Date().toISOString(),
-    }).eq('id', jobId);
-
-    done.push('species_center', 'knowledge_graph', 'marketplace', 'library');
-    setPropagationDone([...done]);
-    setPropagating(false);
+  // ── Get field value from selected candidate ───────────────────────────────
+  const getFieldValue = (key: ValidationField, candidate: Candidate | null): string | null => {
+    if (!candidate) return null;
+    switch (key) {
+      case 'species': return candidate.common_name;
+      case 'scientific_name': return candidate.scientific_name;
+      case 'commercial_name': return candidate.commercial_name;
+      case 'local_names': return null;
+      case 'family': return candidate.family;
+      case 'genus': return candidate.genus;
+      case 'order_name': return candidate.order_name ?? candidate.biological_order ?? null;
+      case 'keywords': return candidate.keywords_candidate?.slice(0, 5).join(', ') ?? null;
+      case 'category': return candidate.category_candidate;
+      case 'description': return candidate.description_candidate;
+      case 'packaging': return candidate.packaging_candidate;
+      case 'product_type': return candidate.product_candidate ?? candidate.product_form;
+      default: return null;
+    }
   };
 
-  // ── Validate ─────────────────────────────────────────────────────────────────
-  const handleValidate = async (action: 'approve' | 'reject' | 'unknown', candidateId?: string) => {
-    if (!selectedJob || !profile || actionLoading) return;
+  // ── CONFIRM IDENTIFICATION (calls server-side transactional API) ──────────
+  const handleConfirmIdentification = async () => {
+    if (actionLoading) return;
+    const candidate = candidates.find((c) => c.id === selectedCandidateId) ?? candidates[0];
+    if (!candidate) return;
+
+    const jobId = effectiveJobId ?? batchJob?.id;
+    if (!jobId) return;
+
+    setActionLoading(true);
+    setConfirmDialogOpen(false);
+    setConfirmSuccess(null);
+    setConfirmError(null);
+    setPropagating(true);
+    setPropagationDone([]);
+
+    let meta: OpenAIPilotMetadata | null = pilotMetadata;
+    if (candidate.is_real_ai && candidate.id && !meta) {
+      const supabase = createClient();
+      const { data } = await supabase
+        .from('openai_pilot_candidate_metadata')
+        .select('*')
+        .eq('candidate_id', candidate.id)
+        .maybeSingle();
+      meta = data ?? null;
+    }
+
+    const payload = {
+      jobId,
+      assetId: effectiveAssetId,
+      publicAssetId: effectivePublicAssetId,
+      candidateId: candidate.id,
+      candidateSource: candidate.is_real_ai ? 'openai_pilot' : 'sie',
+      resultId: candidate.result_id ?? effectiveResultId,
+      batchJobId: batchMode ? batchJob?.id ?? null : null,
+      fieldDecisions,
+      editValues,
+      comment,
+      commonName: candidate.common_name,
+      scientificName: candidate.scientific_name,
+      family: candidate.family,
+      genus: candidate.genus,
+      biologicalOrder: candidate.order_name ?? candidate.biological_order ?? null,
+      confidenceScore: candidate.confidence_score ?? (candidate.ai_score / 100),
+      commercialNames: meta?.commercial_names ?? [],
+      localNamesFr: meta?.local_names_fr ?? [],
+      localNamesEn: meta?.local_names_en ?? [],
+      localNamesEs: meta?.local_names_es ?? [],
+      localNamesPt: meta?.local_names_pt ?? [],
+      localNamesAr: meta?.local_names_ar ?? [],
+      synonyms: meta?.synonyms ?? [],
+    };
+
+    try {
+      const res = await fetch('/api/admin/validate-identification', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      const result = await res.json();
+
+      if (result.success || (result.steps && result.steps.length > 0)) {
+        const stepMap: Record<string, string> = {
+          candidate_validated: 'assets',
+          asset_species_written: 'asset_species',
+          species_created: 'species_center',
+          species_reused: 'species_center',
+          asset_updated_with_aliases: 'search_index',
+          species_names_written: 'knowledge_graph',
+          job_validated: 'library',
+          job_asset_updated: 'marketplace',
+        };
+        const done: string[] = [];
+        for (const step of (result.steps ?? [])) {
+          const target = stepMap[step];
+          if (target && !done.includes(target)) done.push(target);
+        }
+        setPropagationDone(done);
+        setConfirmSuccess(result.message ?? 'Identification confirmed');
+
+        // Update batch asset status locally — mark as validated and remove from unreviewed filter
+        if (batchMode && currentBatchAsset) {
+          setBatchAssets((prev) =>
+            prev.map((a) =>
+              a.id === currentBatchAsset.id ? { ...a, review_status: 'validated', reviewed_at: new Date().toISOString() } : a
+            )
+          );
+          // Also update openai_pilot_results human_validated flag
+          if (currentBatchAsset.result_id) {
+            const supabase = createClient();
+            await supabase
+              .from('openai_pilot_results')
+              .update({ human_validated: true, review_status: 'validated' })
+              .eq('id', currentBatchAsset.result_id);
+          }
+        }
+
+        setLastUndo({ jobId, prevStatus: 'proposals_ready' });
+        const t = setTimeout(() => setLastUndo(null), 8000);
+        setUndoTimer(t);
+        setComment('');
+        setFieldDecisions({});
+        setEditValues({});
+        fetchValidationStats();
+        if (effectiveJobId) fetchHistory(effectiveJobId);
+
+        if (autoAdvance) {
+          setTimeout(() => {
+            if (batchMode) goToNextUnreviewed();
+            else goToNext();
+          }, 1200);
+        }
+      } else {
+        setConfirmError(result.error ?? result.errors?.join('; ') ?? 'Confirmation failed');
+      }
+    } catch (e) {
+      setConfirmError(`Network error: ${e}`);
+    } finally {
+      setActionLoading(false);
+      setPropagating(false);
+    }
+  };
+
+  // ── Skip ──────────────────────────────────────────────────────────────────
+  const handleSkip = async () => {
+    if (batchMode && currentBatchAsset) {
+      const supabase = createClient();
+      await supabase
+        .from('openai_pilot_job_assets')
+        .update({ review_status: 'skipped', reviewed_at: new Date().toISOString() })
+        .eq('id', currentBatchAsset.id);
+      setBatchAssets((prev) =>
+        prev.map((a) => a.id === currentBatchAsset.id ? { ...a, review_status: 'skipped' } : a)
+      );
+      fetchBatchStats();
+    }
+    goToNext();
+  };
+
+  // ── Mark Unknown ──────────────────────────────────────────────────────────
+  const handleMarkUnknown = async () => {
+    if (actionLoading) return;
     setActionLoading(true);
     const supabase = createClient();
-    const prevStatus = selectedJob.job_status;
-    const newStatus = action === 'approve' ? 'validated' : action === 'reject' ? 'rejected' : 'unknown';
+    const jobId = effectiveJobId ?? batchJob?.id;
 
-    await supabase.from('sie_jobs').update({
-      job_status: newStatus,
-      reviewed_at: new Date().toISOString(),
-      reviewer_id: profile.id,
-      reviewer_comment: comment || null,
-    }).eq('id', selectedJob.id);
-
-    if (candidateId && action === 'approve') {
-      await supabase.from('sie_species_candidates').update({ is_selected: true, is_validated: true }).eq('id', candidateId);
-    }
-
-    // Log field decisions
-    const fieldEntries = Object.entries(fieldDecisions);
-    if (fieldEntries.length > 0) {
-      await supabase.from('sie_validation_history').insert(
-        fieldEntries.map(([field, decision]) => ({
-          job_id: selectedJob.id,
-          candidate_id: candidateId ?? null,
-          action: decision.action,
-          field_name: field,
-          comment: decision.comment || comment || null,
-          previous_status: prevStatus,
-          new_status: newStatus,
-          reviewer_id: profile.id,
-          reviewer_name: profile.full_name ?? profile.email ?? null,
-        }))
-      );
-    } else {
+    if (jobId) {
+      await supabase.from('sie_jobs').update({
+        job_status: 'unknown',
+        reviewed_at: new Date().toISOString(),
+        reviewer_id: profile?.id,
+      }).eq('id', jobId);
       await supabase.from('sie_validation_history').insert({
-        job_id: selectedJob.id,
-        candidate_id: candidateId ?? null,
-        action,
-        comment: comment || null,
-        previous_status: prevStatus,
-        new_status: newStatus,
-        reviewer_id: profile.id,
-        reviewer_name: profile.full_name ?? profile.email ?? null,
+        job_id: jobId,
+        action: 'unknown',
+        comment: comment || 'Marked as unknown by reviewer',
+        previous_status: 'proposals_ready',
+        new_status: 'unknown',
+        reviewer_id: profile?.id,
+        reviewer_name: profile?.display_name ?? profile?.email ?? null,
       });
     }
 
-    // Propagate if approved
-    if (action === 'approve') {
-      const topCandidate = candidateId
-        ? candidates.find((c) => c.id === candidateId) ?? candidates[0]
-        : candidates[0];
-      await propagateValidation(selectedJob.id, selectedJob.asset_id, topCandidate ?? null);
+    if (batchMode && currentBatchAsset) {
+      await supabase
+        .from('openai_pilot_job_assets')
+        .update({ review_status: 'unknown', reviewed_at: new Date().toISOString() })
+        .eq('id', currentBatchAsset.id);
+      setBatchAssets((prev) =>
+        prev.map((a) => a.id === currentBatchAsset.id ? { ...a, review_status: 'unknown' } : a)
+      );
+      fetchBatchStats();
     }
 
-    setLastUndo({ jobId: selectedJob.id, prevStatus });
-    const t = setTimeout(() => setLastUndo(null), 8000);
-    setUndoTimer(t);
-    setComment('');
-    setFieldDecisions({});
     setActionLoading(false);
-    fetchJobs();
-    fetchHistory(selectedJob.id);
-
-    // Auto-advance to next
-    setTimeout(() => goToNext(), 300);
+    goToNext();
   };
 
-  // ── Undo ─────────────────────────────────────────────────────────────────────
+  // ── Reject candidate ──────────────────────────────────────────────────────
+  const handleRejectCandidate = async (candidateId: string) => {
+    const supabase = createClient();
+    await supabase.from('sie_species_candidates').update({ is_selected: false }).eq('id', candidateId);
+    const jobId = effectiveJobId;
+    if (jobId) {
+      await supabase.from('sie_validation_history').insert({
+        job_id: jobId,
+        candidate_id: candidateId,
+        action: 'reject',
+        field_name: 'candidate',
+        comment: 'Candidate rejected by reviewer',
+        reviewer_id: profile?.id,
+        reviewer_name: profile?.display_name ?? profile?.email ?? null,
+      });
+    }
+    fetchCandidates(effectiveAssetId, effectiveResultId, effectiveJobId);
+  };
+
+  // ── Undo ──────────────────────────────────────────────────────────────────
   const handleUndo = async () => {
     if (!lastUndo || !profile) return;
     if (undoTimer) clearTimeout(undoTimer);
@@ -385,41 +1078,11 @@ export default function AIStudioValidationPage() {
       action: 'undo',
       comment: 'Undo last action',
       reviewer_id: profile.id,
-      reviewer_name: profile.full_name ?? profile.email ?? null,
+      reviewer_name: profile.display_name ?? profile.email ?? null,
     });
     setLastUndo(null);
     fetchJobs();
-  };
-
-  // ── Bulk Validation ──────────────────────────────────────────────────────────
-  const runBulkValidation = async () => {
-    if (!bulkAction || selectedJobIds.size === 0 || !profile) return;
-    setBulkProcessing(true);
-    const supabase = createClient();
-    const newStatus = bulkAction === 'approve' ? 'validated' : bulkAction === 'reject' ? 'rejected' : 'unknown';
-    const ids = Array.from(selectedJobIds);
-
-    for (const jobId of ids) {
-      await supabase.from('sie_jobs').update({
-        job_status: newStatus,
-        reviewed_at: new Date().toISOString(),
-        reviewer_id: profile.id,
-      }).eq('id', jobId);
-
-      await supabase.from('sie_validation_history').insert({
-        job_id: jobId,
-        action: bulkAction,
-        comment: `Bulk ${bulkAction} — ${ids.length} jobs`,
-        reviewer_id: profile.id,
-        reviewer_name: profile.full_name ?? profile.email ?? null,
-      });
-    }
-
-    setBulkProcessing(false);
-    setSelectedJobIds(new Set());
-    setBulkMode(false);
-    setBulkAction(null);
-    fetchJobs();
+    fetchValidationStats();
   };
 
   if (loading || !user || !profile) {
@@ -434,13 +1097,41 @@ export default function AIStudioValidationPage() {
     score >= 70 ? 'text-emerald-600' : score >= 40 ? 'text-amber-600' : 'text-red-500';
 
   const totalPages = Math.ceil(jobTotal / PAGE_SIZE);
+  const selectedCandidate = candidates.find((c) => c.id === selectedCandidateId) ?? candidates[0] ?? null;
+  const isMockEngine = !selectedCandidate?.is_real_ai;
+
+  // Batch navigation state
+  const batchTotal = filteredBatchAssets.length;
+  const batchDisplayPos = batchTotal > 0 ? batchPosition + 1 : 0;
+  const isFirstBatch = batchPosition === 0;
+  const isLastBatch = batchPosition >= batchTotal - 1;
+
+  // Legacy navigation state
+  const isFirstLegacy = currentJobIndex === 0 && jobPage === 0;
+  const isLastLegacy = currentJobIndex === jobs.length - 1 && (jobPage + 1) * PAGE_SIZE >= jobTotal;
+
+  const isPrevDisabled = batchMode ? isFirstBatch : isFirstLegacy;
+  const isNextDisabled = batchMode ? isLastBatch : isLastLegacy;
+
+  const hasActiveAsset = batchMode ? !!currentBatchAsset : !!selectedJob;
+  const currentAssetTitle = batchMode
+    ? (assetTitle ?? currentBatchAsset?.public_asset_id ?? '—')
+    : (assetTitle ?? selectedJob?.current_name ?? selectedJob?.public_asset_id ?? '—');
+  const currentPublicId = batchMode
+    ? currentBatchAsset?.public_asset_id ?? '—' : selectedJob?.public_asset_id ?? '—';
+  const currentReviewStatus = batchMode
+    ? currentBatchAsset?.review_status ?? 'unreviewed' : selectedJob?.job_status ?? '—';
+
+  // Pending count for selected batch
+  const pendingCount = batchAssets.filter((a) => a.review_status === 'unreviewed').length;
+  const isJobComplete = batchJob && pendingCount === 0 && batchAssets.length > 0;
 
   return (
     <div className="min-h-screen bg-background">
       <Header />
       <main className="max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
 
-        {/* Header */}
+        {/* ── Header ── */}
         <div className="flex items-start justify-between mb-4">
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 rounded-xl bg-blue-100 border border-blue-200 flex items-center justify-center">
@@ -452,46 +1143,133 @@ export default function AIStudioValidationPage() {
                 <span className="text-xs bg-blue-100 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full font-medium">Step 4</span>
               </div>
               <p className="text-sm text-muted-foreground mt-0.5">
-                Photo left · AI proposals right · Per-field Approve/Reject/Replace/Unknown · Auto-propagation
+                Preview left · AI proposals right · Per-field Approve/Edit/Reject/Unknown · CONFIRM IDENTIFICATION
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => setShowKeyboardHelp((v) => !v)}
-              className="p-2 rounded-lg hover:bg-muted transition-colors text-muted-foreground" title="Keyboard shortcuts (?)">
-              <Keyboard size={14} />
-            </button>
-            <button onClick={() => setBulkMode((v) => !v)}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${bulkMode ? 'bg-blue-100 border-blue-300 text-blue-700' : 'bg-muted/40 border-border text-muted-foreground hover:border-blue-300'}`}>
-              <CheckSquare size={12} />Bulk
-            </button>
+            <div className="text-right hidden sm:block">
+              <p className="text-xs text-muted-foreground">Progress</p>
+              <p className="text-sm font-bold text-foreground">
+                {validationStats.validated} / {validationStats.total}
+                <span className="text-xs font-normal text-muted-foreground ml-1">validated</span>
+              </p>
+            </div>
             <Link href="/admin/ai-studio" className="text-sm text-muted-foreground hover:text-foreground transition-colors">← AI Studio</Link>
           </div>
         </div>
 
-        {/* Keyboard shortcuts help */}
-        {showKeyboardHelp && (
-          <div className="bg-card border border-border rounded-xl p-4 mb-4 grid grid-cols-2 sm:grid-cols-4 gap-3">
-            {[
-              { key: '← →', desc: 'Previous / Next' },
-              { key: 'A', desc: 'Approve' },
-              { key: 'R', desc: 'Reject' },
-              { key: 'U', desc: 'Unknown' },
-              { key: 'Ctrl+Z', desc: 'Undo' },
-              { key: '?', desc: 'Toggle shortcuts' },
-            ].map(({ key, desc }) => (
-              <div key={key} className="flex items-center gap-2">
-                <kbd className="px-2 py-1 bg-muted border border-border rounded text-xs font-mono font-semibold">{key}</kbd>
-                <span className="text-xs text-muted-foreground">{desc}</span>
+        {/* ── Job Selector ── */}
+        {allBatchJobs.length > 0 && (
+          <div className="bg-card border border-border rounded-xl p-3 mb-4">
+            <div className="flex items-center gap-3 flex-wrap">
+              <div className="flex items-center gap-2">
+                <Brain size={14} className="text-violet-500" />
+                <span className="text-sm font-semibold text-foreground">Import Batch:</span>
               </div>
-            ))}
+              <div className="relative flex-1 min-w-[220px] max-w-xs">
+                <select
+                  value={selectedBatchJobId ?? ''}
+                  onChange={(e) => {
+                    setSelectedBatchJobId(e.target.value);
+                    setBatchPosition(0);
+                    setBatchFilter('unreviewed');
+                  }}
+                  className="w-full appearance-none bg-muted/40 border border-border rounded-lg px-3 py-1.5 pr-8 text-sm font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-violet-300 cursor-pointer"
+                >
+                  {allBatchJobs.map((job) => {
+                    const assetCount = job.total_assets ?? 0;
+                    const label = job.pilot_job_name ?? `Batch (${assetCount} assets)`;
+                    return (
+                      <option key={job.id} value={job.id}>
+                        {label}
+                      </option>
+                    );
+                  })}
+                </select>
+                <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+              </div>
+              {batchJob && (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground flex-wrap">
+                  <span className="bg-muted/60 border border-border px-2 py-0.5 rounded-full font-mono">
+                    {batchAssets.length} assets total
+                  </span>
+                  <span className={`px-2 py-0.5 rounded-full font-medium border ${pendingCount > 0 ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                    {pendingCount > 0 ? `${pendingCount} pending review` : '✓ All reviewed'}
+                  </span>
+                  <span className="bg-emerald-50 border border-emerald-200 text-emerald-700 px-2 py-0.5 rounded-full font-medium">
+                    {validationStats.validated} validated
+                  </span>
+                  {isJobComplete && (
+                    <span className="bg-blue-50 border border-blue-200 text-blue-700 px-2 py-0.5 rounded-full font-medium">
+                      Job complete — consultable only
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
-        {/* Undo banner */}
+        {/* ── Batch Job Banner ── */}
+        {batchJob && (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 mb-4">
+            <div className="flex items-center justify-between flex-wrap gap-2">
+              <div className="flex items-center gap-2">
+                <Brain size={14} className="text-emerald-600" />
+                <span className="text-sm font-semibold text-emerald-800">{batchJob.pilot_job_name ?? 'OpenAI Vision Pilot'}</span>
+                <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full font-semibold">
+                  REAL AI — OPENAI VISION
+                </span>
+                <span className="text-xs text-emerald-700 font-mono">
+                  {batchAssets.length} assets · {batchJob.ai_model ?? 'gpt-5-mini-2025-08-07'}
+                </span>
+              </div>
+              <div className="flex items-center gap-3 text-xs text-emerald-700">
+                <span>{validationStats.validated} validated</span>
+                <span>{validationStats.skipped} skipped</span>
+                <span>{pendingCount} remaining</span>
+                <button
+                  onClick={() => setBatchMode((v) => !v)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded-lg border text-xs font-medium transition-all ${batchMode ? 'bg-emerald-200 border-emerald-400 text-emerald-800' : 'bg-white border-emerald-300 text-emerald-700 hover:bg-emerald-100'}`}>
+                  <List size={11} />{batchMode ? 'Batch Mode ON' : 'Switch to Batch Mode'}
+                </button>
+              </div>
+            </div>
+
+            {/* Batch filter tabs */}
+            {batchMode && (
+              <div className="flex items-center gap-1 mt-2 flex-wrap">
+                {(['all', 'unreviewed', 'validated', 'skipped', 'unknown'] as const).map((f) => (
+                  <button
+                    key={f}
+                    onClick={() => { setBatchFilter(f); setBatchPosition(0); }}
+                    className={`text-xs px-2 py-0.5 rounded-full border font-medium transition-all capitalize ${batchFilter === f ? 'bg-emerald-600 text-white border-emerald-600' : 'bg-white border-emerald-200 text-emerald-700 hover:bg-emerald-50'}`}>
+                    {f} {f === 'all' ? `(${batchAssets.length})` :
+                         f === 'unreviewed' ? `(${batchAssets.filter((a) => a.review_status === 'unreviewed').length})` :
+                         f === 'validated' ? `(${validationStats.validated})` :
+                         f === 'skipped' ? `(${validationStats.skipped})` :
+                         `(${validationStats.unknown})`}
+                  </button>
+                ))}
+                <label className="flex items-center gap-1.5 ml-auto text-xs text-emerald-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={autoAdvance}
+                    onChange={(e) => setAutoAdvance(e.target.checked)}
+                    className="rounded border-emerald-300 text-emerald-600"
+                  />
+                  Auto-advance after confirmation
+                </label>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── Undo banner ── */}
         {lastUndo && (
           <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-4 flex items-center justify-between">
-            <p className="text-sm text-amber-800">Action recorded.</p>
+            <p className="text-sm text-amber-800">Identification confirmed.</p>
             <button onClick={handleUndo}
               className="flex items-center gap-1.5 text-sm font-semibold text-amber-700 hover:text-amber-900 transition-colors">
               <RotateCcw size={14} />Undo (Ctrl+Z)
@@ -499,30 +1277,97 @@ export default function AIStudioValidationPage() {
           </div>
         )}
 
-        {/* Bulk validation bar */}
-        {bulkMode && (
-          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-4">
-            <div className="flex items-center justify-between flex-wrap gap-3">
-              <div className="flex items-center gap-3">
-                <span className="text-sm font-semibold text-blue-800">
-                  Bulk Validation — {selectedJobIds.size} selected
-                </span>
-                <button onClick={() => setSelectedJobIds(new Set(jobs.map((j) => j.id)))}
-                  className="text-xs text-blue-600 underline">Select all</button>
-                <button onClick={() => setSelectedJobIds(new Set())}
-                  className="text-xs text-blue-600 underline">Clear</button>
+        {/* ── Confirm Success Banner ── */}
+        {confirmSuccess && (
+          <div className="bg-emerald-50 border border-emerald-300 rounded-xl p-3 mb-4 flex items-center gap-2">
+            <CheckCircle2 size={16} className="text-emerald-600 shrink-0" />
+            <p className="text-sm text-emerald-800 font-medium">{confirmSuccess}</p>
+          </div>
+        )}
+
+        {/* ── Confirm Error Banner ── */}
+        {confirmError && (
+          <div className="bg-red-50 border border-red-300 rounded-xl p-3 mb-4 flex items-center gap-2">
+            <AlertTriangle size={16} className="text-red-600 shrink-0" />
+            <p className="text-sm text-red-800">{confirmError}</p>
+          </div>
+        )}
+
+        {/* ── CONFIRM IDENTIFICATION Dialog ── */}
+        {confirmDialogOpen && hasActiveAsset && selectedCandidate && (
+          <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+            <div className="bg-card border border-border rounded-2xl p-6 max-w-lg w-full shadow-2xl max-h-[90vh] overflow-y-auto">
+              <div className="flex items-start gap-3 mb-4">
+                <CheckCircle2 size={20} className="text-emerald-500 shrink-0 mt-0.5" />
+                <div>
+                  <h3 className="text-base font-bold text-foreground">Confirm Identification</h3>
+                  <p className="text-sm text-muted-foreground mt-1">
+                    This will write a real transactional commit to asset_species, species table, search aliases, and species_names.
+                  </p>
+                </div>
               </div>
-              <div className="flex items-center gap-2">
-                {(['approve', 'reject', 'unknown'] as const).map((a) => (
-                  <button key={a} onClick={() => setBulkAction(a)}
-                    className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-all ${bulkAction === a ? ACTION_CONFIG[a].active : ACTION_CONFIG[a].bg} ${ACTION_CONFIG[a].color}`}>
-                    {a.charAt(0).toUpperCase() + a.slice(1)}
-                  </button>
-                ))}
-                <button onClick={runBulkValidation}
-                  disabled={!bulkAction || selectedJobIds.size === 0 || bulkProcessing}
-                  className="px-4 py-1.5 text-xs font-bold bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-all flex items-center gap-1.5">
-                  {bulkProcessing ? <><span className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />Processing...</> : <>Apply to {selectedJobIds.size}</>}
+
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-4 mb-4">
+                <p className="text-xs text-muted-foreground mb-1">Selected species:</p>
+                <p className="text-base font-bold text-foreground">{selectedCandidate.common_name}</p>
+                {selectedCandidate.scientific_name && (
+                  <p className="text-sm text-muted-foreground italic">{selectedCandidate.scientific_name}</p>
+                )}
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {selectedCandidate.family && (
+                    <span className="text-xs bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full">{selectedCandidate.family}</span>
+                  )}
+                  <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-mono">
+                    {selectedCandidate.ai_score}% confidence
+                  </span>
+                  <span className={`text-xs px-2 py-0.5 rounded-full font-mono ${selectedCandidate.is_real_ai ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                    {selectedCandidate.is_real_ai ? 'REAL AI — OPENAI VISION' : 'Mock Engine'}
+                  </span>
+                </div>
+              </div>
+
+              {Object.keys(fieldDecisions).length > 0 && (
+                <div className="mb-4">
+                  <p className="text-xs font-semibold text-foreground mb-2">Field decisions:</p>
+                  <div className="space-y-1">
+                    {Object.entries(fieldDecisions).map(([field, decision]) => (
+                      <div key={field} className="flex items-center justify-between text-xs">
+                        <span className="text-muted-foreground capitalize">{field.replace(/_/g, ' ')}</span>
+                        <span className={`px-1.5 py-0.5 rounded font-medium ${
+                          decision.action === 'approve' ? 'bg-emerald-100 text-emerald-700' :
+                          decision.action === 'reject' ? 'bg-red-100 text-red-700' :
+                          decision.action === 'edit' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
+                        }`}>
+                          {decision.action === 'edit' && editValues[field] ? `Edit: "${editValues[field]}"` : decision.action}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <p className="text-xs text-muted-foreground mb-4">
+                Writes: <strong>asset_species</strong> · <strong>species</strong> (dedup by scientific_name) ·
+                <strong> species_names</strong> · <strong>search_aliases</strong> · <strong>validated_metadata</strong> ·
+                job status → <strong>validated</strong>.
+                Asset will be immediately findable in Library by common name, scientific name, and aliases.
+              </p>
+
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setConfirmDialogOpen(false)}
+                  className="flex-1 px-4 py-2.5 text-sm font-medium border border-border rounded-xl hover:bg-muted transition-colors">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleConfirmIdentification}
+                  disabled={actionLoading}
+                  className="flex-1 px-4 py-2.5 text-sm font-bold bg-emerald-600 text-white rounded-xl hover:bg-emerald-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                  {actionLoading ? (
+                    <><Loader2 size={14} className="animate-spin" />Confirming...</>
+                  ) : (
+                    <><CheckCircle2 size={14} />CONFIRM IDENTIFICATION</>
+                  )}
                 </button>
               </div>
             </div>
@@ -531,38 +1376,75 @@ export default function AIStudioValidationPage() {
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
 
-          {/* ── Job list ── */}
+          {/* ── Left panel: batch asset list OR legacy job list ── */}
           <div className="lg:col-span-1">
             <div className="bg-card border border-border rounded-xl overflow-hidden">
               <div className="px-4 py-3 border-b border-border">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-semibold text-foreground">Jobs ({jobTotal})</span>
-                  <div className="flex items-center gap-1">
-                    <button onClick={() => setJobPage((p) => Math.max(0, p - 1))} disabled={jobPage === 0}
-                      className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
-                      <ChevronLeft size={14} />
-                    </button>
-                    <span className="text-xs text-muted-foreground">{jobPage + 1}/{totalPages || 1}</span>
-                    <button onClick={() => setJobPage((p) => p + 1)} disabled={(jobPage + 1) * PAGE_SIZE >= jobTotal}
-                      className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
-                      <ChevronRight size={14} />
-                    </button>
-                  </div>
-                </div>
-                <select value={jobStatusFilter} onChange={(e) => { setJobStatusFilter(e.target.value); setJobPage(0); }}
-                  className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none">
-                  <option value="">All statuses</option>
-                  <option value="proposals_ready">Proposals Ready</option>
-                  <option value="under_review">Under Review</option>
-                  <option value="validated">Validated</option>
-                  <option value="rejected">Rejected</option>
-                  <option value="unknown">Unknown</option>
-                </select>
+                {batchMode && batchJob ? (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-foreground">
+                        Batch ({batchTotal})
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {batchDisplayPos}/{batchTotal}
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground truncate">{batchJob.pilot_job_name}</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-semibold text-foreground">Jobs ({jobTotal})</span>
+                      <div className="flex items-center gap-1">
+                        <button onClick={() => setJobPage((p) => Math.max(0, p - 1))} disabled={jobPage === 0}
+                          className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span className="text-xs text-muted-foreground">{jobPage + 1}/{totalPages || 1}</span>
+                        <button onClick={() => setJobPage((p) => p + 1)} disabled={(jobPage + 1) * PAGE_SIZE >= jobTotal}
+                          className="p-1 rounded hover:bg-muted disabled:opacity-30 transition-colors">
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+                    <select value={jobStatusFilter} onChange={(e) => { setJobStatusFilter(e.target.value); setJobPage(0); }}
+                      className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none">
+                      <option value="">All statuses</option>
+                      <option value="proposals_ready">Proposals Ready</option>
+                      <option value="under_review">Under Review</option>
+                      <option value="validated">Validated</option>
+                      <option value="partially_validated">Partially Validated</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="unknown">Unknown</option>
+                    </select>
+                  </>
+                )}
               </div>
 
-              {fetching ? (
+              {fetching && !batchMode ? (
                 <div className="flex items-center justify-center py-8">
                   <div className="w-5 h-5 border-2 border-border border-t-blue-500 rounded-full animate-spin" />
+                </div>
+              ) : batchMode ? (
+                <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
+                  {filteredBatchAssets.map((ba, idx) => (
+                    <div key={ba.id}
+                      className={`flex items-start gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer ${idx === batchPosition ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
+                      onClick={() => setBatchPosition(idx)}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-xs font-medium text-foreground truncate">
+                          {ba.public_asset_id}
+                        </p>
+                        <div className="flex items-center gap-1.5 mt-1">
+                          <span className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${REVIEW_STATUS_COLORS[ba.review_status] ?? 'bg-gray-100 text-gray-600'}`}>
+                            {ba.review_status}
+                          </span>
+                          <span className="text-[10px] text-muted-foreground">#{ba.review_position}</span>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               ) : jobs.length === 0 ? (
                 <div className="py-8 text-center px-4">
@@ -577,18 +1459,6 @@ export default function AIStudioValidationPage() {
                     <div key={job.id}
                       className={`flex items-start gap-2 px-3 py-2.5 hover:bg-muted/50 transition-colors cursor-pointer ${selectedJob?.id === job.id ? 'bg-blue-50 border-l-2 border-l-blue-500' : ''}`}
                       onClick={() => setSelectedJob(job)}>
-                      {bulkMode && (
-                        <input type="checkbox" checked={selectedJobIds.has(job.id)}
-                          onChange={(e) => {
-                            e.stopPropagation();
-                            setSelectedJobIds((prev) => {
-                              const next = new Set(prev);
-                              if (next.has(job.id)) next.delete(job.id); else next.add(job.id);
-                              return next;
-                            });
-                          }}
-                          className="mt-1 rounded border-border text-blue-600 shrink-0" />
-                      )}
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium text-foreground truncate">
                           {job.current_name ?? job.public_asset_id ?? job.id.slice(0, 8)}
@@ -613,31 +1483,47 @@ export default function AIStudioValidationPage() {
 
           {/* ── Main validation panel ── */}
           <div className="lg:col-span-3">
-            {!selectedJob ? (
+            {!hasActiveAsset ? (
               <div className="bg-card border border-border rounded-xl flex items-center justify-center py-24 text-center">
                 <div>
                   <Target size={32} className="text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">Select a job to start validation</p>
-                  <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
-                    Launch AI identification first
-                  </Link>
+                  <p className="text-sm text-muted-foreground">
+                    {batchMode
+                      ? (batchFilter === 'unreviewed' && batchAssets.filter((a) => a.review_status === 'unreviewed').length === 0
+                          ? 'All assets in this batch have been reviewed!' :'No assets in this filter')
+                      : 'Select a job to start validation'}
+                  </p>
+                  {batchMode && batchFilter === 'unreviewed' && batchAssets.filter((a) => a.review_status === 'unreviewed').length === 0 && (
+                    <button
+                      onClick={() => setBatchFilter('all')}
+                      className="text-xs text-blue-600 underline mt-2 block mx-auto">
+                      View all assets (including validated)
+                    </button>
+                  )}
+                  {!batchMode && (
+                    <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
+                      Launch AI identification first
+                    </Link>
+                  )}
                 </div>
               </div>
             ) : (
               <div>
                 {/* Navigation bar */}
                 <div className="flex items-center justify-between mb-4 bg-card border border-border rounded-xl px-4 py-2.5">
-                  <button onClick={goToPrev} disabled={currentJobIndex === 0 && jobPage === 0}
+                  <button onClick={goToPrev} disabled={isPrevDisabled}
                     className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors">
                     <ChevronLeft size={16} />Previous
                   </button>
                   <div className="text-center">
                     <p className="text-xs font-semibold text-foreground">
-                      {currentJobIndex + 1 + jobPage * PAGE_SIZE} / {jobTotal}
+                      {batchMode
+                        ? `${batchDisplayPos} / ${batchTotal}`
+                        : `${currentJobIndex + 1 + jobPage * PAGE_SIZE} / ${jobTotal}`}
                     </p>
-                    <p className="text-[10px] text-muted-foreground">Use ← → keys</p>
+                    <p className="text-[10px] text-muted-foreground">← → keys to navigate</p>
                   </div>
-                  <button onClick={goToNext} disabled={currentJobIndex === jobs.length - 1 && (jobPage + 1) * PAGE_SIZE >= jobTotal}
+                  <button onClick={goToNext} disabled={isNextDisabled}
                     className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground disabled:opacity-30 transition-colors">
                     Next<ChevronRight size={16} />
                   </button>
@@ -645,106 +1531,82 @@ export default function AIStudioValidationPage() {
 
                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
 
-                  {/* LEFT: Photo + job info + field decisions */}
+                  {/* ── LEFT: Asset preview + info + field decisions ── */}
                   <div className="space-y-4">
 
-                    {/* Photo card */}
+                    {/* Asset preview card */}
                     <div className="bg-card border border-border rounded-xl overflow-hidden">
-                      <div className="px-4 py-3 border-b border-border flex items-center justify-between">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground truncate">
-                            {selectedJob.current_name ?? selectedJob.public_asset_id ?? selectedJob.id.slice(0, 12)}
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-0.5">{selectedJob.current_category ?? 'Unknown category'}</p>
-                        </div>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${JOB_STATUS_COLORS[selectedJob.job_status] ?? 'bg-gray-100 text-gray-600'}`}>
-                          {selectedJob.job_status}
-                        </span>
-                      </div>
-                      {selectedJob.image_url ? (
-                        <img src={selectedJob.image_url} alt={selectedJob.current_name ?? 'Asset'}
-                          className="w-full aspect-square object-cover" />
-                      ) : (
-                        <div className="aspect-square bg-muted flex items-center justify-center">
-                          <Fish size={48} className="text-muted-foreground" />
-                        </div>
-                      )}
-                      <div className="p-4 grid grid-cols-2 gap-2 text-xs">
-                        {[
-                          { label: 'Vision', value: selectedJob.vision_confidence },
-                          { label: 'Species', value: selectedJob.species_confidence },
-                          { label: 'Commercial', value: selectedJob.commercial_confidence },
-                          { label: 'Metadata', value: selectedJob.metadata_confidence },
-                        ].map(({ label, value }) => value != null && (
-                          <div key={label} className="flex items-center justify-between">
-                            <span className="text-muted-foreground">{label}</span>
-                            <span className={`font-mono font-semibold ${confidenceColor(value)}`}>{value}%</span>
+                      <div className="px-4 py-3 border-b border-border">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground truncate">{currentAssetTitle}</p>
+                            <p className="text-xs text-muted-foreground font-mono mt-0.5">{currentPublicId}</p>
                           </div>
-                        ))}
-                        {selectedJob.global_confidence != null && (
-                          <div className="col-span-2 flex items-center justify-between pt-1 border-t border-border">
-                            <span className="text-muted-foreground font-medium">Global</span>
-                            <span className={`font-mono font-bold text-sm ${confidenceColor(selectedJob.global_confidence)}`}>
-                              {selectedJob.global_confidence}%
+                          <div className="flex flex-col items-end gap-1 shrink-0">
+                            <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${REVIEW_STATUS_COLORS[currentReviewStatus] ?? JOB_STATUS_COLORS[currentReviewStatus] ?? 'bg-gray-100 text-gray-600'}`}>
+                              {currentReviewStatus}
                             </span>
+                            {assetStatus && (
+                              <span className="text-[10px] text-muted-foreground">Asset: {assetStatus}</span>
+                            )}
                           </div>
-                        )}
+                        </div>
+                      </div>
+
+                      <AssetPreview preview={assetPreview} />
+
+                      {/* Provider mode indicator */}
+                      <div className="px-4 py-3">
+                        <span className={`text-[10px] font-mono px-2 py-0.5 rounded-full border ${isMockEngine ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'}`}>
+                          provider_mode = {isMockEngine ? 'mock' : 'real_ai'}
+                        </span>
                       </div>
                     </div>
 
                     {/* Per-field decisions */}
-                    {candidates.length > 0 && (
+                    {selectedCandidate && (
                       <div className="bg-card border border-border rounded-xl p-4">
                         <h4 className="text-xs font-semibold text-foreground mb-3 flex items-center gap-1.5">
                           <Target size={12} />Per-Field Decisions
+                          <span className="text-[10px] text-muted-foreground ml-auto">Approve · Edit · Reject · Unknown</span>
                         </h4>
                         <div className="space-y-2">
                           {VALIDATION_FIELDS.map(({ key, label, icon: FieldIcon }) => {
-                            const topC = candidates[0];
-                            const fieldValue = key === 'species' ? topC?.common_name
-                              : key === 'scientific_name' ? topC?.scientific_name
-                              : key === 'commercial_name' ? topC?.commercial_name
-                              : key === 'family' ? topC?.family
-                              : key === 'genus' ? topC?.genus
-                              : key === 'category' ? topC?.category_candidate
-                              : key === 'description' ? topC?.description_candidate
-                              : key === 'packaging' ? topC?.packaging_candidate
-                              : key === 'product_type' ? topC?.product_form
-                              : key === 'keywords' ? topC?.keywords_candidate?.slice(0, 3).join(', ')
-                              : key === 'confidence' ? `${topC?.ai_score}%`
-                              : null;
-
+                            const fieldValue = getFieldValue(key, selectedCandidate);
                             if (!fieldValue) return null;
                             const decision = fieldDecisions[key];
                             const FieldIconComponent = FieldIcon as React.ElementType;
 
                             return (
-                              <div key={key} className="border border-border rounded-lg p-2">
-                                <div className="flex items-center justify-between mb-1.5">
-                                  <span className="text-xs font-medium text-foreground flex items-center gap-1">
+                              <div key={key} className="border border-border rounded-lg p-2.5">
+                                <div className="flex items-start justify-between mb-1.5 gap-2">
+                                  <span className="text-xs font-medium text-foreground flex items-center gap-1 shrink-0">
                                     <FieldIconComponent size={10} className="text-muted-foreground" />{label}
                                   </span>
-                                  <span className="text-[10px] text-muted-foreground truncate max-w-[100px]">{fieldValue}</span>
+                                  <span className="text-[10px] text-muted-foreground text-right truncate max-w-[140px]">
+                                    {decision?.action === 'edit' && editValues[key] ? editValues[key] : fieldValue}
+                                  </span>
                                 </div>
                                 <div className="flex gap-1">
-                                  {(['approve', 'reject', 'replace', 'unknown'] as const).map((a) => {
+                                  {(['approve', 'edit', 'reject', 'unknown'] as const).map((a) => {
                                     const cfg = ACTION_CONFIG[a];
                                     const AIcon = cfg.icon;
                                     const isActive = decision?.action === a;
                                     return (
                                       <button key={a}
                                         onClick={() => setFieldDecisions((prev) => ({ ...prev, [key]: { action: a } }))}
+                                        title={cfg.label}
                                         className={`flex-1 flex items-center justify-center py-1 rounded border text-[10px] font-medium transition-all ${isActive ? cfg.active : cfg.bg} ${cfg.color}`}>
                                         <AIcon size={9} />
                                       </button>
                                     );
                                   })}
                                 </div>
-                                {decision?.action === 'replace' && (
+                                {decision?.action === 'edit' && (
                                   <input type="text"
-                                    placeholder={`Replace ${label}...`}
-                                    value={replaceValues[key] ?? ''}
-                                    onChange={(e) => setReplaceValues((prev) => ({ ...prev, [key]: e.target.value }))}
+                                    placeholder={`Edit ${label}...`}
+                                    value={editValues[key] ?? ''}
+                                    onChange={(e) => setEditValues((prev) => ({ ...prev, [key]: e.target.value }))}
                                     className="mt-1.5 w-full text-xs bg-muted/40 border border-border rounded px-2 py-1 focus:outline-none focus:ring-1 focus:ring-blue-300" />
                                 )}
                               </div>
@@ -767,22 +1629,32 @@ export default function AIStudioValidationPage() {
                         className="w-full bg-muted/40 border border-border rounded-lg px-3 py-2 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-blue-300" />
                     </div>
 
-                    {/* Global actions */}
-                    <div className="grid grid-cols-3 gap-2">
-                      {(['approve', 'reject', 'unknown'] as const).map((action) => {
-                        const cfg = ACTION_CONFIG[action];
-                        const AIcon = cfg.icon;
-                        const keyHint = action === 'approve' ? 'A' : action === 'reject' ? 'R' : 'U';
-                        return (
-                          <button key={action} onClick={() => handleValidate(action)}
-                            disabled={actionLoading}
-                            className={`flex flex-col items-center gap-1.5 p-3 rounded-xl border text-xs font-semibold transition-all disabled:opacity-50 ${cfg.bg} ${cfg.color}`}>
-                            <AIcon size={16} />
-                            <span>{cfg.label}</span>
-                            <kbd className="text-[9px] bg-white/60 border border-current/20 rounded px-1">{keyHint}</kbd>
-                          </button>
-                        );
-                      })}
+                    {/* Action buttons */}
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setConfirmDialogOpen(true)}
+                        disabled={actionLoading || !selectedCandidate || currentReviewStatus === 'validated'}
+                        className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-emerald-600 to-teal-600 text-white font-bold px-6 py-3.5 rounded-xl hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-sm text-sm">
+                        {actionLoading ? (
+                          <><Loader2 size={16} className="animate-spin" />Confirming...</>
+                        ) : currentReviewStatus === 'validated' ? (
+                          <><CheckCircle2 size={16} />Already Validated</>
+                        ) : (
+                          <><CheckCircle2 size={16} />CONFIRM IDENTIFICATION</>
+                        )}
+                      </button>
+
+                      <div className="grid grid-cols-2 gap-2">
+                        <button onClick={handleSkip}
+                          className="flex items-center justify-center gap-1.5 py-2 text-xs font-medium bg-muted/40 border border-border rounded-xl hover:bg-muted transition-colors text-muted-foreground">
+                          <ChevronRight size={13} />Skip
+                        </button>
+                        <button onClick={handleMarkUnknown}
+                          disabled={actionLoading}
+                          className="flex items-center justify-center gap-1.5 py-2 text-xs font-medium bg-gray-50 border border-gray-200 text-gray-600 rounded-xl hover:bg-gray-100 transition-colors disabled:opacity-50">
+                          <HelpCircle size={13} />Mark Unknown
+                        </button>
+                      </div>
                     </div>
 
                     {/* Propagation status */}
@@ -812,12 +1684,16 @@ export default function AIStudioValidationPage() {
                     {history.length > 0 && (
                       <div className="bg-card border border-border rounded-xl p-4">
                         <h4 className="text-xs font-semibold text-foreground flex items-center gap-1.5 mb-3">
-                          <Clock size={12} />History
+                          <Clock size={12} />Validation History
                         </h4>
                         <div className="space-y-1.5 max-h-36 overflow-y-auto">
                           {history.map((h) => (
                             <div key={h.id} className="flex items-start gap-2 text-xs">
-                              <span className={`px-1.5 py-0.5 rounded font-medium shrink-0 ${h.action === 'approve' ? 'bg-emerald-100 text-emerald-700' : h.action === 'reject' ? 'bg-red-100 text-red-700' : h.action === 'undo' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'}`}>
+                              <span className={`px-1.5 py-0.5 rounded font-medium shrink-0 ${
+                                h.action === 'human_validated' || h.action === 'approve' ? 'bg-emerald-100 text-emerald-700' :
+                                h.action === 'reject' ? 'bg-red-100 text-red-700' :
+                                h.action === 'undo' ? 'bg-amber-100 text-amber-700' : 'bg-gray-100 text-gray-600'
+                              }`}>
                                 {h.action}
                               </span>
                               {h.field_name && <span className="text-violet-600 font-medium">{h.field_name}</span>}
@@ -830,154 +1706,299 @@ export default function AIStudioValidationPage() {
                     )}
                   </div>
 
-                  {/* RIGHT: AI Proposals */}
+                  {/* ── RIGHT: Top AI Proposals ── */}
                   <div className="space-y-3">
                     <div className="flex items-center gap-2">
                       <Brain size={14} className="text-violet-500" />
-                      <h3 className="text-sm font-semibold text-foreground">Top 5 AI Proposals</h3>
-                      <span className="text-xs text-muted-foreground ml-auto">AI suggestion — human validation required</span>
+                      <h3 className="text-sm font-semibold text-foreground">Top AI Proposals</h3>
+                      {candidates.some((c) => c.is_real_ai) ? (
+                        <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-2 py-0.5 rounded-full ml-auto font-semibold">
+                          REAL AI — OPENAI VISION
+                        </span>
+                      ) : (
+                        <span className="text-xs bg-amber-100 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full ml-auto font-medium">
+                          Mock Engine v2
+                        </span>
+                      )}
                     </div>
 
+                    {selectedCandidate && (
+                      <div className={`p-2.5 rounded-lg border text-xs flex items-center gap-2 ${
+                        selectedCandidate.ai_score < 40
+                          ? 'bg-red-50 border-red-200 text-red-700'
+                          : selectedCandidate.ai_score < 70
+                          ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-emerald-50 border-emerald-200 text-emerald-700'
+                      }`}>
+                        <AlertTriangle size={12} className="shrink-0" />
+                        {selectedCandidate.ai_score < 40
+                          ? 'Low confidence — identification uncertain'
+                          : selectedCandidate.ai_score < 70
+                          ? 'Medium confidence — review carefully' : 'Higher confidence — human review still required'}
+                      </div>
+                    )}
+
                     {candidates.length === 0 ? (
-                      <div className="bg-card border border-border rounded-xl p-8 text-center">
-                        <AlertTriangle size={24} className="text-amber-500 mx-auto mb-2" />
-                        <p className="text-sm text-muted-foreground">No proposals available</p>
-                        <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-1 block">
-                          Launch identification
+                      <div className="bg-card border border-border rounded-xl p-6 text-center">
+                        <AlertTriangle size={24} className="text-amber-500 mx-auto mb-3" />
+                        <p className="text-sm font-semibold text-foreground mb-2">No proposals found</p>
+                        <div className="text-left bg-muted/40 border border-border rounded-lg p-3 text-xs space-y-1.5">
+                          <p className="text-muted-foreground">
+                            <span className="font-mono text-foreground">asset_id:</span> {effectiveAssetId ?? '— (null)'}
+                          </p>
+                          <p className="text-muted-foreground">
+                            <span className="font-mono text-foreground">result_id:</span> {effectiveResultId ?? '— (null)'}
+                          </p>
+                          <p className="text-muted-foreground">
+                            Import the OpenAI pilot CSV files to generate proposals.
+                          </p>
+                        </div>
+                        <Link href="/admin/ai-studio/import-real-ai"
+                          className="inline-flex items-center gap-1.5 text-xs font-medium text-blue-600 hover:text-blue-700 underline mt-3">
+                          Import Real AI Results →
                         </Link>
                       </div>
                     ) : (
-                      candidates.map((c) => (
-                        <div key={c.id}
-                          className={`bg-card border rounded-xl p-4 transition-all ${c.is_validated ? 'border-emerald-400 bg-emerald-50/30' : c.rank === 1 ? 'border-violet-200 bg-violet-50/20' : 'border-border'}`}>
+                      candidates.map((c) => {
+                        const isSelected = c.id === selectedCandidateId;
+                        return (
+                          <div key={c.id}
+                            className={`bg-card border rounded-xl p-4 transition-all cursor-pointer ${
+                              c.is_validated ? 'border-emerald-400 bg-emerald-50/30' : isSelected ? 'border-violet-400 bg-violet-50/20 ring-1 ring-violet-300' :
+                              c.rank === 1 ? 'border-violet-200' : 'border-border'
+                            }`}
+                            onClick={() => setSelectedCandidateId(c.id)}>
 
-                          {/* Candidate header */}
-                          <div className="flex items-start justify-between gap-2 mb-3">
-                            <div className="flex items-center gap-2">
-                              <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${c.rank === 1 ? 'bg-violet-100 text-violet-700' : 'bg-muted text-muted-foreground'}`}>
-                                {c.rank}
-                              </span>
-                              <div>
-                                <p className="text-sm font-semibold text-foreground">{c.common_name}</p>
-                                {c.scientific_name && (
-                                  <p className="text-xs text-muted-foreground italic">{c.scientific_name}</p>
-                                )}
+                            <div className="flex items-start justify-between gap-2 mb-3">
+                              <div className="flex items-center gap-2">
+                                <span className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${
+                                  isSelected ? 'bg-violet-600 text-white' :
+                                  c.rank === 1 ? 'bg-violet-100 text-violet-700' : 'bg-muted text-muted-foreground'
+                                }`}>
+                                  {c.rank}
+                                </span>
+                                <div>
+                                  <p className="text-sm font-semibold text-foreground">{c.common_name}</p>
+                                  {c.scientific_name && (
+                                    <p className="text-xs text-muted-foreground italic">{c.scientific_name}</p>
+                                  )}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <p className={`text-sm font-bold font-mono ${confidenceColor(c.ai_score)}`}>{c.ai_score}%</p>
+                                <p className="text-[10px] text-muted-foreground">confidence</p>
                               </div>
                             </div>
-                            <div className="text-right shrink-0">
-                              <p className={`text-sm font-bold font-mono ${confidenceColor(c.ai_score)}`}>{c.ai_score}%</p>
-                              <p className="text-[10px] text-muted-foreground">confidence</p>
-                            </div>
-                          </div>
 
-                          {/* Taxonomy tags */}
-                          <div className="flex flex-wrap gap-1.5 mb-3">
-                            {c.family && (
-                              <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <Fish size={9} />Family: {c.family}
-                              </span>
-                            )}
-                            {c.genus && (
-                              <span className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded-full">
-                                Genus: {c.genus}
-                              </span>
-                            )}
-                            {c.product_form && (
-                              <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <Package size={9} />{c.product_form}
-                              </span>
-                            )}
-                            {c.commercial_name && c.commercial_name !== c.common_name && (
-                              <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full">
-                                {c.commercial_name}
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Description */}
-                          {c.description_candidate && (
-                            <p className="text-xs text-muted-foreground mb-3 line-clamp-2">{c.description_candidate}</p>
-                          )}
-
-                          {/* Keywords */}
-                          {c.keywords_candidate && c.keywords_candidate.length > 0 && (
-                            <div className="flex flex-wrap gap-1 mb-3">
-                              {c.keywords_candidate.slice(0, 5).map((kw, i) => (
-                                <span key={i} className="text-[10px] bg-muted text-muted-foreground px-1.5 py-0.5 rounded">
-                                  {kw}
+                            <div className="flex flex-wrap gap-1.5 mb-3">
+                              {c.is_real_ai ? (
+                                <span className="text-[10px] bg-emerald-50 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded-full font-semibold">
+                                  ✓ REAL AI — OPENAI VISION
                                 </span>
-                              ))}
+                              ) : (
+                                <span className="text-[10px] bg-amber-50 text-amber-700 border border-amber-200 px-1.5 py-0.5 rounded-full font-mono">
+                                  ⚠ Mock Engine
+                                </span>
+                              )}
+                              {c.family && (
+                                <span className="text-xs bg-blue-50 text-blue-700 border border-blue-200 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <Fish size={9} />Family: {c.family}
+                                </span>
+                              )}
+                              {c.genus && (
+                                <span className="text-xs bg-teal-50 text-teal-700 border border-teal-200 px-2 py-0.5 rounded-full">
+                                  Genus: {c.genus}
+                                </span>
+                              )}
+                              {(c.order_name || c.biological_order) && (
+                                <span className="text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-2 py-0.5 rounded-full">
+                                  Order: {c.order_name ?? c.biological_order}
+                                </span>
+                              )}
                             </div>
-                          )}
 
-                          {/* Reasons */}
-                          {c.main_reasons && c.main_reasons.length > 0 && (
-                            <div className="mb-3">
-                              <p className="text-xs text-muted-foreground font-medium mb-1">Why this proposal:</p>
-                              <ul className="space-y-0.5">
-                                {c.main_reasons.slice(0, 3).map((r, i) => (
-                                  <li key={i} className="text-xs text-foreground flex items-start gap-1.5">
-                                    <Star size={9} className="text-violet-400 shrink-0 mt-0.5" />{r}
-                                  </li>
-                                ))}
-                              </ul>
+                            {c.is_real_ai && c.visual_evidence && c.visual_evidence.length > 0 && (
+                              <div className="mb-3">
+                                <p className="text-xs text-muted-foreground font-medium mb-1">Visual evidence:</p>
+                                <ul className="space-y-0.5">
+                                  {c.visual_evidence.slice(0, 3).map((ev, i) => (
+                                    <li key={i} className="text-xs text-foreground flex items-start gap-1.5">
+                                      <Eye size={9} className="text-emerald-500 shrink-0 mt-0.5" />{ev}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {c.is_real_ai && c.identification_limits && c.identification_limits.length > 0 && (
+                              <div className="mb-3 p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                                <p className="text-xs text-amber-700 font-medium mb-1">Identification limits:</p>
+                                <ul className="space-y-0.5">
+                                  {c.identification_limits.slice(0, 2).map((lim, i) => (
+                                    <li key={i} className="text-xs text-amber-700 flex items-start gap-1.5">
+                                      <AlertTriangle size={9} className="shrink-0 mt-0.5" />{lim}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            {c.main_reasons && c.main_reasons.length > 0 && (
+                              <div className="mb-3">
+                                <p className="text-xs text-muted-foreground font-medium mb-1">Why this proposal:</p>
+                                <ul className="space-y-0.5">
+                                  {c.main_reasons.slice(0, 3).map((r, i) => (
+                                    <li key={i} className="text-xs text-foreground flex items-start gap-1.5">
+                                      <Star size={9} className="text-violet-400 shrink-0 mt-0.5" />{r}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+
+                            <div className="flex items-center gap-2 mb-3">
+                              <span className="text-xs text-muted-foreground shrink-0">Similarity:</span>
+                              <div className="flex-1 bg-muted rounded-full h-1.5">
+                                <div className="bg-gradient-to-r from-violet-400 to-blue-400 h-1.5 rounded-full"
+                                  style={{ width: `${c.similarity_score}%` }} />
+                              </div>
+                              <span className="text-xs font-mono text-muted-foreground shrink-0">{c.similarity_score}%</span>
                             </div>
-                          )}
 
-                          {/* Similarity bar */}
-                          <div className="flex items-center gap-2 mb-3">
-                            <span className="text-xs text-muted-foreground shrink-0">Similarity:</span>
-                            <div className="flex-1 bg-muted rounded-full h-1.5">
-                              <div className="bg-gradient-to-r from-violet-400 to-blue-400 h-1.5 rounded-full"
-                                style={{ width: `${c.similarity_score}%` }} />
-                            </div>
-                            <span className="text-xs font-mono text-muted-foreground shrink-0">{c.similarity_score}%</span>
-                          </div>
-
-                          {/* Per-candidate actions */}
-                          <div className="flex gap-1.5">
-                            {(['approve', 'reject', 'replace', 'unknown'] as const).map((action) => {
-                              const cfg = ACTION_CONFIG[action];
-                              const AIcon = cfg.icon;
-                              return (
-                                <button key={action}
-                                  onClick={() => {
-                                    if (action === 'approve') handleValidate('approve', c.id);
-                                    else if (action === 'reject') handleValidate('reject', c.id);
-                                    else if (action === 'unknown') handleValidate('unknown', c.id);
-                                  }}
-                                  disabled={actionLoading}
-                                  className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-xs font-medium transition-all disabled:opacity-50 ${cfg.bg} ${cfg.color}`}>
-                                  <AIcon size={11} />
-                                  <span className="hidden sm:inline">{cfg.label}</span>
+                            <div className="flex gap-1.5">
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setSelectedCandidateId(c.id);
+                                  if (c.is_real_ai) { fetchPilotMetadata(c.id); setShowPilotMetadata(true); }
+                                }}
+                                className={`flex-1 flex items-center justify-center gap-1 py-1.5 rounded-lg border text-xs font-medium transition-all ${
+                                  isSelected
+                                    ? 'bg-violet-100 border-violet-400 text-violet-700 ring-1 ring-violet-300'
+                                    : 'bg-muted/40 border-border text-muted-foreground hover:border-violet-300 hover:bg-violet-50'
+                                }`}>
+                                <Eye size={11} />
+                                {isSelected ? 'Selected' : 'Select this species'}
+                              </button>
+                              {c.is_real_ai && (
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); fetchPilotMetadata(c.id); setShowPilotMetadata(true); }}
+                                  className="flex items-center justify-center gap-1 py-1.5 px-2 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 text-xs font-medium hover:bg-emerald-100 transition-all">
+                                  <Tag size={11} />Metadata
                                 </button>
-                              );
-                            })}
-                          </div>
-
-                          {/* Validated badge */}
-                          {c.is_validated && (
-                            <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
-                              <CheckCircle2 size={12} />Validated — propagated to all targets
+                              )}
+                              <button
+                                onClick={(e) => { e.stopPropagation(); handleRejectCandidate(c.id); }}
+                                className="flex items-center justify-center gap-1 py-1.5 px-3 rounded-lg border border-red-200 bg-red-50 text-red-600 text-xs font-medium hover:bg-red-100 transition-all">
+                                <XCircle size={11} />Reject
+                              </button>
                             </div>
-                          )}
-                        </div>
-                      ))
+
+                            {c.is_validated && (
+                              <div className="mt-2 flex items-center gap-1.5 text-xs text-emerald-600 font-medium">
+                                <CheckCircle2 size={12} />Validated — propagated to all targets
+                              </div>
+                            )}
+                            {isSelected && !c.is_validated && (
+                              <div className="mt-2 flex items-center gap-1.5 text-xs text-violet-600 font-medium">
+                                <Target size={12} />Selected for confirmation
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })
                     )}
 
                     {/* Propagation info */}
                     <div className="bg-muted/30 border border-border rounded-xl p-3">
                       <p className="text-xs font-semibold text-foreground mb-2 flex items-center gap-1.5">
-                        <ArrowRight size={11} className="text-violet-500" />On Approval — Auto-propagates to:
+                        <ArrowRight size={11} className="text-violet-500" />After CONFIRM — writes to:
                       </p>
                       <div className="flex flex-wrap gap-1.5">
-                        {PROPAGATION_TARGETS.map(({ key, label }) => (
-                          <span key={key} className="text-[10px] bg-card border border-border text-muted-foreground px-2 py-0.5 rounded-full">
-                            {label}
-                          </span>
+                        {['asset_species', 'species (dedup)', 'species_names', 'search_aliases', 'validated_metadata', 'Library'].map((t) => (
+                          <span key={t} className="text-[10px] bg-card border border-border text-muted-foreground px-2 py-0.5 rounded-full">{t}</span>
                         ))}
                       </div>
+                      <p className="text-[10px] text-muted-foreground mt-2">
+                        Only approved fields are propagated. Asset immediately findable in Library by common name, scientific name, and aliases.
+                      </p>
                     </div>
+
+                    {/* OpenAI Pilot Candidate Metadata Panel */}
+                    {showPilotMetadata && pilotMetadata && (
+                      <div className="bg-card border border-emerald-200 rounded-xl p-4">
+                        <div className="flex items-center justify-between mb-3">
+                          <h4 className="text-sm font-semibold text-foreground flex items-center gap-2">
+                            <Tag size={14} className="text-emerald-500" />
+                            CANDIDATE METADATA
+                            <span className="text-xs bg-emerald-100 text-emerald-700 border border-emerald-200 px-1.5 py-0.5 rounded font-semibold">
+                              REAL AI — OPENAI VISION
+                            </span>
+                          </h4>
+                          <button onClick={() => setShowPilotMetadata(false)} className="text-muted-foreground hover:text-foreground">
+                            <XCircle size={14} />
+                          </button>
+                        </div>
+
+                        <div className="space-y-2 text-xs">
+                          {[
+                            { label: 'Species', value: pilotMetadata.species_name },
+                            { label: 'Scientific Name', value: pilotMetadata.scientific_name },
+                            { label: 'Family', value: pilotMetadata.family },
+                            { label: 'Genus', value: pilotMetadata.genus },
+                            { label: 'Biological Order', value: pilotMetadata.biological_order },
+                            { label: 'Commercial Names', value: pilotMetadata.commercial_names?.join(', ') },
+                            { label: 'Local Names — French', value: pilotMetadata.local_names_fr?.join(', ') },
+                            { label: 'Local Names — English', value: pilotMetadata.local_names_en?.join(', ') },
+                            { label: 'Local Names — Spanish', value: pilotMetadata.local_names_es?.join(', ') },
+                            { label: 'Local Names — Portuguese', value: pilotMetadata.local_names_pt?.join(', ') },
+                            { label: 'Local Names — Arabic', value: pilotMetadata.local_names_ar?.join(', ') },
+                            { label: 'Synonyms', value: pilotMetadata.synonyms?.join(', ') },
+                            { label: 'Category', value: pilotMetadata.category },
+                            { label: 'Product Form', value: pilotMetadata.product_form },
+                            { label: 'Conservation Method', value: pilotMetadata.conservation_method },
+                            { label: 'Packaging', value: pilotMetadata.packaging },
+                            { label: 'Keywords', value: pilotMetadata.keywords?.join(', ') },
+                            { label: 'Description', value: pilotMetadata.short_description },
+                          ].filter((f) => f.value).map((field) => (
+                            <div key={field.label} className="flex items-start gap-2 p-2 rounded-lg bg-muted/30 border border-border">
+                              <span className="font-medium text-foreground shrink-0 w-36">{field.label}</span>
+                              <span className="text-muted-foreground flex-1">{field.value}</span>
+                            </div>
+                          ))}
+
+                          <div className="pt-2 border-t border-border">
+                            <p className="font-semibold text-foreground mb-2">Confidence Scores</p>
+                            <div className="grid grid-cols-2 gap-1.5">
+                              {[
+                                { label: 'Vision', value: pilotMetadata.vision_confidence },
+                                { label: 'Species', value: pilotMetadata.species_confidence },
+                                { label: 'Commercial', value: pilotMetadata.commercial_confidence },
+                                { label: 'Metadata', value: pilotMetadata.metadata_confidence },
+                                { label: 'Global', value: pilotMetadata.global_confidence },
+                              ].filter((s) => s.value != null).map((score) => (
+                                <div key={score.label} className="flex items-center justify-between p-1.5 rounded bg-muted/40">
+                                  <span className="text-muted-foreground">{score.label}</span>
+                                  <span className={`font-mono font-bold ${confidenceColor(Math.round((score.value ?? 0) * 100))}`}>
+                                    {Math.round((score.value ?? 0) * 100)}%
+                                  </span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          {pilotMetadata.warnings && pilotMetadata.warnings.length > 0 && (
+                            <div className="p-2 bg-amber-50 border border-amber-200 rounded-lg">
+                              <p className="font-semibold text-amber-800 mb-1">Warnings</p>
+                              {pilotMetadata.warnings.map((w, i) => (
+                                <p key={i} className="text-amber-700 flex items-start gap-1.5">
+                                  <AlertTriangle size={10} className="shrink-0 mt-0.5" />{w}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>
@@ -987,5 +2008,17 @@ export default function AIStudioValidationPage() {
       </main>
       <Footer />
     </div>
+  );
+}
+
+export default function AIStudioValidationPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin" />
+      </div>
+    }>
+      <AIStudioValidationPageInner />
+    </Suspense>
   );
 }

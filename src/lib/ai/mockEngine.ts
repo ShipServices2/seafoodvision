@@ -521,6 +521,29 @@ function deterministicSeed(str: string): number {
   return Math.abs(hash);
 }
 
+// ─── Product form enum mapping ────────────────────────────────────────────────
+// CRITICAL: sie_species_candidates.product_form is a PostgreSQL ENUM:
+// 'whole' | 'hgt' | 'fillet' | 'steak' | 'loin' | 'iqf' | 'block' | 'vacuum' | 'portion' | 'other'
+// All values MUST be lowercase to match the enum. Capitalized values cause silent insert failures.
+
+export function toSieProductForm(raw: string | null | undefined): string {
+  if (!raw) return 'other';
+  const lower = raw.toLowerCase().trim();
+  const VALID_FORMS = ['whole', 'hgt', 'fillet', 'steak', 'loin', 'iqf', 'block', 'vacuum', 'portion', 'other'];
+  if (VALID_FORMS.includes(lower)) return lower;
+  // Map common aliases
+  const MAP: Record<string, string> = {
+    'hlso': 'other', 'pd': 'other', 'pud': 'other', 'cooked': 'other',
+    'smoked': 'other', 'canned': 'other', 'salted': 'other', 'pickled': 'other',
+    'live': 'whole', 'half': 'other', 'tail': 'other', 'leg': 'other',
+    'cluster': 'other', 'claw': 'other', 'tentacles': 'other', 'tube': 'other',
+    'ring': 'other', 'roe': 'other', 'uni': 'other', 'sheet': 'other',
+    'flake': 'other', 'dried': 'other', 'ink': 'other', 'lump meat': 'other',
+    'sashimi': 'other', 'surimi': 'other',
+  };
+  return MAP[lower] ?? 'other';
+}
+
 // ─── Main Mock Engine function ────────────────────────────────────────────────
 
 export function generateEnrichedMockCandidates(
@@ -707,7 +730,7 @@ export function generateEnrichedMockCandidates(
       order_name: species.order,
       ai_score: confidence,
       similarity_score: similarity,
-      product_form: candidateProductForm,
+      product_form: toSieProductForm(candidateProductForm),
       source_provider: 'mock',
       main_reasons: reasons,
       commercial_name: species.commercialName,

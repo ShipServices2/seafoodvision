@@ -7,8 +7,9 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, Filter } from 'lucide-react';
-import { generateEnrichedMockCandidates, MockAssetContext } from '@/lib/ai/mockEngine';
+import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, Filter, ShieldAlert, Target } from 'lucide-react';
+import { generateEnrichedMockCandidates, toSieProductForm, MockAssetContext } from '@/lib/ai/mockEngine';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -16,13 +17,12 @@ interface AssetRow {
   id: string;
   public_asset_id: string | null;
   title: string | null;
-  file_name: string | null;
   category: string | null;
-  thumbnail_url: string | null;
+  preview_storage_bucket: string | null;
+  preview_storage_path: string | null;
   review_status: string | null;
   species_id: string | null;
   created_at: string | null;
-  import_batch_id: string | null;
   is_demo: boolean | null;
   species_common_name?: string | null;
   ai_identified?: boolean;
@@ -32,7 +32,6 @@ interface FilterState {
   reviewStatus: string;
   metadataFilter: string;
   category: string;
-  importBatch: string;
   textSearch: string;
   aiStatus: string;
 }
@@ -107,6 +106,35 @@ const STATUS_COLORS: Record<string, string> = {
   editorial: 'bg-purple-100 text-purple-700',
 };
 
+// ─── Signed URL hook ──────────────────────────────────────────────────────────
+function useSignedUrl(bucket: string | null | undefined, path: string | null | undefined): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!bucket || !path) { setUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(bucket, path, 3600).then((signed) => {
+      if (!cancelled) setUrl(signed);
+    });
+    return () => { cancelled = true; };
+  }, [bucket, path]);
+  return url;
+}
+
+// ─── Asset thumbnail card ─────────────────────────────────────────────────────
+function AssetThumb({ asset }: { asset: AssetRow }) {
+  const [imgError, setImgError] = useState(false);
+  const signedUrl = useSignedUrl(asset.preview_storage_bucket, asset.preview_storage_path);
+  const hasImage = !!signedUrl && !imgError;
+  return hasImage ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={signedUrl!} alt={asset.title ?? 'Asset'} className="w-full h-full object-cover" onError={() => setImgError(true)} />
+  ) : (
+    <div className="w-full h-full flex items-center justify-center">
+      <Fish size={24} className="text-muted-foreground" />
+    </div>
+  );
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function AIStudioIdentifyPage() {
@@ -122,14 +150,12 @@ export default function AIStudioIdentifyPage() {
   const [assetsLoading, setAssetsLoading] = useState(true);
   const [showFilters, setShowFilters] = useState(false);
   const [categories, setCategories] = useState<string[]>([]);
-  const [importBatches, setImportBatches] = useState<{ id: string; name: string }[]>([]);
   const [identifiedAssetIds, setIdentifiedAssetIds] = useState<Set<string>>(new Set());
 
   const [filters, setFilters] = useState<FilterState>({
     reviewStatus: '',
     metadataFilter: '',
     category: '',
-    importBatch: '',
     textSearch: '',
     aiStatus: '',
   });
@@ -145,6 +171,7 @@ export default function AIStudioIdentifyPage() {
 
   // Recent jobs
   const [recentJobs, setRecentJobs] = useState<SIEJob[]>([]);
+  const [validationStats, setValidationStats] = useState<{ total: number; validated: number }>({ total: 0, validated: 0 });
 
   useEffect(() => {
     if (!loading && !user) { router.replace('/auth?next=/admin/ai-studio/identify'); return; }
@@ -175,16 +202,15 @@ export default function AIStudioIdentifyPage() {
 
     let query = supabase
       .from('assets')
-      .select('id, public_asset_id, title, file_name, category, thumbnail_url, review_status, species_id, created_at, import_batch_id, is_demo', { count: 'exact' })
+      .select('id, public_asset_id, title, category, review_status, species_id, created_at, is_demo, asset_previews(storage_bucket, storage_path)', { count: 'exact' })
       .order('created_at', { ascending: false })
       .range(from, to);
 
     if (filters.textSearch) {
-      query = query.or(`title.ilike.%${filters.textSearch}%,file_name.ilike.%${filters.textSearch}%,public_asset_id.ilike.%${filters.textSearch}%`);
+      query = query.or(`title.ilike.%${filters.textSearch}%,public_asset_id.ilike.%${filters.textSearch}%`);
     }
     if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
     if (filters.category) query = query.eq('category', filters.category);
-    if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
     if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
 
     const { data, count, error: queryError } = await query;
@@ -196,10 +222,23 @@ export default function AIStudioIdentifyPage() {
       return;
     }
 
-    let rows: AssetRow[] = (data ?? []).map((a: AssetRow) => ({
-      ...a,
-      ai_identified: identifiedAssetIds.has(a.id),
-    }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let rows: AssetRow[] = (data ?? []).map((a: any) => {
+      const preview = Array.isArray(a.asset_previews) ? a.asset_previews[0] : a.asset_previews;
+      return {
+        id: a.id,
+        public_asset_id: a.public_asset_id,
+        title: a.title,
+        category: a.category,
+        review_status: a.review_status,
+        species_id: a.species_id,
+        created_at: a.created_at,
+        is_demo: a.is_demo,
+        preview_storage_bucket: preview?.storage_bucket ?? null,
+        preview_storage_path: preview?.storage_path ?? null,
+        ai_identified: identifiedAssetIds.has(a.id),
+      };
+    });
 
     // AI status filter (client-side after fetch)
     if (filters.aiStatus === 'not_identified') {
@@ -216,12 +255,10 @@ export default function AIStudioIdentifyPage() {
 
   const fetchMeta = useCallback(async () => {
     if (!profile) return;
-    const [cats, batches] = await Promise.all([
+    const [cats] = await Promise.all([
       supabase.from('categories').select('name').order('name'),
-      supabase.from('import_batches').select('id, name').order('created_at', { ascending: false }).limit(50),
     ]);
     setCategories((cats.data ?? []).map((c: { name: string }) => c.name));
-    setImportBatches((batches.data ?? []) as { id: string; name: string }[]);
   }, [profile, supabase]);
 
   const fetchRecentJobs = useCallback(async () => {
@@ -237,6 +274,20 @@ export default function AIStudioIdentifyPage() {
   useEffect(() => { fetchAssets(0); }, [fetchAssets]); // re-runs when profile loads (fetchAssets deps include profile indirectly via supabase client)
   useEffect(() => { fetchMeta(); }, [fetchMeta]);
   useEffect(() => { fetchRecentJobs(); }, [fetchRecentJobs]);
+
+  // Fetch validation stats
+  useEffect(() => {
+    const fetchStats = async () => {
+      const [totalRes, validatedRes] = await Promise.all([
+        supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
+          .in('job_status', ['proposals_ready', 'under_review', 'validated', 'partially_validated']),
+        supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
+          .eq('job_status', 'validated'),
+      ]);
+      setValidationStats({ total: totalRes.count ?? 0, validated: validatedRes.count ?? 0 });
+    };
+    fetchStats();
+  }, [supabase]);
 
   // ── Selection ───────────────────────────────────────────────────────────────
   const toggleSelect = (id: string) => {
@@ -263,10 +314,9 @@ export default function AIStudioIdentifyPage() {
       .order('created_at', { ascending: false })
       .limit(2000);
 
-    if (filters.textSearch) query = query.or(`title.ilike.%${filters.textSearch}%,file_name.ilike.%${filters.textSearch}%`);
+    if (filters.textSearch) query = query.or(`title.ilike.%${filters.textSearch}%`);
     if (filters.reviewStatus) query = query.eq('review_status', filters.reviewStatus);
     if (filters.category) query = query.eq('category', filters.category);
-    if (filters.importBatch) query = query.eq('import_batch_id', filters.importBatch);
     if (filters.metadataFilter === 'without_species') query = query.is('species_id', null);
 
     const { data } = await query;
@@ -338,7 +388,7 @@ export default function AIStudioIdentifyPage() {
       const { data: enrichedAssets, error: fetchErr } = await supabase
         .from('assets')
         .select(`
-          id, title, file_name, category, product_form, packaging, description,
+          id, title, category, product_form, packaging, description,
           species:species_id (common_name, scientific_name, family),
           asset_keywords (keywords (term))
         `)
@@ -351,7 +401,7 @@ export default function AIStudioIdentifyPage() {
       }
 
       const enrichedMap = new Map<string, {
-        title: string | null; file_name: string | null; category: string | null;
+        title: string | null; category: string | null;
         product_form: string | null; packaging: string | null; description: string | null;
         species: { common_name: string; scientific_name: string; family: string } | null;
         keywords: string[];
@@ -363,7 +413,7 @@ export default function AIStudioIdentifyPage() {
           .map((ak: { keywords: { term: string } | null }) => ak.keywords?.term)
           .filter((t: string | undefined): t is string => !!t);
         enrichedMap.set(ea.id, {
-          title: ea.title ?? null, file_name: ea.file_name ?? null,
+          title: ea.title ?? null,
           category: ea.category ?? null, product_form: ea.product_form ?? null,
           packaging: ea.packaging ?? null, description: ea.description ?? null,
           species: speciesData, keywords: kws,
@@ -381,7 +431,7 @@ export default function AIStudioIdentifyPage() {
         return {
           asset_id: assetId,
           public_asset_id: asset?.public_asset_id ?? null,
-          current_name: enriched?.title ?? asset?.title ?? asset?.file_name ?? null,
+          current_name: enriched?.title ?? asset?.title ?? null,
           current_category: enriched?.category ?? asset?.category ?? null,
           job_status: 'proposals_ready',
           progress_step: 'proposals_ready',
@@ -423,8 +473,8 @@ export default function AIStudioIdentifyPage() {
 
         const context: MockAssetContext = {
           assetId: job.asset_id,
-          title: enriched?.title ?? asset?.title ?? asset?.file_name ?? null,
-          fileName: enriched?.file_name ?? asset?.file_name ?? null,
+          title: enriched?.title ?? asset?.title ?? null,
+          fileName: null,
           category: enriched?.category ?? asset?.category ?? null,
           productForm: enriched?.product_form ?? null,
           packaging: enriched?.packaging ?? null,
@@ -434,20 +484,30 @@ export default function AIStudioIdentifyPage() {
           existingSpeciesFamily: speciesData?.family ?? null,
           existingSpeciesGenus: genus,
           keywords: enriched?.keywords ?? [],
-          importBatch: asset?.import_batch_id ?? null,
+          importBatch: null,
           folderPath: null,
         };
 
         const candidates = generateEnrichedMockCandidates(job.id, context);
         for (const c of candidates) {
           candidateRows.push({
-            job_id: job.id, rank: c.rank, common_name: c.common_name,
-            scientific_name: c.scientific_name, family: c.family, genus: c.genus,
-            ai_score: c.ai_score, similarity_score: c.similarity_score,
-            main_reasons: c.main_reasons, product_form: c.product_form,
-            source_provider: c.source_provider, commercial_name: c.commercial_name,
-            description_candidate: c.description_candidate, category_candidate: c.category_candidate,
-            packaging_candidate: c.packaging_candidate, product_candidate: c.product_candidate,
+            job_id: job.id,
+            asset_id: job.asset_id,
+            rank: c.rank,
+            common_name: c.common_name,
+            scientific_name: c.scientific_name,
+            family: c.family,
+            genus: c.genus,
+            ai_score: c.ai_score,
+            similarity_score: c.similarity_score,
+            main_reasons: c.main_reasons,
+            product_form: toSieProductForm(c.product_form),
+            source_provider: c.source_provider,
+            commercial_name: c.commercial_name,
+            description_candidate: c.description_candidate,
+            category_candidate: c.category_candidate,
+            packaging_candidate: c.packaging_candidate,
+            product_candidate: c.product_candidate,
             keywords_candidate: c.keywords_candidate,
           });
         }
@@ -468,8 +528,20 @@ export default function AIStudioIdentifyPage() {
         allJobIds.push(job.id);
       }
 
-      if (candidateRows.length > 0) await supabase.from('sie_species_candidates').insert(candidateRows);
-      if (suggestionRows.length > 0) await supabase.from('metadata_suggestions').insert(suggestionRows);
+      if (candidateRows.length > 0) {
+        const { error: candErr } = await supabase.from('sie_species_candidates').insert(candidateRows);
+        if (candErr) {
+          console.error('[AI Studio] Candidate insert error:', candErr.message, candErr.details, candErr.hint);
+          errorCount++;
+          setBatchJob((prev) => prev ? { ...prev, errors: [...prev.errors, `Candidate insert: ${candErr.message}`] } : prev);
+        }
+      }
+      if (suggestionRows.length > 0) {
+        const { error: suggErr } = await supabase.from('metadata_suggestions').insert(suggestionRows);
+        if (suggErr) {
+          console.warn('[AI Studio] Suggestion insert warning (non-critical):', suggErr.message);
+        }
+      }
 
       const newProcessed = Math.min(i + CHUNK, toProcessIds.length);
       setBatchJob((prev) => prev ? {
@@ -503,7 +575,7 @@ export default function AIStudioIdentifyPage() {
   };
 
   const clearFilters = () => {
-    setFilters({ reviewStatus: '', metadataFilter: '', category: '', importBatch: '', textSearch: '', aiStatus: '' });
+    setFilters({ reviewStatus: '', metadataFilter: '', category: '', textSearch: '', aiStatus: '' });
     setSearchInput('');
     setCurrentPage(0);
   };
@@ -553,6 +625,20 @@ export default function AIStudioIdentifyPage() {
           <Link href="/admin/ai-studio" className="text-sm text-muted-foreground hover:text-foreground transition-colors">
             ← AI Studio
           </Link>
+        </div>
+
+        {/* ── Mock Engine Warning Banner ── */}
+        <div className="bg-amber-50 border border-amber-300 rounded-xl p-3 mb-6 flex items-start gap-3">
+          <ShieldAlert size={16} className="text-amber-600 shrink-0 mt-0.5" />
+          <div>
+            <p className="text-sm font-semibold text-amber-800">
+              Mock proposals — workflow testing only. Not real visual identification.
+            </p>
+            <p className="text-xs text-amber-700 mt-0.5">
+              Proposals are generated by <strong>Mock Engine v2</strong> using asset metadata, not actual visual AI analysis.
+              <span className="ml-1 font-mono bg-amber-100 px-1 rounded">provider_mode = mock</span>
+            </p>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
@@ -644,17 +730,6 @@ export default function AIStudioIdentifyPage() {
                         className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
                         <option value="">All categories</option>
                         {categories.map((c) => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </div>
-                  )}
-
-                  {importBatches.length > 0 && (
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Import Batch</label>
-                      <select value={filters.importBatch} onChange={(e) => updateFilter('importBatch', e.target.value)}
-                        className="w-full text-xs bg-muted/40 border border-border rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-violet-300">
-                        <option value="">All batches</option>
-                        {importBatches.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
                       </select>
                     </div>
                   )}
@@ -803,9 +878,18 @@ export default function AIStudioIdentifyPage() {
               </div>
             )}
             {success && (
-              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-2">
+              <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 space-y-3">
                 <p className="text-xs text-emerald-700 font-semibold">✓ {success}</p>
-                <div className="flex flex-col gap-1">
+
+                {/* REVIEW AI PROPOSALS — primary CTA */}
+                <Link
+                  href={`/admin/ai-studio/validation${batchJob?.jobIds?.[0] ? `?job=${batchJob.jobIds[0]}` : ''}`}
+                  className="w-full flex items-center justify-center gap-2 bg-gradient-to-r from-violet-600 to-blue-600 text-white font-bold px-4 py-3 rounded-xl hover:from-violet-700 hover:to-blue-700 transition-all text-sm shadow-sm">
+                  <Target size={15} />
+                  REVIEW AI PROPOSALS
+                </Link>
+
+                <div className="flex flex-col gap-1 pt-1 border-t border-emerald-200">
                   <Link href="/admin/ai-studio/validation"
                     className="text-xs text-violet-600 underline hover:no-underline flex items-center gap-1">
                     <ArrowRight size={10} />Human Validation Workspace
@@ -813,6 +897,10 @@ export default function AIStudioIdentifyPage() {
                   <Link href="/admin/metadata-review/assets"
                     className="text-xs text-blue-600 underline hover:no-underline flex items-center gap-1">
                     <ArrowRight size={10} />Metadata Review Center
+                  </Link>
+                  <Link href="/admin/ai-studio/candidates"
+                    className="text-xs text-teal-600 underline hover:no-underline flex items-center gap-1">
+                    <ArrowRight size={10} />View all candidates
                   </Link>
                 </div>
               </div>
@@ -832,16 +920,44 @@ export default function AIStudioIdentifyPage() {
                 <h3 className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3 flex items-center gap-1.5">
                   <Clock size={11} />Recent Jobs
                 </h3>
+
+                {/* Validation progress */}
+                <div className="mb-3 bg-muted/30 rounded-lg p-2.5">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="text-muted-foreground">Validation progress</span>
+                    <span className="font-semibold text-foreground">{validationStats.validated}/{validationStats.total}</span>
+                  </div>
+                  <div className="w-full bg-muted rounded-full h-1.5">
+                    <div
+                      className="bg-gradient-to-r from-emerald-500 to-teal-500 h-1.5 rounded-full transition-all"
+                      style={{ width: validationStats.total > 0 ? `${Math.round((validationStats.validated / validationStats.total) * 100)}%` : '0%' }} />
+                  </div>
+                  <p className="text-[10px] text-muted-foreground mt-1">
+                    Human validations · separate from processing progress
+                  </p>
+                </div>
+
                 <div className="space-y-2">
                   {recentJobs.map((job) => (
-                    <div key={job.id} className="flex items-center justify-between text-xs">
-                      <span className="text-foreground truncate max-w-[120px]">
+                    <div key={job.id} className="flex items-center justify-between text-xs gap-2">
+                      <span className="text-foreground truncate max-w-[100px]">
                         {job.current_name ?? job.public_asset_id ?? job.id.slice(0, 8)}
                       </span>
-                      <span className={`px-1.5 py-0.5 rounded-full font-medium shrink-0 ${
-                        job.job_status === 'proposals_ready' ? 'bg-blue-100 text-blue-700' :
-                        job.job_status === 'validated'? 'bg-emerald-100 text-emerald-700' : 'bg-gray-100 text-gray-600'
-                      }`}>{job.job_status}</span>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <span className={`px-1.5 py-0.5 rounded-full font-medium ${
+                          job.job_status === 'proposals_ready' ? 'bg-blue-100 text-blue-700' :
+                          job.job_status === 'validated' ? 'bg-emerald-100 text-emerald-700' :
+                          job.job_status === 'partially_validated'? 'bg-teal-100 text-teal-700' : 'bg-gray-100 text-gray-600'
+                        }`}>{job.job_status}</span>
+                        {job.job_status === 'proposals_ready' && (
+                          <Link
+                            href={`/admin/ai-studio/validation?job=${job.id}`}
+                            className="text-[10px] text-violet-600 hover:underline font-medium"
+                            onClick={(e) => e.stopPropagation()}>
+                            Review →
+                          </Link>
+                        )}
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -918,14 +1034,7 @@ export default function AIStudioIdentifyPage() {
 
                         {/* Thumbnail */}
                         <div className="aspect-square bg-muted relative">
-                          {asset.thumbnail_url ? (
-                            <img src={asset.thumbnail_url} alt={asset.title ?? asset.file_name ?? 'Asset'}
-                              className="w-full h-full object-cover" />
-                          ) : (
-                            <div className="w-full h-full flex items-center justify-center">
-                              <Fish size={24} className="text-muted-foreground" />
-                            </div>
-                          )}
+                          <AssetThumb asset={asset} />
 
                           {/* Selection overlay */}
                           {isSelected && (
@@ -965,7 +1074,7 @@ export default function AIStudioIdentifyPage() {
                         {/* Info */}
                         <div className="p-2 bg-card">
                           <p className="text-xs font-medium text-foreground truncate leading-tight">
-                            {asset.title ?? asset.file_name ?? '—'}
+                            {asset.title ?? '—'}
                           </p>
                           {asset.public_asset_id && (
                             <p className="text-[10px] text-muted-foreground truncate font-mono mt-0.5">
