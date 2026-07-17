@@ -294,6 +294,7 @@ function AIStudioValidationPageInner() {
   const [undoTimer, setUndoTimer] = useState<ReturnType<typeof setTimeout> | null>(null);
   const [propagating, setPropagating] = useState(false);
   const [propagationDone, setPropagationDone] = useState<string[]>([]);
+  const skipPropagationResetRef = useRef(false);
   const [confirmDialogOpen, setConfirmDialogOpen] = useState(false);
   const [confirmSuccess, setConfirmSuccess] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
@@ -894,7 +895,11 @@ function AIStudioValidationPageInner() {
       setFieldDecisions({});
       setEditValues({});
       setComment('');
-      setPropagationDone([]);
+      if (skipPropagationResetRef.current) {
+        skipPropagationResetRef.current = false;
+      } else {
+        setPropagationDone([]);
+      }
       setConfirmDialogOpen(false);
       setConfirmSuccess(null);
       setConfirmError(null);
@@ -914,7 +919,11 @@ function AIStudioValidationPageInner() {
       setFieldDecisions({});
       setEditValues({});
       setComment('');
-      setPropagationDone([]);
+      if (skipPropagationResetRef.current) {
+        skipPropagationResetRef.current = false;
+      } else {
+        setPropagationDone([]);
+      }
       setConfirmDialogOpen(false);
       setConfirmSuccess(null);
       setConfirmError(null);
@@ -1124,12 +1133,13 @@ function AIStudioValidationPageInner() {
 
         if (autoAdvance) {
           setTimeout(() => {
+            skipPropagationResetRef.current = true;
             if (batchMode) {
               goToNextUnreviewed(currentPos, updatedAssets);
             } else {
               goToNext();
             }
-          }, 1200);
+          }, 2500);
         }
       } else {
         setConfirmError(result.error ?? result.errors?.join('; ') ?? 'Confirmation failed');
