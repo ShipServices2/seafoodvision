@@ -11,38 +11,55 @@ ALTER TABLE public.sie_propagation_log
   ADD COLUMN IF NOT EXISTS backfill_source text DEFAULT 'manual',
   ADD COLUMN IF NOT EXISTS species_id uuid REFERENCES public.species(id) ON DELETE SET NULL;
 
--- 2. Unique index: one propagation log entry per (asset_id, target_system)
+-- 2. Deduplicate sie_propagation_log before creating unique index
+--    Keep only the most recent row per (asset_id, target_system)
+DELETE FROM public.sie_propagation_log
+WHERE id IN (
+  SELECT id FROM (
+    SELECT
+      id,
+      ROW_NUMBER() OVER (
+        PARTITION BY asset_id, target_system
+        ORDER BY created_at DESC NULLS LAST, id DESC
+      ) AS rn
+    FROM public.sie_propagation_log
+    WHERE asset_id IS NOT NULL
+  ) ranked
+  WHERE rn > 1
+);
+
+-- 3. Unique index: one propagation log entry per (asset_id, target_system)
 --    Allows idempotent upsert without duplicates
 CREATE UNIQUE INDEX IF NOT EXISTS idx_sie_propagation_log_asset_target
   ON public.sie_propagation_log (asset_id, target_system)
   WHERE asset_id IS NOT NULL;
 
--- 3. Add propagation tracking to openai_pilot_results
+-- 4. Add propagation tracking to openai_pilot_results
 ALTER TABLE public.openai_pilot_results
   ADD COLUMN IF NOT EXISTS propagation_status text DEFAULT 'pending',
   ADD COLUMN IF NOT EXISTS propagation_completed_at timestamptz,
   ADD COLUMN IF NOT EXISTS propagation_error text;
 
--- 4. Add propagation tracking to openai_pilot_job_assets
+-- 5. Add propagation tracking to openai_pilot_job_assets
 ALTER TABLE public.openai_pilot_job_assets
   ADD COLUMN IF NOT EXISTS propagation_status text DEFAULT 'pending',
   ADD COLUMN IF NOT EXISTS propagation_completed_at timestamptz;
 
--- 5. Index for fast lookup of validated-but-not-propagated assets
+-- 6. Index for fast lookup of validated-but-not-propagated assets
 CREATE INDEX IF NOT EXISTS idx_openai_pilot_results_validated_propagation
   ON public.openai_pilot_results (job_id, human_validated, propagation_status)
   WHERE human_validated = true;
 
--- 6. Index on assets.search_aliases for fast text search
+-- 7. Index on assets.search_aliases for fast text search
 CREATE INDEX IF NOT EXISTS idx_assets_search_aliases
   ON public.assets USING gin(search_aliases);
 
--- 7. Index on assets.human_validated for fast lookup
+-- 8. Index on assets.human_validated for fast lookup
 CREATE INDEX IF NOT EXISTS idx_assets_human_validated
   ON public.assets (human_validated)
   WHERE human_validated = true;
 
--- 8. Function: check_asset_propagation_status
+-- 9. Function: check_asset_propagation_status
 --    Returns a JSON summary of propagation completeness for a given asset_id.
 --    Used by the backfill audit to determine which steps are missing.
 CREATE OR REPLACE FUNCTION public.check_asset_propagation_status(p_asset_id uuid)
@@ -116,5 +133,5 @@ BEGIN
 END;
 $func$;
 
--- 9. Grant execute to authenticated users (admin-only enforced at API level)
+-- 10. Grant execute to authenticated users (admin-only enforced at API level)
 GRANT EXECUTE ON FUNCTION public.check_asset_propagation_status(uuid) TO authenticated;
