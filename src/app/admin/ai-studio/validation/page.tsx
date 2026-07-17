@@ -117,6 +117,7 @@ interface SIEJob {
   pilot_job_name?: string | null;
   provider_mode?: string | null;
   total_assets?: number | null;
+  is_superseded?: boolean | null;
 }
 
 // Batch asset entry from openai_pilot_job_assets
@@ -320,55 +321,80 @@ function AIStudioValidationPageInner() {
     router.replace(newUrl, { scroll: false });
   }, [pathname, router]);
 
-  // ── Load ALL batch jobs (job selector) ────────────────────────────────────
+  // ── Load ALL batch jobs (job selector) — excludes superseded duplicates ───
   const loadAllBatchJobs = useCallback(async () => {
     const supabase = createClient();
-    const { data: pilotJobs } = await supabase
-      .from('sie_jobs')
-      .select('*')
-      .not('pilot_job_name', 'is', null)
-      .eq('provider_mode', 'real_ai')
-      .order('created_at', { ascending: false });
+    try {
+      // Only load non-superseded jobs. If is_superseded column doesn't exist yet
+      // (migration pending), fall back to all real_ai pilot jobs.
+      let query = supabase
+        .from('sie_jobs')
+        .select('*')
+        .not('pilot_job_name', 'is', null)
+        .eq('provider_mode', 'real_ai')
+        .order('created_at', { ascending: false });
 
-    if (!pilotJobs || pilotJobs.length === 0) return;
-    setAllBatchJobs(pilotJobs as SIEJob[]);
+      const { data: allJobs, error: allJobsError } = await query;
 
-    // Determine which job to auto-select:
-    // Priority 1: job specified in URL param
-    // Priority 2: most recent job that still has unreviewed assets
-    // Priority 3: most recent job overall
-    let targetJobId: string | null = null;
+      if (allJobsError || !allJobs || allJobs.length === 0) return;
 
-    if (urlJobId) {
-      const urlJob = pilotJobs.find((j: SIEJob) => j.id === urlJobId);
-      if (urlJob) targetJobId = urlJob.id;
-    }
+      // Filter out superseded jobs client-side (handles both old and new schema)
+      const pilotJobs = (allJobs as SIEJob[]).filter(
+        (j) => j.is_superseded !== true && !j.pilot_job_name?.includes('[superseded]')
+      );
 
-    if (!targetJobId) {
-      for (const job of pilotJobs as SIEJob[]) {
-        const { count: unreviewedCount } = await supabase
-          .from('openai_pilot_job_assets')
-          .select('*', { count: 'exact', head: true })
-          .eq('batch_job_id', job.id)
-          .eq('review_status', 'unreviewed');
+      if (pilotJobs.length === 0) {
+        // Fallback: if all are marked superseded (shouldn't happen), show all
+        setAllBatchJobs(allJobs as SIEJob[]);
+      } else {
+        setAllBatchJobs(pilotJobs);
+      }
 
-        if ((unreviewedCount ?? 0) > 0) {
-          targetJobId = job.id;
-          break;
+      const activePilotJobs = pilotJobs.length > 0 ? pilotJobs : (allJobs as SIEJob[]);
+
+      // Determine which job to auto-select:
+      // Priority 1: job specified in URL param (must be non-superseded)
+      // Priority 2: most recent non-superseded job that still has unreviewed assets
+      // Priority 3: most recent non-superseded job overall
+      let targetJobId: string | null = null;
+
+      if (urlJobId) {
+        const urlJob = activePilotJobs.find((j) => j.id === urlJobId);
+        if (urlJob) targetJobId = urlJob.id;
+      }
+
+      if (!targetJobId) {
+        for (const job of activePilotJobs) {
+          const { count: unreviewedCount } = await supabase
+            .from('openai_pilot_job_assets')
+            .select('*', { count: 'exact', head: true })
+            .eq('batch_job_id', job.id)
+            .eq('review_status', 'unreviewed');
+
+          if ((unreviewedCount ?? 0) > 0) {
+            targetJobId = job.id;
+            break;
+          }
         }
       }
-    }
 
-    if (!targetJobId && pilotJobs.length > 0) {
-      targetJobId = (pilotJobs[0] as SIEJob).id;
-    }
+      if (!targetJobId && activePilotJobs.length > 0) {
+        targetJobId = activePilotJobs[0].id;
+      }
 
-    if (targetJobId) {
-      setSelectedBatchJobId(targetJobId);
+      if (targetJobId) {
+        setSelectedBatchJobId(targetJobId);
+      }
+    } catch (err) {
+      console.error('[loadAllBatchJobs] Error:', err);
     }
   }, [urlJobId]);
 
   // ── Load batch assets when selected batch job changes ─────────────────────
+  // CRITICAL: always uses try/catch/finally so loading never hangs forever
+  const [batchLoadError, setBatchLoadError] = useState<string | null>(null);
+  const [batchLoading, setBatchLoading] = useState(false);
+
   const loadBatchJobAssets = useCallback(async (jobId: string) => {
     const supabase = createClient();
 
@@ -377,40 +403,56 @@ function AIStudioValidationPageInner() {
 
     setBatchJob(targetJob);
     setBatchMode(true);
+    setBatchLoading(true);
+    setBatchLoadError(null);
 
-    // Load from openai_pilot_job_assets — the persistent source of truth
-    const { data: jobAssets, error: jaError } = await supabase
-      .from('openai_pilot_job_assets')
-      .select('*')
-      .eq('batch_job_id', jobId)
-      .order('review_position', { ascending: true });
+    try {
+      // Load from openai_pilot_job_assets — the persistent source of truth
+      const { data: jobAssets, error: jaError } = await supabase
+        .from('openai_pilot_job_assets')
+        .select('*')
+        .eq('batch_job_id', jobId)
+        .order('review_position', { ascending: true });
 
-    if (!jaError && jobAssets && jobAssets.length > 0) {
-      setBatchAssets(jobAssets as BatchAsset[]);
-
-      // Restore position from URL or find first unreviewed
-      const urlPos = urlPosition ? parseInt(urlPosition, 10) : null;
-      if (urlPos && urlPos >= 1 && urlPos <= jobAssets.length) {
-        setBatchPosition(urlPos - 1); // URL is 1-based, state is 0-based
-      } else {
-        // Find first unreviewed asset
-        const firstUnreviewedIdx = (jobAssets as BatchAsset[]).findIndex(
-          (a) => a.review_status === 'unreviewed'
-        );
-        setBatchPosition(firstUnreviewedIdx >= 0 ? firstUnreviewedIdx : 0);
+      if (jaError) {
+        throw new Error(`openai_pilot_job_assets query failed: ${jaError.message} (table: openai_pilot_job_assets, job: ${jobId})`);
       }
-      return;
-    }
 
-    // Fallback: batch was imported before openai_pilot_job_assets was populated
-    // Build synthetic BatchAsset entries from openai_pilot_results and insert them
-    const { data: pilotResults } = await supabase
-      .from('openai_pilot_results')
-      .select('id, asset_id, public_asset_id, review_status, human_validated, requires_human_review')
-      .eq('job_id', jobId)
-      .order('created_at', { ascending: true });
+      if (jobAssets && jobAssets.length > 0) {
+        setBatchAssets(jobAssets as BatchAsset[]);
 
-    if (pilotResults && pilotResults.length > 0) {
+        // Restore position from URL or find first unreviewed
+        const urlPos = urlPosition ? parseInt(urlPosition, 10) : null;
+        if (urlPos && urlPos >= 1 && urlPos <= jobAssets.length) {
+          setBatchPosition(urlPos - 1); // URL is 1-based, state is 0-based
+        } else {
+          const firstUnreviewedIdx = (jobAssets as BatchAsset[]).findIndex(
+            (a) => a.review_status === 'unreviewed'
+          );
+          setBatchPosition(firstUnreviewedIdx >= 0 ? firstUnreviewedIdx : 0);
+        }
+        return;
+      }
+
+      // Fallback: batch was imported before openai_pilot_job_assets was populated
+      // Build synthetic BatchAsset entries from openai_pilot_results and insert them
+      const { data: pilotResults, error: prError } = await supabase
+        .from('openai_pilot_results')
+        .select('id, asset_id, public_asset_id, review_status, human_validated, requires_human_review')
+        .eq('job_id', jobId)
+        .order('created_at', { ascending: true });
+
+      if (prError) {
+        throw new Error(`openai_pilot_results query failed: ${prError.message} (table: openai_pilot_results, job: ${jobId})`);
+      }
+
+      if (!pilotResults || pilotResults.length === 0) {
+        // Truly empty batch — show 0 assets, not infinite spinner
+        setBatchAssets([]);
+        setBatchPosition(0);
+        return;
+      }
+
       const newAssets: BatchAsset[] = [];
       let position = 1;
 
@@ -474,6 +516,14 @@ function AIStudioValidationPageInner() {
         const firstUnreviewedIdx = newAssets.findIndex((a) => a.review_status === 'unreviewed');
         setBatchPosition(firstUnreviewedIdx >= 0 ? firstUnreviewedIdx : 0);
       }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      console.error('[loadBatchJobAssets] Error:', msg);
+      setBatchLoadError(msg);
+      setBatchAssets([]);
+    } finally {
+      // CRITICAL: always stop loading — never leave spinner running forever
+      setBatchLoading(false);
     }
   }, [allBatchJobs, urlPosition]);
 
@@ -1519,6 +1569,10 @@ function AIStudioValidationPageInner() {
                 <div className="flex items-center justify-center py-8">
                   <div className="w-5 h-5 border-2 border-border border-t-blue-500 rounded-full animate-spin" />
                 </div>
+              ) : batchMode && batchLoading ? (
+                <div className="flex items-center justify-center py-8">
+                  <div className="w-5 h-5 border-2 border-border border-t-blue-500 rounded-full animate-spin" />
+                </div>
               ) : batchMode ? (
                 <div className="divide-y divide-border max-h-[600px] overflow-y-auto">
                   {filteredBatchAssets.map((ba) => {
@@ -1581,30 +1635,59 @@ function AIStudioValidationPageInner() {
 
           {/* ── Main validation panel ── */}
           <div className="lg:col-span-3">
+            {/* Batch load error — shown instead of infinite spinner */}
+            {batchLoadError && (
+              <div className="bg-red-50 border border-red-300 rounded-xl p-4 mb-4">
+                <div className="flex items-start gap-3">
+                  <AlertTriangle size={18} className="text-red-600 shrink-0 mt-0.5" />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold text-red-800 mb-1">Failed to load batch assets</p>
+                    <p className="text-xs text-red-700 font-mono break-all">{batchLoadError}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      setBatchLoadError(null);
+                      if (selectedBatchJobId) loadBatchJobAssets(selectedBatchJobId);
+                    }}
+                    className="shrink-0 px-3 py-1.5 text-xs font-semibold bg-red-600 text-white rounded-lg hover:bg-red-700 transition-colors">
+                    Retry
+                  </button>
+                </div>
+              </div>
+            )}
+
             {!hasActiveAsset ? (
               <div className="bg-card border border-border rounded-xl flex items-center justify-center py-24 text-center">
                 <div>
-                  <Target size={32} className="text-muted-foreground mx-auto mb-3" />
-                  <p className="text-sm text-muted-foreground">
-                    {batchMode
-                      ? (batchAssets.length === 0
-                          ? 'Loading batch assets...'
-                          : batchFilter !== 'all' && filteredBatchAssets.length === 0
-                          ? `No assets with status "${batchFilter}"`
-                          : 'All assets in this batch have been reviewed!')
-                      : 'Select a job to start validation'}
-                  </p>
-                  {batchMode && batchAssets.length > 0 && pendingCount === 0 && (
-                    <button
-                      onClick={() => setBatchFilter('all')}
-                      className="text-xs text-blue-600 underline mt-2 block mx-auto">
-                      View all assets (including validated)
-                    </button>
-                  )}
-                  {!batchMode && (
-                    <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
-                      Launch AI identification first
-                    </Link>
+                  {batchLoading ? (
+                    <>
+                      <div className="w-8 h-8 border-2 border-border border-t-blue-500 rounded-full animate-spin mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground">Loading batch assets...</p>
+                    </>
+                  ) : (
+                    <>
+                      <Target size={32} className="text-muted-foreground mx-auto mb-3" />
+                      <p className="text-sm text-muted-foreground">
+                        {batchMode
+                          ? (batchFilter !== 'all' && filteredBatchAssets.length === 0 && batchAssets.length > 0
+                              ? `No assets with status "${batchFilter}"`
+                              : batchAssets.length === 0
+                              ? 'No assets found in this batch' :'All assets in this batch have been reviewed!')
+                          : 'Select a job to start validation'}
+                      </p>
+                      {batchMode && batchAssets.length > 0 && pendingCount === 0 && (
+                        <button
+                          onClick={() => setBatchFilter('all')}
+                          className="text-xs text-blue-600 underline mt-2 block mx-auto">
+                          View all assets (including validated)
+                        </button>
+                      )}
+                      {!batchMode && (
+                        <Link href="/admin/ai-studio/identify" className="text-xs text-blue-600 underline mt-2 block">
+                          Launch AI identification first
+                        </Link>
+                      )}
+                    </>
                   )}
                 </div>
               </div>

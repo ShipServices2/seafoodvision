@@ -30,6 +30,13 @@ interface DryRunReport {
   rows_to_create: number;
   rows_to_update: number;
   rejected_rows: { public_asset_id: string; reason: string }[];
+  // Duplicate detection fields
+  is_duplicate?: boolean;
+  duplicate_of_job_id?: string;
+  duplicate_of_job_name?: string;
+  overlap_count?: number;
+  overlap_ratio?: number;
+  message?: string;
 }
 
 interface ImportResult {
@@ -381,6 +388,27 @@ export default function ImportRealAIPage() {
                   </p>
                 </div>
 
+                {/* Duplicate detection warning */}
+                {dryRunReport.is_duplicate && (
+                  <div className="p-4 bg-red-50 border border-red-300 rounded-xl mb-4">
+                    <div className="flex items-start gap-2">
+                      <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
+                      <div>
+                        <p className="text-sm font-bold text-red-800 mb-1">Import dupliqué détecté</p>
+                        <p className="text-xs text-red-700">{dryRunReport.message}</p>
+                        {dryRunReport.duplicate_of_job_id && (
+                          <a
+                            href={`/admin/ai-studio/validation?job=${dryRunReport.duplicate_of_job_id}`}
+                            className="inline-flex items-center gap-1 mt-2 text-xs font-semibold text-red-700 underline hover:text-red-900"
+                          >
+                            → Ouvrir &quot;{dryRunReport.duplicate_of_job_name}&quot; dans Human Validation
+                          </a>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 {step === 'dry_run' && (
                   <div className="flex gap-3">
                     <button
@@ -391,7 +419,7 @@ export default function ImportRealAIPage() {
                     </button>
                     <button
                       onClick={() => setStep('confirm')}
-                      disabled={dryRunReport.assets_found === 0}
+                      disabled={dryRunReport.assets_found === 0 || dryRunReport.is_duplicate === true}
                       className="flex-1 flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-2.5 rounded-xl transition-colors"
                     >
                       <ArrowRight size={16} />
