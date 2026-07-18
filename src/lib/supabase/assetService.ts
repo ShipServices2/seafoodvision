@@ -268,6 +268,14 @@ export async function fetchAssets(
   const { data, error, count } = await query;
 
   if (error) {
+    // "Requested range not satisfiable" (PGRST103) means the page is beyond
+    // the total result count — treat as empty page, not a fatal error.
+    if (
+      error.message?.includes('Requested range not satisfiable') ||
+      (error as { code?: string }).code === 'PGRST103'
+    ) {
+      return { assets: [], total: 0 };
+    }
     console.error('fetchAssets error:', error.message);
     return { assets: [], total: 0 };
   }
