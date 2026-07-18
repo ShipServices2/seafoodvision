@@ -123,20 +123,35 @@ export async function POST(req: NextRequest) {
     .in('public_asset_id', expectedPublicIds);
 
   // Count existing pilot batches to generate batch name
-  const { count: existingBatchCount } = await supabase
+  // CRITICAL: Only count non-superseded jobs that actually have assets
+  // (stale sie_jobs from failed imports must not inflate the batch number)
+  const { data: activeBatchJobs } = await supabase
     .from('sie_jobs')
-    .select('*', { count: 'exact', head: true })
+    .select('id')
     .not('pilot_job_name', 'is', null)
-    .eq('provider_mode', 'real_ai');
+    .eq('provider_mode', 'real_ai')
+    .or('is_superseded.is.null,is_superseded.eq.false')
+    .not('pilot_job_name', 'like', '[superseded]%');
 
-  const batchNumber = (existingBatchCount ?? 0) + 1;
-  const assetCount = assetsFound.length;
-  // Generate a human-readable batch name: "Batch 01 (100 assets)" or "OpenAI Pilot 20" for the first
-  const batchLabel = batchNumber === 1
-    ? `OpenAI Pilot ${assetCount}`
-    : `Batch ${String(batchNumber - 1).padStart(2, '0')} (${assetCount})`;
+  // Further filter: only count jobs that actually have assets
+  let activeBatchCount = 0;
+  if (activeBatchJobs && activeBatchJobs.length > 0) {
+    for (const job of activeBatchJobs) {
+      const { count: assetCount } = await supabase
+        .from('openai_pilot_job_assets')
+        .select('*', { count: 'exact', head: true })
+        .eq('batch_job_id', job.id);
+      if ((assetCount ?? 0) > 0) activeBatchCount++;
+    }
+  }
 
   // Build dry-run report
+  const batchNumber = activeBatchCount + 1;
+  const assetCount = assetsFound.length;
+  const batchLabel = batchNumber === 1
+    ? `OpenAI Pilot ${assetCount}`
+    : `Batch ${String(batchNumber).padStart(2, '0')} (${assetCount})`;
+
   const dryRunReport = {
     assets_expected: expectedPublicIds.length,
     assets_found: assetsFound.length,
@@ -154,6 +169,59 @@ export async function POST(req: NextRequest) {
     rejected_rows: assetsMissing.map((id) => ({ public_asset_id: id, reason: 'Asset not found in database' })),
     batch_label: batchLabel,
   };
+
+  // ── Duplicate detection ──────────────────────────────────────────────────
+  // Check if any existing batch job already contains the same public_asset_ids.
+  // If so, return the existing canonical job instead of creating a duplicate.
+  if (mode === 'import' || mode === 'dry_run') {
+    const { data: existingBatchJobs } = await supabase
+      .from('sie_jobs')
+      .select('id, pilot_job_name, total_assets, created_at')
+      .not('pilot_job_name', 'is', null)
+      .eq('provider_mode', 'real_ai')
+      .order('created_at', { ascending: false });
+
+    if (existingBatchJobs && existingBatchJobs.length > 0) {
+      for (const existingJob of existingBatchJobs) {
+        // Check overlap: how many of the incoming public_asset_ids already exist in this job
+        const { data: existingAssetRows } = await supabase
+          .from('openai_pilot_results')
+          .select('public_asset_id')
+          .eq('job_id', existingJob.id)
+          .in('public_asset_id', expectedPublicIds);
+
+        const overlapCount = existingAssetRows?.length ?? 0;
+        const overlapRatio = expectedPublicIds.length > 0 ? overlapCount / expectedPublicIds.length : 0;
+
+        // If ≥ 90% overlap, this is a duplicate import
+        if (overlapRatio >= 0.9) {
+          const duplicateReport = {
+            ...dryRunReport,
+            is_duplicate: true,
+            duplicate_of_job_id: existingJob.id,
+            duplicate_of_job_name: existingJob.pilot_job_name,
+            overlap_count: overlapCount,
+            overlap_ratio: Math.round(overlapRatio * 100),
+            message: `This batch is a duplicate of "${existingJob.pilot_job_name}" (${Math.round(overlapRatio * 100)}% overlap). Import blocked to prevent duplication.`,
+          };
+
+          if (mode === 'dry_run') {
+            return NextResponse.json({ success: true, mode: 'dry_run', report: duplicateReport });
+          }
+
+          // For confirmed import, block it and return the existing job
+          return NextResponse.json({
+            success: false,
+            mode: 'import',
+            error: `Duplicate import blocked: ${Math.round(overlapRatio * 100)}% of these assets already exist in "${existingJob.pilot_job_name}". Use the existing batch in Human Validation.`,
+            duplicate_of_job_id: existingJob.id,
+            duplicate_of_job_name: existingJob.pilot_job_name,
+            report: duplicateReport,
+          }, { status: 409 });
+        }
+      }
+    }
+  }
 
   if (mode === 'dry_run') {
     return NextResponse.json({ success: true, mode: 'dry_run', report: dryRunReport });
