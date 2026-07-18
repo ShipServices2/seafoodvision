@@ -1,6 +1,5 @@
 # Node modules
 node_modules/
-package-lock.json
 
 # Next.js build output
 .next/
@@ -35,3 +34,13 @@ jest-test-results.json
 
 # Optional: if using TurboRepo or monorepo
 turbo/
+# Environment variables and secrets
+.env
+.env.local
+.env.development
+.env.development.local
+.env.test
+.env.test.local
+.env.production
+.env.production.local
+.env.*.local
