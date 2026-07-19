@@ -98,15 +98,20 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      if (!mountedRef.current) return;
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchProfile(session.user.id);
-      } else {
-        setProfile(null);
-      }
-      setLoading(false);
+      // Defer state updates to avoid React 19 warning about state updates
+      // on components that haven't mounted yet (onAuthStateChange can fire
+      // synchronously during subscription setup).
+      setTimeout(() => {
+        if (!mountedRef.current) return;
+        setSession(session);
+        setUser(session?.user ?? null);
+        if (session?.user) {
+          fetchProfile(session.user.id);
+        } else {
+          setProfile(null);
+        }
+        setLoading(false);
+      }, 0);
     });
 
     return () => {
