@@ -49,8 +49,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [session, setSession] = useState<any>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
-  const supabase = createClient();
   const mountedRef = useRef(false);
+
+  // createClient now returns a no-op proxy when env vars are missing — safe to call always
+  const supabase = createClient();
 
   const fetchProfile = async (userId: string) => {
     try {
@@ -101,7 +103,6 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   }, []);
 
   const signUp = async (email: string, password: string, metadata: Record<string, string> = {}) => {
-    // Build emailRedirectTo preserving any checkout intent from the current URL
     let callbackUrl = `${window.location.origin}/auth/callback`;
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
@@ -199,3 +200,5 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 };
+
+export default AuthContext;
