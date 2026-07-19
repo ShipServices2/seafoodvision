@@ -2,15 +2,6 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { canAccessAdminRoute, type AppRole } from '@/lib/supabase/roleAuth';
 
-// ── Configuration check (evaluated once at module load, never throws) ────────
-
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-const isSupabaseConfigured =
-  supabaseUrl.length > 0 &&
-  supabaseAnonKey.length > 0 &&
-  !supabaseUrl.includes('placeholder');
-
 /**
  * Routes that are fully public and require no Supabase check.
  * Static assets are already excluded by the matcher pattern below.
@@ -48,16 +39,31 @@ function isPublicRoute(pathname: string): boolean {
   return PUBLIC_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
-function getProjectRef(): string {
-  return supabaseUrl.match(/https:\/\/([^.]+)\./)?.[1] ?? '';
+/**
+ * Evaluated at request time (not module load time) so that NEXT_PUBLIC_*
+ * env vars are always read from the current process environment.
+ */
+function getSupabaseConfig(): { url: string; anonKey: string; configured: boolean } {
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+  const configured =
+    url.length > 0 &&
+    anonKey.length > 0 &&
+    !url.includes('placeholder') &&
+    !url.includes('your-project');
+  return { url, anonKey, configured };
 }
 
-function injectTokenFromHeader(request: NextRequest): void {
+function getProjectRef(url: string): string {
+  return url.match(/https:\/\/([^.]+)\./)?.[1] ?? '';
+}
+
+function injectTokenFromHeader(request: NextRequest, url: string): void {
   const token = request.headers.get('x-sb-token');
   if (!token) return;
   const hasCookie = request.cookies.getAll().some((c) => c.name.includes('auth-token'));
   if (hasCookie) return;
-  request.cookies.set(`sb-${getProjectRef()}-auth-token`, token);
+  request.cookies.set(`sb-${getProjectRef(url)}-auth-token`, token);
 }
 
 export async function middleware(request: NextRequest) {
@@ -67,6 +73,9 @@ export async function middleware(request: NextRequest) {
   if (isPublicRoute(pathname)) {
     return NextResponse.next({ request });
   }
+
+  // ── Read config at request time (not frozen at build time) ───────────────
+  const { url: supabaseUrl, anonKey: supabaseAnonKey, configured: isSupabaseConfigured } = getSupabaseConfig();
 
   // ── Protected routes without Supabase configured → explicit 500 ─────────
   if (!isSupabaseConfigured) {
@@ -104,7 +113,7 @@ export async function middleware(request: NextRequest) {
   }
 
   // ── Supabase is configured — normal auth flow ────────────────────────────
-  injectTokenFromHeader(request);
+  injectTokenFromHeader(request, supabaseUrl);
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
