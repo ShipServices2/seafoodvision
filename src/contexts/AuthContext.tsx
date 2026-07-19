@@ -1,7 +1,7 @@
 'use client';
 
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
-import { createClient } from '@/lib/supabase/client';
+import { createClient, isSupabaseConfigured } from '@/lib/supabase/client';
 
 interface UserProfile {
   id: string;
@@ -23,6 +23,7 @@ interface AuthContextType {
   session: any;
   profile: UserProfile | null;
   loading: boolean;
+  supabaseConfigured: boolean;
   signUp: (email: string, password: string, metadata?: Record<string, string>) => Promise<any>;
   signIn: (email: string, password: string) => Promise<any>;
   signOut: () => Promise<void>;
@@ -51,11 +52,13 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const mountedRef = useRef(false);
 
-  // createClient now returns a no-op proxy when env vars are missing — safe to call always
-  const supabase = createClient();
+  // Check configuration once — never throws at module level
+  const configured = isSupabaseConfigured();
 
   const fetchProfile = async (userId: string) => {
+    if (!configured) return;
     try {
+      const supabase = createClient();
       const { data, error } = await supabase
         .from('profiles')
         .select('*')
@@ -71,6 +74,16 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   useEffect(() => {
     mountedRef.current = true;
+
+    // If Supabase is not configured, skip auth entirely — no fake session
+    if (!configured) {
+      setLoading(false);
+      return () => {
+        mountedRef.current = false;
+      };
+    }
+
+    const supabase = createClient();
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       if (!mountedRef.current) return;
@@ -100,9 +113,14 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       mountedRef.current = false;
       subscription.unsubscribe();
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const signUp = async (email: string, password: string, metadata: Record<string, string> = {}) => {
+    if (!configured) {
+      throw new Error('Authentication is not available: Supabase is not configured.');
+    }
+
     let callbackUrl = `${window.location.origin}/auth/callback`;
     if (typeof window !== 'undefined') {
       const sp = new URLSearchParams(window.location.search);
@@ -119,6 +137,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
       if (qs) callbackUrl += `?${qs}`;
     }
 
+    const supabase = createClient();
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -135,18 +154,30 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
   };
 
   const signIn = async (email: string, password: string) => {
+    if (!configured) {
+      throw new Error('Authentication is not available: Supabase is not configured.');
+    }
+    const supabase = createClient();
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (error) throw error;
     return data;
   };
 
   const signOut = async () => {
+    if (!configured) {
+      throw new Error('Authentication is not available: Supabase is not configured.');
+    }
+    const supabase = createClient();
     const { error } = await supabase.auth.signOut();
     if (error) throw error;
     setProfile(null);
   };
 
   const getCurrentUser = async () => {
+    if (!configured) {
+      throw new Error('Authentication is not available: Supabase is not configured.');
+    }
+    const supabase = createClient();
     const {
       data: { user },
       error,
@@ -161,6 +192,10 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
 
   const getUserProfile = async (): Promise<UserProfile | null> => {
     if (!user) return null;
+    if (!configured) {
+      throw new Error('Authentication is not available: Supabase is not configured.');
+    }
+    const supabase = createClient();
     const { data, error } = await supabase
       .from('profiles')
       .select('*')
@@ -187,6 +222,7 @@ export const AuthProvider = ({ children }: { children: React.ReactNode }) => {
     session,
     profile,
     loading,
+    supabaseConfigured: configured,
     signUp,
     signIn,
     signOut,

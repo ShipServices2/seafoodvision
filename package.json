@@ -58,6 +58,7 @@
     "@tailwindcss/forms": "^0.5.10",
     "@tailwindcss/typography": "^0.5.16",
     "dodopayments": "2.42.2",
+    "jest-mock": "^30.4.1",
     "lucide-react": "^1.7.0",
     "next": "15.5.18",
     "next-intl": "^3.26.3",
