@@ -140,7 +140,16 @@ function AssetThumb({ asset }: { asset: AssetRow }) {
 export default function AIStudioIdentifyPage() {
   const { user, profile, loading } = useAuth();
   const router = useRouter();
-  const supabase = createClient();
+  // Lazy Supabase client — never called at module level or during SSR prerendering.
+  // createClient() is only invoked the first time getSupabase() is called,
+  // which happens inside useEffect / useCallback (browser-only execution).
+  const supabaseRef = useRef<ReturnType<typeof createClient> | null>(null);
+  const getSupabase = useCallback((): ReturnType<typeof createClient> => {
+    if (!supabaseRef.current) {
+      supabaseRef.current = createClient();
+    }
+    return supabaseRef.current;
+  }, []);
 
   // Gallery state
   const [assets, setAssets] = useState<AssetRow[]>([]);
@@ -182,14 +191,14 @@ export default function AIStudioIdentifyPage() {
 
   // ── Fetch identified asset IDs ──────────────────────────────────────────────
   const fetchIdentifiedIds = useCallback(async () => {
-    const { data } = await supabase
+    const { data } = await getSupabase()
       .from('sie_jobs')
       .select('asset_id')
       .not('asset_id', 'is', null)
       .in('job_status', ['proposals_ready', 'validated', 'under_review']);
     const ids = new Set<string>((data ?? []).map((r: { asset_id: string }) => r.asset_id).filter(Boolean));
     setIdentifiedAssetIds(ids);
-  }, [supabase]);
+  }, [getSupabase]);
 
   // ── Fetch assets ────────────────────────────────────────────────────────────
   const fetchAssets = useCallback(async (page = 0) => {
@@ -200,7 +209,7 @@ export default function AIStudioIdentifyPage() {
     const from = page * PAGE_SIZE;
     const to = from + PAGE_SIZE - 1;
 
-    let query = supabase
+    let query = getSupabase()
       .from('assets')
       .select('id, public_asset_id, title, category, review_status, species_id, created_at, is_demo, asset_previews(storage_bucket, storage_path)', { count: 'exact' })
       .order('created_at', { ascending: false })
@@ -251,24 +260,24 @@ export default function AIStudioIdentifyPage() {
     setTotalCount(count ?? 0);
     setCurrentPage(page);
     setAssetsLoading(false);
-  }, [filters, identifiedAssetIds, supabase, user]);
+  }, [filters, identifiedAssetIds, getSupabase, user]);
 
   const fetchMeta = useCallback(async () => {
     if (!profile) return;
     const [cats] = await Promise.all([
-      supabase.from('categories').select('name').order('name'),
+      getSupabase().from('categories').select('name').order('name'),
     ]);
     setCategories((cats.data ?? []).map((c: { name: string }) => c.name));
-  }, [profile, supabase]);
+  }, [profile, getSupabase]);
 
   const fetchRecentJobs = useCallback(async () => {
-    const { data } = await supabase
+    const { data } = await getSupabase()
       .from('sie_jobs')
       .select('id, asset_id, public_asset_id, current_name, job_status, created_at, global_confidence')
       .order('created_at', { ascending: false })
       .limit(5);
     setRecentJobs(data ?? []);
-  }, [supabase]);
+  }, [getSupabase]);
 
   useEffect(() => { fetchIdentifiedIds(); }, [fetchIdentifiedIds]);
   useEffect(() => { fetchAssets(0); }, [fetchAssets]); // re-runs when profile loads (fetchAssets deps include profile indirectly via supabase client)
@@ -279,15 +288,15 @@ export default function AIStudioIdentifyPage() {
   useEffect(() => {
     const fetchStats = async () => {
       const [totalRes, validatedRes] = await Promise.all([
-        supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
+        getSupabase().from('sie_jobs').select('id', { count: 'exact', head: true })
           .in('job_status', ['proposals_ready', 'under_review', 'validated', 'partially_validated']),
-        supabase.from('sie_jobs').select('id', { count: 'exact', head: true })
+        getSupabase().from('sie_jobs').select('id', { count: 'exact', head: true })
           .eq('job_status', 'validated'),
       ]);
       setValidationStats({ total: totalRes.count ?? 0, validated: validatedRes.count ?? 0 });
     };
     fetchStats();
-  }, [supabase]);
+  }, [getSupabase]);
 
   // ── Selection ───────────────────────────────────────────────────────────────
   const toggleSelect = (id: string) => {
@@ -308,7 +317,7 @@ export default function AIStudioIdentifyPage() {
 
   // Select all filtered assets (up to 2000)
   const selectAllFiltered = useCallback(async () => {
-    let query = supabase
+    let query = getSupabase()
       .from('assets')
       .select('id')
       .order('created_at', { ascending: false })
@@ -321,7 +330,7 @@ export default function AIStudioIdentifyPage() {
 
     const { data } = await query;
     setSelectedIds(new Set((data ?? []).map((r: { id: string }) => r.id)));
-  }, [filters, supabase]);
+  }, [filters, getSupabase]);
 
   // ── ETA calculation ──────────────────────────────────────────────────────────
   const calcETA = (processed: number, total: number, startedAt: number): string => {
@@ -385,7 +394,7 @@ export default function AIStudioIdentifyPage() {
       const chunkIds = toProcessIds.slice(i, i + CHUNK);
 
       // Fetch full metadata for chunk
-      const { data: enrichedAssets, error: fetchErr } = await supabase
+      const { data: enrichedAssets, error: fetchErr } = await getSupabase()
         .from('assets')
         .select(`
           id, title, category, product_form, packaging, description,
@@ -450,7 +459,7 @@ export default function AIStudioIdentifyPage() {
         };
       });
 
-      const { data: insertedJobs, error: jobErr } = await supabase
+      const { data: insertedJobs, error: jobErr } = await getSupabase()
         .from('sie_jobs')
         .insert(jobRows)
         .select('id, asset_id');
@@ -529,7 +538,7 @@ export default function AIStudioIdentifyPage() {
       }
 
       if (candidateRows.length > 0) {
-        const { error: candErr } = await supabase.from('sie_species_candidates').insert(candidateRows);
+        const { error: candErr } = await getSupabase().from('sie_species_candidates').insert(candidateRows);
         if (candErr) {
           console.error('[AI Studio] Candidate insert error:', candErr.message, candErr.details, candErr.hint);
           errorCount++;
@@ -537,7 +546,7 @@ export default function AIStudioIdentifyPage() {
         }
       }
       if (suggestionRows.length > 0) {
-        const { error: suggErr } = await supabase.from('metadata_suggestions').insert(suggestionRows);
+        const { error: suggErr } = await getSupabase().from('metadata_suggestions').insert(suggestionRows);
         if (suggErr) {
           console.warn('[AI Studio] Suggestion insert warning (non-critical):', suggErr.message);
         }
