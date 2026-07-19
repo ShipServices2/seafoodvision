@@ -88,10 +88,80 @@ if (typeof window !== 'undefined' && !(window as Record<string, unknown>).__sb_p
   };
 }
 
+// A no-op proxy that silently returns empty/null results when Supabase is not configured.
+// This prevents crashes during static prerendering and allows the app to load so users
+// can see the UI and configure their credentials.
+function createNoOpClient(): ReturnType<typeof createBrowserClient> {
+  const noOpQuery = {
+    select: () => noOpQuery,
+    insert: () => noOpQuery,
+    update: () => noOpQuery,
+    delete: () => noOpQuery,
+    upsert: () => noOpQuery,
+    eq: () => noOpQuery,
+    neq: () => noOpQuery,
+    gt: () => noOpQuery,
+    gte: () => noOpQuery,
+    lt: () => noOpQuery,
+    lte: () => noOpQuery,
+    like: () => noOpQuery,
+    ilike: () => noOpQuery,
+    is: () => noOpQuery,
+    in: () => noOpQuery,
+    not: () => noOpQuery,
+    or: () => noOpQuery,
+    filter: () => noOpQuery,
+    order: () => noOpQuery,
+    limit: () => noOpQuery,
+    range: () => noOpQuery,
+    single: () => Promise.resolve({ data: null, error: null }),
+    maybeSingle: () => Promise.resolve({ data: null, error: null }),
+    then: (resolve: (value: { data: null; error: null; count: null }) => unknown) =>
+      Promise.resolve({ data: null, error: null, count: null }).then(resolve),
+  };
+
+  const noOpAuth = {
+    getSession: () => Promise.resolve({ data: { session: null }, error: null }),
+    getUser: () => Promise.resolve({ data: { user: null }, error: null }),
+    signUp: () => Promise.resolve({ data: null, error: null }),
+    signInWithPassword: () => Promise.resolve({ data: null, error: null }),
+    signOut: () => Promise.resolve({ error: null }),
+    onAuthStateChange: () => ({ data: { subscription: { unsubscribe: () => {} } } }),
+    resetPasswordForEmail: () => Promise.resolve({ data: null, error: null }),
+    updateUser: () => Promise.resolve({ data: null, error: null }),
+    exchangeCodeForSession: () => Promise.resolve({ data: null, error: null }),
+  };
+
+  return {
+    auth: noOpAuth,
+    from: () => noOpQuery,
+    storage: {
+      from: () => ({
+        upload: () => Promise.resolve({ data: null, error: null }),
+        download: () => Promise.resolve({ data: null, error: null }),
+        getPublicUrl: () => ({ data: { publicUrl: '' } }),
+        createSignedUrl: () => Promise.resolve({ data: null, error: null }),
+        list: () => Promise.resolve({ data: [], error: null }),
+        remove: () => Promise.resolve({ data: null, error: null }),
+      }),
+    },
+    rpc: () => Promise.resolve({ data: null, error: null }),
+    channel: () => ({ on: () => ({ subscribe: () => {} }) }),
+    removeChannel: () => Promise.resolve(),
+  } as unknown as ReturnType<typeof createBrowserClient>;
+}
+
 export function createClient() {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseAnonKey || supabaseUrl.includes('placeholder')) {
+    return createNoOpClient();
+  }
+
   return createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll: () => (canUseCookies() ? fromCookies() : fromStorage()),

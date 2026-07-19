@@ -2,9 +2,15 @@ import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { canAccessAdminRoute, type AppRole } from '@/lib/supabase/roleAuth';
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+const isSupabaseConfigured =
+  supabaseUrl.length > 0 &&
+  supabaseAnonKey.length > 0 &&
+  !supabaseUrl.includes('placeholder');
+
 function getProjectRef(): string {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  return url.match(/https:\/\/([^.]+)\./)?.[1] ?? '';
+  return supabaseUrl.match(/https:\/\/([^.]+)\./)?.[1] ?? '';
 }
 
 function injectTokenFromHeader(request: NextRequest): void {
@@ -16,12 +22,17 @@ function injectTokenFromHeader(request: NextRequest): void {
 }
 
 export async function middleware(request: NextRequest) {
+  // If Supabase is not configured, allow all requests through
+  if (!isSupabaseConfigured) {
+    return NextResponse.next({ request });
+  }
+
   injectTokenFromHeader(request);
   let supabaseResponse = NextResponse.next({ request });
 
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
