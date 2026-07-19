@@ -11,7 +11,7 @@ import { ArrowRight, RefreshCw, AlertCircle, ShoppingCart, CheckCircle2, Setting
 type ResumeState =
   | 'loading' |'creating_checkout' |'redirecting' |'error' |'no_intent' |'not_configured';
 
-type CheckoutType = 'subscription' | 'asset_license' | 'unknown';
+type CheckoutType = 'subscription' | 'asset_license' | 'credit_pack' | 'unknown';
 
 export default function CheckoutResumeContent() {
   const searchParams = useSearchParams();
@@ -26,11 +26,15 @@ export default function CheckoutResumeContent() {
   const assetId = searchParams.get('asset_id');
   const licenseTypeCode = searchParams.get('license_type');
   const unitProductCode = searchParams.get('unit_product');
+  const creditPackCode = searchParams.get('credit_pack');
 
   const checkoutType: CheckoutType = plan
     ? 'subscription'
     : assetId && licenseTypeCode && unitProductCode
-    ? 'asset_license' :'unknown';
+    ? 'asset_license'
+    : creditPackCode
+    ? 'credit_pack'
+    : 'unknown';
 
   const [state, setState] = useState<ResumeState>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -50,6 +54,7 @@ export default function CheckoutResumeContent() {
       if (assetId) currentParams.set('asset_id', assetId);
       if (licenseTypeCode) currentParams.set('license_type', licenseTypeCode);
       if (unitProductCode) currentParams.set('unit_product', unitProductCode);
+      if (creditPackCode) currentParams.set('credit_pack', creditPackCode);
       router.replace(`/auth/sign-in?${currentParams.toString()}`);
       return;
     }
@@ -94,16 +99,22 @@ export default function CheckoutResumeContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'subscription',
-            planCode: plan && !plan.includes('_') ? `${plan}_${cycle}` : plan,
+            planCode: plan?.replace(/_(monthly|annual)$/i, ''),
             billingCycle: cycle,
           }),
         });
-      } else {
+      } else if (checkoutType === 'asset_license') {
         // asset_license
         res = await fetch('/api/payments/dodo/checkout', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ assetId, licenseTypeCode, unitProductCode }),
+        });
+      } else {
+        res = await fetch('/api/payments/dodo/credit-checkout', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ packCode: creditPackCode }),
         });
       }
 
@@ -160,6 +171,8 @@ export default function CheckoutResumeContent() {
         })()
       : checkoutType === 'asset_license'
       ? `Image license (${licenseTypeCode ?? ''})`
+      : checkoutType === 'credit_pack'
+      ? `Credit pack (${creditPackCode ?? ''})`
       : '';
 
   // Intent summary for display (never lost — shown in all non-loading states)
@@ -171,6 +184,8 @@ export default function CheckoutResumeContent() {
           label: 'License',
           value: `${licenseTypeCode ?? ''} — asset ${assetId?.slice(0, 8) ?? ''}`,
         }
+      : checkoutType === 'credit_pack'
+      ? { label: 'Credit pack', value: creditPackCode ?? '' }
       : null;
 
   return (

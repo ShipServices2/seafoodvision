@@ -133,11 +133,11 @@ export default function MediaLinkingContent() {
     selected: string;
     setSelected: (v: string) => void;
   }> = [
-    { type: 'species', label: 'Species', icon: Fish, options: species as LinkTypeOption[], nameKey: 'common_name', selected: selectedSpecies, setSelected: setSelectedSpecies },
-    { type: 'product', label: 'Product', icon: ShoppingBag, options: products as LinkTypeOption[], nameKey: 'public_name', selected: selectedProduct, setSelected: setSelectedProduct },
-    { type: 'market', label: 'Market', icon: Globe, options: markets as LinkTypeOption[], nameKey: 'name', selected: selectedMarket, setSelected: setSelectedMarket },
-    { type: 'certification', label: 'Certification', icon: Award, options: certifications as LinkTypeOption[], nameKey: 'name', selected: selectedCert, setSelected: setSelectedCert },
-    { type: 'packaging', label: 'Packaging', icon: Package, options: packagingConfigs as LinkTypeOption[], nameKey: 'name', selected: selectedPkg, setSelected: setSelectedPkg },
+    { type: 'species', label: 'Species', icon: Fish, options: species as unknown as LinkTypeOption[], nameKey: 'common_name', selected: selectedSpecies, setSelected: setSelectedSpecies },
+    { type: 'product', label: 'Product', icon: ShoppingBag, options: products as unknown as LinkTypeOption[], nameKey: 'public_name', selected: selectedProduct, setSelected: setSelectedProduct },
+    { type: 'market', label: 'Market', icon: Globe, options: markets as unknown as LinkTypeOption[], nameKey: 'name', selected: selectedMarket, setSelected: setSelectedMarket },
+    { type: 'certification', label: 'Certification', icon: Award, options: certifications as unknown as LinkTypeOption[], nameKey: 'name', selected: selectedCert, setSelected: setSelectedCert },
+    { type: 'packaging', label: 'Packaging', icon: Package, options: packagingConfigs as unknown as LinkTypeOption[], nameKey: 'name', selected: selectedPkg, setSelected: setSelectedPkg },
   ];
 
   return (

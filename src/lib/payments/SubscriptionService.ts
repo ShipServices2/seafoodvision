@@ -3,7 +3,7 @@
 // Manages subscription lifecycle: status, cancellation, renewal.
 // ============================================================
 
-import { createClient } from '@/lib/supabase/server';
+import { createServiceClient } from '@/lib/supabase/server';
 import { DodoPaymentsProvider } from './dodo/DodoPaymentsProvider';
 
 const provider = new DodoPaymentsProvider();
@@ -31,7 +31,7 @@ export interface UserSubscriptionRecord {
 export async function getActiveSubscription(
   userId: string
 ): Promise<UserSubscriptionRecord | null> {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
 
   const { data, error } = await supabase
     .from('user_subscriptions')
@@ -76,7 +76,7 @@ export async function cancelSubscriptionAtPeriodEnd(
   userId: string,
   subscriptionId: string
 ): Promise<void> {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
 
   const { data: sub } = await supabase
     .from('user_subscriptions')
@@ -90,8 +90,10 @@ export async function cancelSubscriptionAtPeriodEnd(
 
   const config = provider.getConfig();
   if (config.isEnabled && config.isConfigured && sub.external_subscription_id) {
-    // TODO: Will call provider.cancelSubscription when Dodo is integrated
-    // await provider.cancelSubscription({ externalSubscriptionId: sub.external_subscription_id, cancelAtPeriodEnd: true });
+    await provider.cancelSubscription({
+      externalSubscriptionId: sub.external_subscription_id,
+      cancelAtPeriodEnd: true,
+    });
   }
 
   await supabase
@@ -115,7 +117,7 @@ export async function cancelSubscriptionAtPeriodEnd(
  * Get subscription history for a user.
  */
 export async function getSubscriptionHistory(userId: string): Promise<UserSubscriptionRecord[]> {
-  const supabase = await createClient();
+  const supabase = createServiceClient();
 
   const { data, error } = await supabase
     .from('user_subscriptions')

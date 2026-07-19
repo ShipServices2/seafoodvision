@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@/lib/supabase/server';
+import { createClient, createServiceClient } from '@/lib/supabase/server';
 
 const SIGNED_URL_DURATION = parseInt(process.env.DOWNLOAD_SIGNED_URL_DURATION ?? '3600', 10);
 
@@ -8,13 +8,14 @@ export async function GET(
   { params }: { params: Promise<{ entitlementId: string }> }
 ) {
   const { entitlementId } = await params;
-  const supabase = await createClient();
+  const authClient = await createClient();
 
   // 1. Authenticate user
-  const { data: { user }, error: authError } = await supabase.auth.getUser();
+  const { data: { user }, error: authError } = await authClient.auth.getUser();
   if (authError || !user) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
+  const supabase = createServiceClient();
 
   const ip = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ?? request.headers.get('x-real-ip') ?? null;
   const userAgent = request.headers.get('user-agent') ?? null;
@@ -23,7 +24,7 @@ export async function GET(
   // 2. Load entitlement
   const { data: entitlement, error: entErr } = await supabase
     .from('download_entitlements')
-    .select('*, asset:assets(id, public_asset_id, title, commercial_status, review_status)')
+    .select('*')
     .eq('id', entitlementId)
     .single();
 
@@ -130,12 +131,42 @@ export async function GET(
     );
   }
 
-  // 9. Generate signed URL
+  // 9. Reserve one download atomically before returning a signed URL.
+  const { data: reserved, error: reserveError } = await supabase
+    .from('download_entitlements')
+    .update({
+      downloads_used: downloadsUsed + 1,
+      download_count: downloadsUsed + 1,
+      last_downloaded_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', entitlementId)
+    .eq('downloads_used', downloadsUsed)
+    .select('id')
+    .maybeSingle();
+  if (reserveError || !reserved) {
+    return NextResponse.json(
+      { error: 'Download entitlement changed; retry the request' },
+      { status: 409 }
+    );
+  }
+
+  // 10. Generate signed URL
   const { data: signedData, error: signedError } = await supabase.storage
     .from(assetFile.storage_bucket)
     .createSignedUrl(assetFile.storage_path, SIGNED_URL_DURATION);
 
   if (signedError || !signedData?.signedUrl) {
+    // Release the reserved quota when URL generation fails.
+    await supabase
+      .from('download_entitlements')
+      .update({
+        downloads_used: downloadsUsed,
+        download_count: downloadsUsed,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', entitlementId)
+      .eq('downloads_used', downloadsUsed + 1);
     await logDownloadEvent(supabase, {
       userId: user.id,
       assetId: entitlement.asset_id,
@@ -148,17 +179,6 @@ export async function GET(
     });
     return NextResponse.json({ error: 'Failed to generate download URL' }, { status: 500 });
   }
-
-  // 10. Increment download counter
-  await supabase
-    .from('download_entitlements')
-    .update({
-      downloads_used: downloadsUsed + 1,
-      download_count: downloadsUsed + 1,
-      last_downloaded_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', entitlementId);
 
   // 11. Log successful download
   await logDownloadEvent(supabase, {
@@ -182,7 +202,7 @@ export async function GET(
 }
 
 async function logDownloadEvent(
-  supabase: Awaited<ReturnType<typeof createClient>>,
+  supabase: ReturnType<typeof createServiceClient>,
   params: {
     userId: string;
     assetId: string;

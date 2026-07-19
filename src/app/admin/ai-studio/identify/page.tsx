@@ -351,7 +351,7 @@ export default function AIStudioIdentifyPage() {
       id: batchId,
       jobIds: [],
       assetCount: toProcessIds.length,
-      reviewer: profile?.full_name ?? profile?.email ?? 'Reviewer',
+      reviewer: profile?.display_name ?? profile?.email ?? 'Reviewer',
       createdAt: new Date().toISOString(),
       status: 'running',
       processed: 0,
@@ -408,8 +408,8 @@ export default function AIStudioIdentifyPage() {
       }>();
 
       for (const ea of (enrichedAssets ?? [])) {
-        const speciesData = ea.species as { common_name: string; scientific_name: string; family: string } | null;
-        const kws = (ea.asset_keywords as { keywords: { term: string } | null }[] ?? [])
+        const speciesData = ea.species as unknown as { common_name: string; scientific_name: string; family: string } | null;
+        const kws = (ea.asset_keywords as unknown as { keywords: { term: string } | null }[] ?? [])
           .map((ak: { keywords: { term: string } | null }) => ak.keywords?.term)
           .filter((t: string | undefined): t is string => !!t);
         enrichedMap.set(ea.id, {

@@ -28,6 +28,8 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
   const licenseTypeCode = searchParams.get('license_type');
   const unitProductCode = searchParams.get('unit_product');
   const hasAssetIntent = !!(assetId && licenseTypeCode && unitProductCode);
+  const creditPackCode = searchParams.get('credit_pack');
+  const hasCreditIntent = !!creditPackCode;
 
   const { user, loading, signIn, signUp } = useAuth();
 
@@ -58,6 +60,9 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
         unit_product: unitProductCode!,
       });
       return `/checkout/resume?${params.toString()}`;
+    }
+    if (hasCheckoutIntent && hasCreditIntent) {
+      return `/checkout/resume?credit_pack=${encodeURIComponent(creditPackCode!)}`;
     }
     return next;
   }
@@ -135,6 +140,16 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
           <CheckCircle2 size={16} className="text-secondary shrink-0" />
           <p className="text-sm text-foreground">
             You selected an image license.
+            {mode === 'login' ? ' Sign in' : ' Create your account'} to continue to checkout.
+          </p>
+        </div>
+      )}
+
+      {hasCheckoutIntent && hasCreditIntent && !plan && !hasAssetIntent && (
+        <div className="w-full max-w-md mb-4 bg-secondary/10 border border-secondary/30 rounded-xl px-4 py-3 flex items-center gap-3">
+          <CheckCircle2 size={16} className="text-secondary shrink-0" />
+          <p className="text-sm text-foreground">
+            You selected a credit pack.
             {mode === 'login' ? ' Sign in' : ' Create your account'} to continue to checkout.
           </p>
         </div>

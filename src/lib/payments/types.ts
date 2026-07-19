@@ -114,6 +114,7 @@ export interface CreateOrderParams {
   currency: string;
   items: OrderItemInput[];
   metadata?: Record<string, unknown>;
+  checkoutKey?: string;
 }
 
 export interface OrderItemInput {
@@ -143,4 +144,6 @@ export interface OrderRecord {
   updatedAt: string;
   paidAt?: string;
   cancelledAt?: string;
+  checkoutUrl?: string;
+  reused?: boolean;
 }

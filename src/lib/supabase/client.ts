@@ -70,8 +70,8 @@ const getToken = () =>
     c.name.includes('auth-token')
   )?.value ?? null;
 
-if (typeof window !== 'undefined' && !(window as Record<string, unknown>).__sb_patched__) {
-  (window as Record<string, unknown>).__sb_patched__ = true;
+if (typeof window !== 'undefined' && !(window as unknown as Record<string, unknown>).__sb_patched__) {
+  (window as unknown as Record<string, unknown>).__sb_patched__ = true;
   const orig = window.fetch.bind(window);
   window.fetch = (input, init) => {
     const token = getToken();

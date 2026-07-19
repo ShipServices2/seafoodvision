@@ -359,5 +359,5 @@ export async function fetchSimilarAssets(
     console.error('fetchSimilarAssets error:', error.message);
     return [];
   }
-  return (data as AssetRow[]) || [];
+  return (data as unknown as AssetRow[]) || [];
 }

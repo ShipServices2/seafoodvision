@@ -161,8 +161,10 @@ export class DodoPaymentsProvider implements PaymentProvider {
   async cancelSubscription(params: CancelSubscriptionParams): Promise<void> {
     const client = createDodoClient();
     await client.subscriptions.update(params.externalSubscriptionId, {
-      status: 'cancelled',
-    } as Parameters<typeof client.subscriptions.update>[1]);
+      cancel_at_next_billing_date: params.cancelAtPeriodEnd,
+      ...(params.cancelAtPeriodEnd ? {} : { status: 'cancelled' as const }),
+      cancel_reason: 'cancelled_by_customer',
+    });
   }
 
   async verifyWebhookSignature(
