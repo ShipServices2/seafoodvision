@@ -83,14 +83,18 @@ export default function CheckoutResumeContent() {
       // ── Server-side configuration check ──────────────────
       // This check runs on the server where process.env is available.
       // Never rely on client-side env vars for payment configuration.
-      const configRes = await fetch('/api/payments/dodo/config-check');
-      if (configRes.ok) {
-        const configData = await configRes.json() as { isCheckoutReady: boolean };
-        if (!configData.isCheckoutReady) {
-          setState('not_configured');
-          setErrorMessage('Dodo Payments is not configured for checkout.');
-          return;
-        }
+      const configRes = await fetch('/api/payments/dodo/config-check', {
+        cache: 'no-store',
+        headers: { 'Cache-Control': 'no-cache' },
+      });
+      if (!configRes.ok) {
+        throw new Error('Unable to verify payment configuration. Please retry.');
+      }
+      const configData = await configRes.json() as { isCheckoutReady: boolean };
+      if (!configData.isCheckoutReady) {
+        setState('not_configured');
+        setErrorMessage('Dodo Payments is not configured for checkout.');
+        return;
       }
       // ─────────────────────────────────────────────────────
 
@@ -125,12 +129,12 @@ export default function CheckoutResumeContent() {
       const data = await res.json();
 
       if (!res.ok) {
-        const errMsg = (data as { error?: string }).error ?? 'Checkout failed';
+        const checkoutError = data as { error?: string; errorCode?: string };
+        const errMsg = checkoutError.error ?? 'Checkout failed';
         // Detect Dodo not configured — show informative state, preserve intent
         if (
-          errMsg.toLowerCase().includes('not configured') ||
-          errMsg.toLowerCase().includes('disabled') ||
-          errMsg.toLowerCase().includes('dodo payments')
+          ['provider_disabled', 'api_key_missing', 'environment_invalid']
+            .includes(checkoutError.errorCode ?? '')
         ) {
           setState('not_configured');
           setErrorMessage(errMsg);
@@ -243,15 +247,8 @@ export default function CheckoutResumeContent() {
                 Dodo Payments is not configured
               </h1>
               <p className="text-sm text-muted-foreground max-w-sm">
-                The payment provider is not yet configured. Please set{' '}
-                <code className="bg-muted px-1 rounded text-xs">
-                  DODO_PAYMENTS_API_KEY
-                </code>{' '}
-                and{' '}
-                <code className="bg-muted px-1 rounded text-xs">
-                  DODO_PAYMENTS_WEBHOOK_SECRET
-                </code>{' '}
-                in your environment variables to enable checkout.
+                Secure checkout is unavailable because its server-side provider configuration
+                is incomplete. Webhook readiness is checked separately and does not block checkout.
               </p>
 
               {/* Purchase intent preserved — never lost */}

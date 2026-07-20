@@ -15,14 +15,19 @@ export class SupabaseServerConfigurationError extends Error {
   }
 }
 
+function runtimeEnv(name: string): string | null {
+  const value = process.env[name]?.trim();
+  return value ? value : null;
+}
+
 /**
  * Returns true only when both public env vars are present and non-placeholder.
  * Safe to call at module level — never throws.
  */
 export function isSupabaseServerConfigured(): boolean {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
-  return url.length > 0 && key.length > 0 && !url.includes('placeholder');
+  const url = runtimeEnv('NEXT_PUBLIC_SUPABASE_URL');
+  const key = runtimeEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY');
+  return !!url && !!key && !url.includes('placeholder');
 }
 
 /**
@@ -40,8 +45,8 @@ export async function getSupabaseServerClient() {
     throw new SupabaseServerConfigurationError();
   }
 
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+  const supabaseUrl = runtimeEnv('NEXT_PUBLIC_SUPABASE_URL')!;
+  const supabaseAnonKey = runtimeEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY')!;
 
   const cookieStore = await cookies();
 
@@ -83,8 +88,8 @@ export async function createClient() {
  * webhook before using it.
  */
 export function createServiceClient() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const url = runtimeEnv('NEXT_PUBLIC_SUPABASE_URL');
+  const serviceRoleKey = runtimeEnv('SUPABASE_SERVICE_ROLE_KEY');
 
   if (!url || !serviceRoleKey || serviceRoleKey === 'your-service-role-key-here') {
     throw new Error('Supabase service role is not configured for server-side commerce operations');

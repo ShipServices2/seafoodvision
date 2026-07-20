@@ -8,8 +8,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { initiateAssetLicenseCheckout, initiateSubscriptionCheckout } from '@/lib/payments/CheckoutService';
+import { getDodoRuntimeConfig } from '@/lib/payments/dodo/config';
 
 export const dynamic = 'force-dynamic';
+
+function configurationError() {
+  const config = getDodoRuntimeConfig();
+  if (!config.isEnabled) return { errorCode: 'provider_disabled', error: 'Dodo Payments is disabled' };
+  if (!config.environmentValid) return { errorCode: 'environment_invalid', error: 'Dodo Payments environment is invalid' };
+  if (!config.apiKeyFound) return { errorCode: 'api_key_missing', error: 'Dodo Payments API key is not configured' };
+  return null;
+}
+
+function checkoutErrorCode(message: string): string {
+  if (/subscription plan .*not found or inactive/i.test(message)) return 'plan_unavailable';
+  if (/mapping is missing/i.test(message)) return 'mapping_missing';
+  return 'checkout_failed';
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,6 +33,11 @@ export async function POST(request: NextRequest) {
 
     if (!user) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
+    const providerBlocker = configurationError();
+    if (providerBlocker) {
+      return NextResponse.json(providerBlocker, { status: 503 });
     }
 
     const body = await request.json();
@@ -76,6 +96,6 @@ export async function POST(request: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Checkout failed';
     console.error('[checkout/unified] Error:', message);
-    return NextResponse.json({ error: message }, { status: 500 });
+    return NextResponse.json({ error: message, errorCode: checkoutErrorCode(message) }, { status: 500 });
   }
 }

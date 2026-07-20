@@ -13,6 +13,7 @@ import {
   handleRefundIssued,
 } from '@/lib/payments/WebhookService';
 import type { PaymentEnvironment } from '@/lib/payments/types';
+import { getDodoRuntimeConfig } from '@/lib/payments/dodo/config';
 
 // Disable body parsing — we need the raw body for signature verification
 export const dynamic = 'force-dynamic';
@@ -34,9 +35,13 @@ export async function POST(request: NextRequest) {
     'webhook-timestamp': request.headers.get('webhook-timestamp') ?? '',
   };
 
-  const webhookSecret = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
-  const webhookSecretConfigured = !!(webhookSecret && webhookSecret.length > 0);
-  const environment = (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as PaymentEnvironment;
+  const runtimeConfig = getDodoRuntimeConfig();
+  const environment = (runtimeConfig.environment === 'invalid' ? 'test' : runtimeConfig.environment) as PaymentEnvironment;
+
+  if (!runtimeConfig.isWebhookReady) {
+    console.error('[webhook/dodo] Webhook configuration is incomplete');
+    return NextResponse.json({ error: 'Webhook configuration is incomplete' }, { status: 503 });
+  }
 
   // 1. Verify webhook signature
   let verificationResult: {
@@ -46,7 +51,7 @@ export async function POST(request: NextRequest) {
     externalEventId: string;
   } | null = null;
 
-  if (webhookSecretConfigured) {
+  if (runtimeConfig.isWebhookReady) {
     // STRICT: webhook secret is configured — always verify signature
     try {
       const result = await provider.verifyWebhookSignature(rawBody, '', webhookHeaders);
