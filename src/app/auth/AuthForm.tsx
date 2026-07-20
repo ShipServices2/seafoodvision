@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Eye, EyeOff, Fish, Mail, Lock, User, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Eye, EyeOff, Mail, Lock, User, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import Link from 'next/link';
+import Image from 'next/image';
 
 type AuthMode = 'login' | 'register';
 
@@ -118,9 +119,14 @@ export default function AuthForm({ defaultMode = 'login' }: AuthFormProps) {
     <div className="min-h-screen gradient-hero flex flex-col items-center justify-center px-4 py-16">
       {/* Logo */}
       <Link href="/" className="flex items-center gap-2.5 mb-10">
-        <div className="w-9 h-9 rounded-xl bg-secondary/20 border border-secondary/30 flex items-center justify-center">
-          <Fish size={18} className="text-secondary" />
-        </div>
+        <Image
+          src="/assets/images/LOGO_SEAFOODVISION-1784570594128.png"
+          alt="SeafoodVision logo"
+          width={44}
+          height={44}
+          className="object-contain"
+          priority
+        />
         <span className="text-white font-bold text-lg tracking-tight">SeafoodVision</span>
       </Link>
 
