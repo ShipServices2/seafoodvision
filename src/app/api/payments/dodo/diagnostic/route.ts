@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
+import { getDodoRuntimeConfig } from '@/lib/payments/dodo/config';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,17 +22,12 @@ export async function GET() {
 
     // ── Variable audit (server-side only — never expose values) ──────────────
     // DODO_PAYMENTS_API_KEY: required for checkout
-    const apiKeyConfigured = !!(
-      process.env.DODO_PAYMENTS_API_KEY &&
-      process.env.DODO_PAYMENTS_API_KEY?.length > 0
-    );
+    const runtimeConfig = getDodoRuntimeConfig();
+    const apiKeyConfigured = runtimeConfig.apiKeyFound;
     // DODO_PAYMENTS_WEBHOOK_SECRET: required for webhook signature verification
-    const webhookSecretConfigured = !!(
-      process.env.DODO_PAYMENTS_WEBHOOK_SECRET &&
-      process.env.DODO_PAYMENTS_WEBHOOK_SECRET?.length > 0
-    );
-    const environment = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
-    const providerEnabled = process.env.NEXT_PUBLIC_DODO_PAYMENTS_ENABLED === 'true';
+    const webhookSecretConfigured = runtimeConfig.webhookSecretFound;
+    const environment = runtimeConfig.environment;
+    const providerEnabled = runtimeConfig.isEnabled;
     const returnUrlConfigured = !!(
       process.env.DODO_PAYMENTS_RETURN_URL &&
       process.env.DODO_PAYMENTS_RETURN_URL?.length > 0
@@ -42,9 +38,9 @@ export async function GET() {
     );
 
     // Checkout is ready when API key is present and provider is enabled
-    const checkoutReady = providerEnabled && apiKeyConfigured;
+    const checkoutReady = runtimeConfig.isCheckoutReady;
     // Webhook verification is ready when webhook secret is present
-    const webhookReady = webhookSecretConfigured;
+    const webhookReady = runtimeConfig.isWebhookReady;
 
     // Return URLs (safe to show — not secrets)
     const returnUrl =

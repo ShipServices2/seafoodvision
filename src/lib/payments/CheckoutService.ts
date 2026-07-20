@@ -13,6 +13,10 @@ import {
   validateAssetLicensePurchase,
   validateCreditPackPurchase,
   validateSubscriptionPurchase,
+} from './CommercialValidationService';
+import { getDodoRuntimeConfig } from './dodo/config';
+
+export {
   getCommercialAssetBlockers,
 } from './CommercialValidationService';
 import type { CommercialAssetSnapshot } from './CommercialValidationService';
@@ -23,11 +27,11 @@ export type { CommercialAssetSnapshot };
 const provider = new DodoPaymentsProvider();
 
 function environment(): 'test' | 'production' {
-  return (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production';
+  return getDodoRuntimeConfig().environment === 'production' ? 'production' : 'test';
 }
 
 function assertProviderReady(): void {
-  if (!provider.getConfig().isCheckoutReady) {
+  if (!getDodoRuntimeConfig().isCheckoutReady) {
     throw new Error('Dodo Payments is not configured for checkout');
   }
 }

@@ -22,18 +22,18 @@ import type {
   PaymentStatusResult,
   PaymentProviderConfig,
 } from '../types';
-import { getDodoConfig } from './config';
+import { getDodoConfig, getDodoRuntimeConfig } from './config';
 
 function createDodoClient(): DodoPayments {
-  const apiKey = process.env.DODO_PAYMENTS_API_KEY;
-  const env = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
+  const apiKey = process.env.DODO_PAYMENTS_API_KEY?.trim();
+  const runtime = getDodoRuntimeConfig();
   // The Dodo SDK constructor accepts webhookKey for signature verification.
   // We read DODO_PAYMENTS_WEBHOOK_SECRET (our env var name) and pass it as webhookKey.
-  const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+  const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET?.trim();
 
   return new DodoPayments({
     bearerToken: apiKey,
-    environment: env === 'production' ? 'live_mode' : 'test_mode',
+    environment: runtime.environment === 'production' ? 'live_mode' : 'test_mode',
     ...(webhookKey ? { webhookKey } : {}),
   });
 }
@@ -170,7 +170,7 @@ export class DodoPaymentsProvider implements PaymentProvider {
     _signature: string,
     headers?: Record<string, string>
   ): Promise<WebhookVerificationResult> {
-    const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET;
+    const webhookKey = process.env.DODO_PAYMENTS_WEBHOOK_SECRET?.trim();
     if (!webhookKey) {
       throw new Error('DODO_PAYMENTS_WEBHOOK_SECRET is not set');
     }
@@ -178,8 +178,8 @@ export class DodoPaymentsProvider implements PaymentProvider {
     // Create a client with the webhook key for signature verification.
     // The SDK's webhooks.unwrap() uses the webhookKey passed to the constructor.
     const client = new DodoPayments({
-      bearerToken: process.env.DODO_PAYMENTS_API_KEY,
-      environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') === 'production' ? 'live_mode' : 'test_mode',
+      bearerToken: process.env.DODO_PAYMENTS_API_KEY?.trim(),
+      environment: getDodoRuntimeConfig().environment === 'production' ? 'live_mode' : 'test_mode',
       webhookKey,
     });
 
