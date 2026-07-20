@@ -13,12 +13,12 @@ import {
   validateAssetLicensePurchase,
   validateCreditPackPurchase,
   validateSubscriptionPurchase,
-} from './CommercialValidationService';
-
-export {
   getCommercialAssetBlockers,
-  type CommercialAssetSnapshot,
 } from './CommercialValidationService';
+import type { CommercialAssetSnapshot } from './CommercialValidationService';
+
+export { getCommercialAssetBlockers };
+export type { CommercialAssetSnapshot };
 
 const provider = new DodoPaymentsProvider();
 

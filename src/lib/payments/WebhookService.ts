@@ -183,11 +183,8 @@ export async function handlePaymentSucceeded(
     currency: order.currency,
     status: 'succeeded',
     payment_type:
-      order.order_type === 'subscription'
-        ? 'subscription'
-        : order.order_type === 'credit_pack'
-          ? 'credit_pack'
-          : 'one_time',
+      order.order_type === 'subscription' ?'subscription'
+        : order.order_type === 'credit_pack' ?'credit_pack' :'one_time',
     environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production',
     raw_status: String(data['status'] ?? 'succeeded'),
     succeeded_at: new Date().toISOString(),
@@ -271,7 +268,7 @@ async function fulfillAssetLicenseOrder(
     throw new Error(`Asset license order item is incomplete: ${itemError?.message ?? order.id}`);
   }
 
-  const [{ data: licenseType }, { data: product }] = await Promise.all([
+  const [licenseTypeResult, productResult] = await Promise.all([
     supabase.from('license_types').select('terms_version').eq('id', item.license_type_id).single(),
     supabase
       .from('unit_products')
@@ -279,6 +276,8 @@ async function fulfillAssetLicenseOrder(
       .eq('id', item.internal_product_id)
       .single(),
   ]);
+  const licenseType = licenseTypeResult.data;
+  const product = productResult.data;
 
   const { data: purchasedLicense, error: licenseError } = await supabase
     .from('purchased_licenses')

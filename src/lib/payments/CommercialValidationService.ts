@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server';
 
+
 type CommerceClient = ReturnType<typeof createServiceClient>;
 type BillingCycle = 'monthly' | 'annual';
 type Environment = 'test' | 'production';

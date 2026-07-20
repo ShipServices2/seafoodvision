@@ -33,8 +33,7 @@ export default function CheckoutResumeContent() {
     : assetId && licenseTypeCode && unitProductCode
     ? 'asset_license'
     : creditPackCode
-    ? 'credit_pack'
-    : 'unknown';
+    ? 'credit_pack' :'unknown';
 
   const [state, setState] = useState<ResumeState>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
