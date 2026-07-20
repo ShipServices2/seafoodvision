@@ -7,6 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { ArrowRight, RefreshCw, AlertCircle, ShoppingCart, CheckCircle2, Settings } from 'lucide-react';
+import { resolveSubscriptionSelection } from '@/lib/payments/subscriptionPlanResolution';
 
 type ResumeState =
   | 'loading' |'creating_checkout' |'redirecting' |'error' |'no_intent' |'not_configured';
@@ -20,7 +21,10 @@ export default function CheckoutResumeContent() {
 
   // Subscription params
   const plan = searchParams.get('plan');
-  const cycle = (searchParams.get('cycle') ?? 'monthly') as 'monthly' | 'annual';
+  const subscriptionSelection = plan
+    ? resolveSubscriptionSelection(plan, searchParams.get('cycle'))
+    : null;
+  const cycle = subscriptionSelection?.billingCycle ?? 'monthly';
 
   // Asset license params
   const assetId = searchParams.get('asset_id');
@@ -99,7 +103,7 @@ export default function CheckoutResumeContent() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             type: 'subscription',
-            planCode: plan?.replace(/_(monthly|annual)$/i, ''),
+            planCode: subscriptionSelection?.planCode,
             billingCycle: cycle,
           }),
         });
