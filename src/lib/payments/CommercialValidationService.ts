@@ -1,4 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server';
+import { CommercialValidationResult } from '@/lib/payments/CommercialValidationService';
+
 
 
 type CommerceClient = ReturnType<typeof createServiceClient>;
