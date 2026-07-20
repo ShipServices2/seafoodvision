@@ -275,10 +275,12 @@ async function fulfillAssetLicenseOrder(
     if (!item.asset_id || !item.license_type_id || !item.internal_product_id) {
       throw new Error(`Asset license order item is incomplete: ${item.id}`);
     }
-    const [{ data: licenseType }, { data: product }] = await Promise.all([
+    const [licenseTypeResult, productResult] = await Promise.all([
       supabase.from('license_types').select('terms_version').eq('id', item.license_type_id).single(),
       supabase.from('unit_products').select('resolution_allowed, download_quota').eq('id', item.internal_product_id).single(),
     ]);
+    const licenseType = licenseTypeResult.data;
+    const product = productResult.data;
     const licenseValues = {
       user_id: order.user_id,
       asset_id: item.asset_id,

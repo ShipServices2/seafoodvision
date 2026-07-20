@@ -81,13 +81,17 @@ type ValidatedLine = {
 };
 
 export class CartError extends Error {
+  public readonly code: string;
+  public readonly status: number;
   constructor(
-    public readonly code: string,
+    code: string,
     message: string,
-    public readonly status = 400
+    status = 400
   ) {
     super(message);
     this.name = 'CartError';
+    this.code = code;
+    this.status = status;
   }
 }
 
