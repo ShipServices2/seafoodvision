@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { CheckCircle2, Loader2, Minus, Plus, ShoppingCart, Trash2, XCircle } from 'lucide-react';
@@ -10,6 +10,14 @@ import { useAuth } from '@/contexts/AuthContext';
 import type { CartSnapshot, CartValidationResult } from '@/lib/payments/CartService';
 
 export default function CartPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" aria-busy="true" />}>
+      <CartPageContent />
+    </Suspense>
+  );
+}
+
+function CartPageContent() {
   const { user, loading: authLoading } = useAuth();
   const router = useRouter();
   const searchParams = useSearchParams();
