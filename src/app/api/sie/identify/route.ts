@@ -61,8 +61,8 @@ export async function POST(req: NextRequest) {
         .single();
 
       if (asset) {
-        const speciesData = asset.species as { common_name: string; scientific_name: string; family: string } | null;
-        const keywordTerms = (asset.asset_keywords as { keywords: { term: string } | null }[] ?? [])
+        const speciesData = asset.species as unknown as { common_name: string; scientific_name: string; family: string } | null;
+        const keywordTerms = (asset.asset_keywords as unknown as { keywords: { term: string } | null }[] ?? [])
           .map((ak) => ak.keywords?.term)
           .filter((t): t is string => !!t);
 

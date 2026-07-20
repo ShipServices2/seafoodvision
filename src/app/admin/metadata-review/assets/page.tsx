@@ -288,7 +288,7 @@ export default function AssetReviewPage() {
         }))
       );
 
-      showToast(`Bulk action "${bulkAction}" applied to ${ids.size} assets.`, 'success');
+      showToast(`Bulk action "${bulkAction}" applied to ${ids.length} assets.`, 'success');
       setSelectedIds(new Set());
       setBulkAction('');
       setBulkParam('');

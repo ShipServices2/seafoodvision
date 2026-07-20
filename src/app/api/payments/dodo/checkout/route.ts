@@ -47,25 +47,6 @@ export async function POST(request: NextRequest) {
 
       // Idempotency: if a pending order already exists for this user+plan+cycle
       // within the last 10 minutes, reuse it instead of creating a duplicate.
-      const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
-      const { data: existingOrder } = await supabase
-        .from('orders')
-        .select('id, external_checkout_id, status')
-        .eq('user_id', user.id)
-        .eq('order_type', 'subscription')
-        .in('status', ['pending', 'draft'])
-        .gte('created_at', tenMinutesAgo)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-
-      if (existingOrder?.external_checkout_id) {
-        // Reuse existing checkout session — return the stored checkout URL
-        // We can't retrieve the URL from Dodo without calling their API again,
-        // so we re-initiate (Dodo is idempotent on product_cart + customer).
-        // Fall through to create a new session with the same order.
-      }
-
       const result = await initiateSubscriptionCheckout({
         userId: user.id,
         userEmail: user.email ?? '',

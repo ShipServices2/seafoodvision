@@ -192,7 +192,7 @@ export async function fetchUserFavorites(userId: string): Promise<Favorite[]> {
     console.error('fetchUserFavorites error:', error.message);
     return [];
   }
-  return (data as Favorite[]) || [];
+  return (data as unknown as Favorite[]) || [];
 }
 
 export async function checkIsFavorited(userId: string, assetId: string): Promise<boolean> {
@@ -292,7 +292,7 @@ export async function fetchCollectionItems(
     console.error('fetchCollectionItems error:', error.message);
     return [];
   }
-  return (data as CollectionItem[]) || [];
+  return (data as unknown as CollectionItem[]) || [];
 }
 
 export async function createCollection(

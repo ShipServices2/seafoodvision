@@ -516,7 +516,7 @@ export async function fetchEncProductList(opts: {
     console.error('fetchEncProductList error:', error.message);
     return { data: [], total: 0, page, pageSize };
   }
-  return { data: (data as EncProduct[]) || [], total: count ?? 0, page, pageSize };
+  return { data: (data as unknown as EncProduct[]) || [], total: count ?? 0, page, pageSize };
 }
 
 export async function fetchEncProductBySlug(slug: string): Promise<EncProduct | null> {
@@ -657,7 +657,7 @@ export async function fetchEncDocumentList(opts: {
 
   const { data, count, error } = await query;
   if (error) { console.error('fetchEncDocumentList error:', error.message); return { data: [], total: 0, page, pageSize }; }
-  return { data: (data as EncDocument[]) || [], total: count ?? 0, page, pageSize };
+  return { data: (data as unknown as EncDocument[]) || [], total: count ?? 0, page, pageSize };
 }
 
 // ============================================================
@@ -684,7 +684,7 @@ export async function fetchEncPackagingList(opts: {
 
   const { data, count, error } = await query;
   if (error) { console.error('fetchEncPackagingList error:', error.message); return { data: [], total: 0, page, pageSize }; }
-  return { data: (data as EncPackaging[]) || [], total: count ?? 0, page, pageSize };
+  return { data: (data as unknown as EncPackaging[]) || [], total: count ?? 0, page, pageSize };
 }
 
 // ============================================================

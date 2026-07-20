@@ -175,7 +175,7 @@ export async function POST(req: NextRequest) {
     await supabase.rpc('assistant_upsert_unanswered', {
       p_question: question.toLowerCase().trim(),
       p_locale: locale,
-    }).catch(() => {});
+    });
   }
 
   // ---- Log usage ----

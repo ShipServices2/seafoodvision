@@ -7,10 +7,14 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { CheckCircle2, XCircle, ArrowRight, Zap, BarChart2, HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle } from '@/lib/pricingConfig';
+import { useAuth } from '@/contexts/AuthContext';
 
 export default function PricingPage() {
   const [billing, setBilling] = useState<BillingCycle>('monthly');
+  const [purchasingPack, setPurchasingPack] = useState<string | null>(null);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
   const router = useRouter();
+  const { user } = useAuth();
 
   /**
    * Build the signup URL with checkout intent params so the plan is preserved
@@ -25,7 +29,40 @@ export default function PricingPage() {
       return_to: '/checkout/resume',
       checkout_intent: '1',
     });
-    return `/auth/sign-up?${params.toString()}`;
+    return user
+      ? `/checkout/resume?plan=${encodeURIComponent(planId)}&cycle=${billing}`
+      : `/auth/sign-up?${params.toString()}`;
+  }
+
+  async function purchaseCreditPack(packCode: string) {
+    if (purchasingPack) return;
+    setPurchaseError(null);
+    if (!user) {
+      const params = new URLSearchParams({
+        credit_pack: packCode,
+        return_to: '/checkout/resume',
+        checkout_intent: '1',
+      });
+      router.push(`/auth/sign-in?${params.toString()}`);
+      return;
+    }
+
+    setPurchasingPack(packCode);
+    try {
+      const response = await fetch('/api/payments/dodo/credit-checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packCode }),
+      });
+      const data = await response.json() as { checkoutUrl?: string; error?: string };
+      if (!response.ok || !data.checkoutUrl) {
+        throw new Error(data.error ?? 'Credit pack checkout is unavailable.');
+      }
+      window.location.assign(data.checkoutUrl);
+    } catch (error) {
+      setPurchaseError(error instanceof Error ? error.message : 'Credit pack checkout failed.');
+      setPurchasingPack(null);
+    }
   }
 
   return (
@@ -201,9 +238,20 @@ export default function PricingPage() {
                 <div className="text-sm text-muted-foreground mb-3">credits</div>
                 <div className="text-xl font-bold text-foreground mb-1">{pack.price}€</div>
                 <div className="text-xs text-muted-foreground">{(pack.pricePerCredit * 100).toFixed(1)}¢ per credit</div>
+                <button
+                  type="button"
+                  onClick={() => purchaseCreditPack(pack.id)}
+                  disabled={purchasingPack !== null}
+                  className="mt-4 w-full rounded-lg bg-secondary px-3 py-2 text-sm font-semibold text-white transition-colors hover:bg-secondary/90 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {purchasingPack === pack.id ? 'Opening checkout…' : 'Buy credits'}
+                </button>
               </div>
             ))}
           </div>
+          {purchaseError && (
+            <p role="alert" className="mt-4 text-sm text-red-600">{purchaseError}</p>
+          )}
           <p className="text-xs text-muted-foreground mt-4">
             Credits can be used for downloads (1–15 credits), AI identification (2 credits), smart search (1 credit) and AI generation (5 credits).
           </p>

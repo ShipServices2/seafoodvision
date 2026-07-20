@@ -6,8 +6,8 @@ import { cookies } from 'next/headers';
 // For production scale, use Redis; this works for the current deployment
 const undoStore = new Map<string, { assetIds: string[]; action: string; previousStates: Record<string, string>; expiresAt: number }>();
 
-function createSupabaseServer() {
-  const cookieStore = cookies();
+async function createSupabaseServer() {
+  const cookieStore = await cookies();
   return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
@@ -22,7 +22,7 @@ function createSupabaseServer() {
 }
 
 export async function POST(req: NextRequest) {
-  const supabase = createSupabaseServer();
+  const supabase = await createSupabaseServer();
 
   // Auth check
   const { data: { user } } = await supabase.auth.getUser();

@@ -30,18 +30,18 @@ function formatDimensions(w: number | null, h: number | null): string {
 // License options shown when asset is commercially available
 const LICENSE_OPTIONS = [
   {
-    code: 'standard',
-    name: 'Standard License',
-    unitProductCode: 'image_standard',
-    description: 'Web, social media, editorial use up to 500k impressions',
-    price: '29€',
+    code: 'commercial',
+    name: 'Commercial License',
+    unitProductCode: 'photo_hd',
+    description: 'Commercial web, social media, presentations and print use',
+    price: '20€',
   },
   {
     code: 'extended',
     name: 'Extended License',
-    unitProductCode: 'image_extended',
+    unitProductCode: 'photo_ultrahd',
     description: 'Unlimited digital use, print, merchandise',
-    price: '149€',
+    price: '40€',
   },
 ];
 

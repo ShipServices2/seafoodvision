@@ -758,10 +758,10 @@ export async function fetchSearchAnalytics(): Promise<SearchAnalytics> {
 
   const [totalRes, topQueriesRes, zeroRes, recentRes] = await Promise.all([
     supabase.from('search_events').select('*', { count: 'exact', head: true }),
-    supabase.rpc ? supabase
+    supabase
       .from('search_events')
       .select('query_text_normalized')
-      .limit(200) : Promise.resolve({ data: [] }),
+      .limit(200),
     supabase.from('search_zero_results')
       .select('query_normalized, frequency, locale')
       .order('frequency', { ascending: false })

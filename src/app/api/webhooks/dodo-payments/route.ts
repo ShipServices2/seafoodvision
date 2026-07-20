@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { DodoPaymentsProvider } from '@/lib/payments/dodo/DodoPaymentsProvider';
-import DodoPayments from 'dodopayments';
 import {
   recordWebhookEvent,
   markWebhookProcessing,
@@ -9,6 +8,7 @@ import {
   handlePaymentSucceeded,
   handleCreditPurchaseSucceeded,
   handleSubscriptionActivated,
+  handleSubscriptionStatusChanged,
   handlePaymentFailed,
   handleRefundIssued,
 } from '@/lib/payments/WebhookService';
@@ -66,37 +66,20 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Webhook signature verification failed' }, { status: 401 });
     }
   } else if (environment === 'test') {
-    // TEST MODE without secret: use unsafe_unwrap (no signature verification).
-    // This allows testing via Dodo dashboard test events and CLI trigger.
+    // TEST MODE only: accept raw JSON when no webhook secret is configured.
+    // Production always rejects unsigned events.
     try {
-      const client = new DodoPayments({
-        bearerToken: process.env.DODO_PAYMENTS_API_KEY,
-        environment: 'test_mode',
-      });
-      // unsafe_unwrap parses without verifying signature
-      const unwrapped = client.webhooks.unwrapUnsafe(rawBody);
-      const u = unwrapped as unknown as Record<string, unknown>;
-      const eventType = String(u.type ?? u.event_type ?? 'unknown');
-      const externalEventId = webhookHeaders['webhook-id'] || String(u.id ?? `test-${Date.now()}`);
+      const parsed = JSON.parse(rawBody) as Record<string, unknown>;
+      const eventType = String(parsed.type ?? parsed.event_type ?? 'unknown');
+      const externalEventId = webhookHeaders['webhook-id'] || String(parsed.id ?? `test-${Date.now()}`);
       verificationResult = {
         isValid: true,
-        payload: u,
+        payload: parsed,
         eventType,
         externalEventId,
       };
     } catch {
-      // Fall back to raw JSON parse if unwrapUnsafe is not available
-      try {
-        const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-        verificationResult = {
-          isValid: true,
-          payload: parsed,
-          eventType: String(parsed.type ?? parsed.event_type ?? 'unknown'),
-          externalEventId: webhookHeaders['webhook-id'] || String(parsed.id ?? `test-${Date.now()}`),
-        };
-      } catch {
-        return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
-      }
+      return NextResponse.json({ error: 'Invalid JSON body' }, { status: 400 });
     }
   } else {
     // Production mode without secret — reject
@@ -180,9 +163,11 @@ export async function POST(request: NextRequest) {
       }
 
       // Subscription lifecycle events (log only)
-      case 'subscription.cancelled': case'subscription.expired': case'subscription.on_hold': case'subscription.plan_changed': case'subscription.updated': case'subscription.failed':
-        console.log(`[webhook/dodo] Subscription lifecycle event: ${eventType}`, payload);
+      case 'subscription.cancelled': case'subscription.expired': case'subscription.on_hold': case'subscription.plan_changed': case'subscription.updated': case'subscription.failed': case'subscription.paused': {
+        const result = await handleSubscriptionStatusChanged(payload, eventType);
+        relatedSubscriptionId = result.subscriptionId;
         break;
+      }
 
       // License key events
       case 'license_key.created':
@@ -206,7 +191,8 @@ export async function POST(request: NextRequest) {
       await markWebhookFailed(webhookEventId, message);
     }
 
-    // Return 200 to prevent Dodo from retrying events we've already recorded
-    return NextResponse.json({ received: true, error: message });
+    // A non-2xx response is intentional: Dodo must retry until all local
+    // fulfillment records have been created successfully.
+    return NextResponse.json({ received: false, error: message }, { status: 500 });
   }
 }
