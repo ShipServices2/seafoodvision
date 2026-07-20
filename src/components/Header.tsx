@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import AppLogo from '@/components/ui/AppLogo';
-import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, Compass, Sparkles, Microscope, Building2 } from 'lucide-react';
+import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, ShoppingCart, Compass, Sparkles, Microscope, Building2 } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
 
@@ -42,12 +42,33 @@ export default function Header({ transparent = false }: HeaderProps) {
   const langRef = useRef<HTMLDivElement>(null);
   const { user, profile, signOut } = useAuth();
   const [signingOut, setSigningOut] = useState(false);
+  const [cartCount, setCartCount] = useState(0);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const refreshCartCount = async () => {
+      if (!user) { if (active) setCartCount(0); return; }
+      try {
+        const response = await fetch('/api/cart', { cache: 'no-store' });
+        const data = await response.json() as { lineCount?: number };
+        if (active && response.ok) setCartCount(Number(data.lineCount ?? 0));
+      } catch {
+        if (active) setCartCount(0);
+      }
+    };
+    void refreshCartCount();
+    window.addEventListener('seafoodvision:cart-updated', refreshCartCount);
+    return () => {
+      active = false;
+      window.removeEventListener('seafoodvision:cart-updated', refreshCartCount);
+    };
+  }, [user]);
 
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
@@ -112,6 +133,20 @@ export default function Header({ transparent = false }: HeaderProps) {
 
             {/* Right actions */}
             <div className="ml-auto flex items-center gap-2">
+              <Link
+                href={user ? '/cart' : '/auth/sign-in?return_to=/cart'}
+                aria-label={`Cart with ${cartCount} lines`}
+                className={`relative inline-flex items-center rounded-lg p-2 transition-colors ${
+                  isTransparent ? 'text-white/80 hover:bg-white/10 hover:text-white' : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                <ShoppingCart size={18} />
+                {cartCount > 0 && (
+                  <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-secondary px-1 text-center text-[10px] font-bold leading-4 text-white">
+                    {cartCount > 99 ? '99+' : cartCount}
+                  </span>
+                )}
+              </Link>
               {/* Language selector */}
               <div className="relative" ref={langRef}>
                 <button

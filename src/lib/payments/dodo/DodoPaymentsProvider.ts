@@ -57,12 +57,10 @@ export class DodoPaymentsProvider implements PaymentProvider {
     // Dodo Payments API uses return_url (not success_url) and cancel_url.
     // The response contains checkout_url and session_id.
     const session = await client.checkoutSessions.create({
-      product_cart: [
-        {
-          product_id: params.metadata?.dodoProductId as string ?? params.orderId,
-          quantity: 1,
-        },
-      ],
+      product_cart: (params.productCart?.length
+        ? params.productCart
+        : [{ productId: params.metadata?.dodoProductId ?? params.orderId, quantity: 1 }]
+      ).map((item) => ({ product_id: item.productId, quantity: item.quantity })),
       customer: {
         email: params.userEmail,
       },

@@ -24,6 +24,10 @@ export interface CreateCheckoutParams {
   successUrl: string;
   cancelUrl: string;
   metadata?: Record<string, string>;
+  productCart?: Array<{
+    productId: string;
+    quantity: number;
+  }>;
 }
 
 export interface CheckoutResult {
