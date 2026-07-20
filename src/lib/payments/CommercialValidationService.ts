@@ -1,4 +1,7 @@
 import { createServiceClient } from '@/lib/supabase/server';
+import { canonicalPlanCode } from './subscriptionPlanResolution';
+
+export { canonicalPlanCode } from './subscriptionPlanResolution';
 
 type CommerceClient = ReturnType<typeof createServiceClient>;
 type BillingCycle = 'monthly' | 'annual';
@@ -45,10 +48,6 @@ export interface CommercialAssetSnapshot {
     storage_path?: string | null;
     mime_type?: string | null;
   }> | null;
-}
-
-export function canonicalPlanCode(planCode: string): string {
-  return planCode.trim().toLowerCase().replace(/_(monthly|annual)$/i, '');
 }
 
 export function isValidMoney(value: unknown): boolean {
@@ -225,11 +224,12 @@ export async function validateSubscriptionPurchase(
   client: CommerceClient = createServiceClient()
 ): Promise<CommercialValidationResult> {
   const canonicalCode = canonicalPlanCode(params.planCode);
-  const { data: plans } = await client
+  const { data: plans, error: planError } = await client
     .from('pricing_plans')
     .select('*')
-    .in('plan_code', [canonicalCode, `${canonicalCode}_monthly`])
+    .in('plan_code', [canonicalCode, `${canonicalCode}_monthly`, `${canonicalCode}_annual`])
     .eq('is_active', true);
+  if (planError) return invalid([`subscription catalog lookup failed: ${planError.message}`]);
   const plan = (plans ?? []).find((candidate) => candidate.plan_code === canonicalCode) ?? plans?.[0] ?? null;
   if (!plan) return invalid([`subscription plan ${canonicalCode} not found or inactive`]);
 
