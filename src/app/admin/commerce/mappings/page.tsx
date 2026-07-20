@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { RefreshCw, AlertCircle, CheckCircle2, XCircle } from 'lucide-react';
+import { RefreshCw, AlertCircle, CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
 
 interface Mapping {
   id: string;
@@ -73,6 +73,21 @@ export default function AdminCommerceMappingsPage() {
             </div>
           </div>
         )}
+
+        {/* Dodo product lookup shortcut */}
+        <div className="flex items-center justify-between bg-blue-50 border border-blue-200 rounded-xl px-4 py-3 text-sm mb-6">
+          <div className="text-blue-800">
+            <span className="font-medium">422 sur les packs crédits ?</span>{' '}
+            Vérifiez les Product IDs réels dans votre compte Dodo TEST.
+          </div>
+          <Link
+            href="/admin/commerce/dodo-products"
+            className="inline-flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors flex-shrink-0 ml-4"
+          >
+            <ExternalLink className="w-3 h-3" />
+            Voir les produits Dodo
+          </Link>
+        </div>
 
         <div className="bg-card border border-border rounded-xl p-4 mb-6 text-sm text-muted-foreground">
           <p className="mb-1 font-medium text-foreground">How to add a mapping</p>
