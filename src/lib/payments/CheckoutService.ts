@@ -14,6 +14,7 @@ import {
   validateCreditPackPurchase,
   validateSubscriptionPurchase,
 } from './CommercialValidationService';
+import { getDodoRuntimeConfig } from './dodo/config';
 
 export {
   getCommercialAssetBlockers,
@@ -23,11 +24,11 @@ export {
 const provider = new DodoPaymentsProvider();
 
 function environment(): 'test' | 'production' {
-  return (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production';
+  return getDodoRuntimeConfig().environment === 'production' ? 'production' : 'test';
 }
 
 function assertProviderReady(): void {
-  if (!provider.getConfig().isCheckoutReady) {
+  if (!getDodoRuntimeConfig().isCheckoutReady) {
     throw new Error('Dodo Payments is not configured for checkout');
   }
 }
