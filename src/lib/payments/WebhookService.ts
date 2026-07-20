@@ -233,11 +233,16 @@ export async function handlePaymentSucceeded(
     }
   }
 
-  if (order.order_type === 'asset_license') {
-    await fulfillAssetLicenseOrder(supabase, order, transactionId);
-  } else if (order.order_type === 'credit_pack') {
-    await fulfillCreditPackOrder(supabase, order, transactionId);
-  }
+  const { data: fulfillmentItems, error: fulfillmentItemsError } = await supabase
+    .from('order_items')
+    .select('item_type')
+    .eq('order_id', order.id);
+  if (fulfillmentItemsError) throw new Error(`Failed to load fulfillment lines: ${fulfillmentItemsError.message}`);
+  const itemTypes = new Set((fulfillmentItems ?? []).map((item) => item.item_type));
+  if (itemTypes.has('asset_license')) await fulfillAssetLicenseOrder(supabase, order, transactionId);
+  if (itemTypes.has('credit_pack')) await fulfillCreditPackOrder(supabase, order, transactionId);
+  const unsupported = [...itemTypes].filter((type) => !['asset_license', 'credit_pack'].includes(type));
+  if (unsupported.length) throw new Error(`Unsupported fulfillment line types: ${unsupported.join(', ')}`);
 
   const { error: orderUpdateError } = await supabase
     .from('orders')
@@ -260,90 +265,77 @@ async function fulfillAssetLicenseOrder(
   order: { id: string; user_id: string },
   transactionId: string
 ): Promise<void> {
-  const { data: item, error: itemError } = await supabase
+  const { data: items, error: itemError } = await supabase
     .from('order_items')
-    .select('asset_id, license_type_id, internal_product_id')
+    .select('id, asset_id, license_type_id, internal_product_id')
     .eq('order_id', order.id)
-    .eq('item_type', 'asset_license')
-    .limit(1)
-    .single();
-  if (itemError || !item?.asset_id || !item.license_type_id) {
+    .eq('item_type', 'asset_license');
+  if (itemError || !items?.length) {
     throw new Error(`Asset license order item is incomplete: ${itemError?.message ?? order.id}`);
   }
 
-  const [{ data: licenseType }, { data: product }] = await Promise.all([
-    supabase.from('license_types').select('terms_version').eq('id', item.license_type_id).single(),
-    supabase
-      .from('unit_products')
-      .select('resolution_allowed, download_quota')
-      .eq('id', item.internal_product_id)
-      .single(),
-  ]);
+  for (const item of items) {
+    if (!item.asset_id || !item.license_type_id || !item.internal_product_id) {
+      throw new Error(`Asset license order item is incomplete: ${item.id}`);
+    }
+    const [{ data: licenseType }, { data: product }] = await Promise.all([
+      supabase.from('license_types').select('terms_version').eq('id', item.license_type_id).single(),
+      supabase.from('unit_products').select('resolution_allowed, download_quota').eq('id', item.internal_product_id).single(),
+    ]);
+    const licenseValues = {
+      user_id: order.user_id,
+      asset_id: item.asset_id,
+      order_id: order.id,
+      order_item_id: item.id,
+      transaction_id: transactionId,
+      license_type_id: item.license_type_id,
+      terms_version: licenseType?.terms_version ?? '1.0',
+      status: 'active',
+      metadata: { unitProductId: item.internal_product_id, resolutionAllowed: product?.resolution_allowed ?? 'hd' },
+      updated_at: new Date().toISOString(),
+    };
+    let licenseResult = await supabase.from('purchased_licenses')
+      .upsert(licenseValues, { onConflict: 'order_item_id' }).select('id').single();
+    // Backward-compatible until the Sprint 2 migration is applied remotely.
+    if (licenseResult.error?.code === '42703' || licenseResult.error?.code === '42P10') {
+      const { order_item_id: _orderItemId, ...legacyValues } = licenseValues;
+      licenseResult = await supabase.from('purchased_licenses')
+        .upsert(legacyValues, { onConflict: 'user_id,asset_id,license_type_id,order_id' }).select('id').single();
+    }
+    const purchasedLicense = licenseResult.data;
+    if (licenseResult.error || !purchasedLicense) {
+      throw new Error(`Failed to create purchased license for line ${item.id}: ${licenseResult.error?.message}`);
+    }
 
-  const { data: purchasedLicense, error: licenseError } = await supabase
-    .from('purchased_licenses')
-    .upsert(
-      {
-        user_id: order.user_id,
-        asset_id: item.asset_id,
-        order_id: order.id,
-        transaction_id: transactionId,
-        license_type_id: item.license_type_id,
-        terms_version: licenseType?.terms_version ?? '1.0',
-        status: 'active',
-        updated_at: new Date().toISOString(),
-      },
-      { onConflict: 'user_id,asset_id,license_type_id,order_id' }
-    )
-    .select('id')
-    .single();
-  if (licenseError || !purchasedLicense) {
-    throw new Error(`Failed to create purchased license: ${licenseError?.message}`);
-  }
-
-  const resolution = product?.resolution_allowed ?? 'hd';
-  const maxDownloads = Math.max(1, Number(product?.download_quota ?? 1));
-  const entitlementValues = {
-    user_id: order.user_id,
-    asset_id: item.asset_id,
-    purchased_license_id: purchasedLicense.id,
-    order_id: order.id,
-    entitlement_type: 'purchased_license',
-    status: 'active',
-    resolution_allowed: resolution,
-    allowed_resolution: resolution,
-    max_downloads: maxDownloads,
-    updated_at: new Date().toISOString(),
-  };
-  const { data: existingEntitlement } = await supabase
-    .from('download_entitlements')
-    .select('id')
-    .eq('purchased_license_id', purchasedLicense.id)
-    .limit(1)
-    .maybeSingle();
-
-  if (existingEntitlement) {
-    const { error } = await supabase
-      .from('download_entitlements')
-      .update(entitlementValues)
-      .eq('id', existingEntitlement.id);
-    if (error) throw new Error(`Failed to update download entitlement: ${error.message}`);
-  } else {
-    const { error } = await supabase.from('download_entitlements').insert({
-      ...entitlementValues,
-      download_count: 0,
-      downloads_used: 0,
-    });
-    if (error?.code === '23505') {
-      const { error: retryUpdateError } = await supabase
-        .from('download_entitlements')
-        .update(entitlementValues)
-        .eq('purchased_license_id', purchasedLicense.id);
-      if (retryUpdateError) {
-        throw new Error(`Failed to recover concurrent download entitlement: ${retryUpdateError.message}`);
+    const resolution = product?.resolution_allowed ?? 'hd';
+    const entitlementValues = {
+      user_id: order.user_id,
+      asset_id: item.asset_id,
+      purchased_license_id: purchasedLicense.id,
+      order_id: order.id,
+      entitlement_type: 'purchased_license',
+      status: 'active',
+      resolution_allowed: resolution,
+      allowed_resolution: resolution,
+      max_downloads: Math.max(1, Number(product?.download_quota ?? 1)),
+      updated_at: new Date().toISOString(),
+    };
+    const { data: existingEntitlement } = await supabase.from('download_entitlements')
+      .select('id').eq('purchased_license_id', purchasedLicense.id).limit(1).maybeSingle();
+    if (existingEntitlement) {
+      const { error } = await supabase.from('download_entitlements').update(entitlementValues).eq('id', existingEntitlement.id);
+      if (error) throw new Error(`Failed to update download entitlement: ${error.message}`);
+    } else {
+      const { error } = await supabase.from('download_entitlements').insert({
+        ...entitlementValues, download_count: 0, downloads_used: 0,
+      });
+      if (error?.code === '23505') {
+        const { error: retryUpdateError } = await supabase.from('download_entitlements')
+          .update(entitlementValues).eq('purchased_license_id', purchasedLicense.id);
+        if (retryUpdateError) throw new Error(`Failed to recover concurrent download entitlement: ${retryUpdateError.message}`);
+      } else if (error) {
+        throw new Error(`Failed to create download entitlement: ${error.message}`);
       }
-    } else if (error) {
-      throw new Error(`Failed to create download entitlement: ${error.message}`);
     }
   }
 }
@@ -362,7 +354,17 @@ async function fulfillCreditPackOrder(
     .maybeSingle();
   if (existingEntry) return;
 
-  const credits = Number(order.metadata?.credits ?? 0);
+  const { data: items, error: itemsError } = await supabase.from('order_items')
+    .select('internal_product_id, quantity').eq('order_id', order.id).eq('item_type', 'credit_pack');
+  if (itemsError) throw new Error(`Failed to load credit pack lines: ${itemsError.message}`);
+  let credits = 0;
+  for (const item of items ?? []) {
+    const { data: pack, error: packError } = await supabase.from('credit_packs')
+      .select('credits').eq('id', item.internal_product_id).single();
+    if (packError || !pack) throw new Error(`Credit pack line is incomplete: ${packError?.message ?? order.id}`);
+    credits += Number(pack.credits) * Number(item.quantity);
+  }
+  if (!credits && items?.length === 0) credits = Number(order.metadata?.credits ?? 0);
   if (!Number.isInteger(credits) || credits <= 0) {
     throw new Error(`Credit pack order has invalid credit amount: ${order.id}`);
   }

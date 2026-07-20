@@ -110,7 +110,7 @@ export async function validateAssetLicensePurchase(
 ): Promise<CommercialValidationResult> {
   const [{ data: asset }, { data: license }, { data: product }] = await Promise.all([
     client.from('assets').select(`
-      id, public_asset_id, media_type, review_status, publication_status,
+      id, public_asset_id, title, slug, media_type, review_status, publication_status,
       commercial_use, license_type, restrictions, is_demo,
       asset_readiness(technical_quality, rights_verified, original_available, license_ready, publication_ready),
       asset_files(file_level, storage_bucket, storage_path, mime_type)

@@ -14,6 +14,7 @@ import AssetPreview from '@/app/asset-detail/components/AssetPreview';
 import SimilarAssets from '@/app/asset-detail/components/SimilarAssets';
 import CollectionModal from '@/app/asset-detail/components/CollectionModal';
 import { useAuth } from '@/contexts/AuthContext';
+import AddToCartButton from '@/components/AddToCartButton';
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -392,6 +393,22 @@ export default function AssetSlugPage() {
                           </>
                         )}
                       </button>
+
+                      {selectedLicense && (() => {
+                        const option = LICENSE_OPTIONS.find((entry) => entry.code === selectedLicense);
+                        return option ? (
+                          <AddToCartButton
+                            item={{
+                              itemType: 'asset_license',
+                              assetId: asset.id,
+                              licenseTypeCode: option.code,
+                              unitProductCode: option.unitProductCode,
+                              quantity: 1,
+                            }}
+                            className="w-full flex items-center justify-center gap-2 rounded-xl border border-secondary px-4 py-2.5 text-sm font-semibold text-secondary transition-colors hover:bg-secondary/5 disabled:opacity-50"
+                          />
+                        ) : null;
+                      })()}
 
                       <p className="text-xs text-muted-foreground text-center leading-relaxed">
                         Secure checkout via Dodo Payments. License terms apply.{' '}
