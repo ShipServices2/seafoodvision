@@ -5,7 +5,7 @@
 // ============================================================
 
 import { DodoPaymentsProvider } from './dodo/DodoPaymentsProvider';
-import { getDodoReturnUrl, getDodoCancelUrl } from './dodo/config';
+import { getDodoReturnUrl, getDodoCancelUrl, getDodoRuntimeConfig } from './dodo/config';
 import { createOrder, updateOrderCheckoutRef } from './PaymentService';
 import {
   assertCommercialValidation,
@@ -13,10 +13,6 @@ import {
   validateAssetLicensePurchase,
   validateCreditPackPurchase,
   validateSubscriptionPurchase,
-} from './CommercialValidationService';
-import { getDodoRuntimeConfig } from './dodo/config';
-
-export {
   getCommercialAssetBlockers,
 } from './CommercialValidationService';
 import type { CommercialAssetSnapshot } from './CommercialValidationService';
