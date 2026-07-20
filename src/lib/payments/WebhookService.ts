@@ -183,11 +183,8 @@ export async function handlePaymentSucceeded(
     currency: order.currency,
     status: 'succeeded',
     payment_type:
-      order.order_type === 'subscription'
-        ? 'subscription'
-        : order.order_type === 'credit_pack'
-          ? 'credit_pack'
-          : 'one_time',
+      order.order_type === 'subscription' ?'subscription'
+        : order.order_type === 'credit_pack' ?'credit_pack' :'one_time',
     environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production',
     raw_status: String(data['status'] ?? 'succeeded'),
     succeeded_at: new Date().toISOString(),

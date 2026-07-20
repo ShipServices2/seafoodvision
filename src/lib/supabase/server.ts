@@ -91,11 +91,27 @@ export function createServiceClient() {
   const url = runtimeEnv('NEXT_PUBLIC_SUPABASE_URL');
   const serviceRoleKey = runtimeEnv('SUPABASE_SERVICE_ROLE_KEY');
 
-  if (!url || !serviceRoleKey || serviceRoleKey === 'your-service-role-key-here') {
+  const KNOWN_PLACEHOLDERS = [
+    'your-service-role-key-here',
+    'YOUR_SUPABASE_SERVICE_ROLE_KEY_HERE',
+    'placeholder',
+    '',
+  ];
+
+  if (!url || !serviceRoleKey || KNOWN_PLACEHOLDERS.includes(serviceRoleKey.trim())) {
     throw new Error('Supabase service role is not configured for server-side commerce operations');
   }
 
-  return createSupabaseClient(url, serviceRoleKey, {
+  // Supabase service role keys are JWTs — they must start with "eyJ".
+  // A common misconfiguration is using the anon key or a truncated value.
+  if (!serviceRoleKey.trim().startsWith('eyJ')) {
+    throw new Error(
+      'SUPABASE_SERVICE_ROLE_KEY appears to be invalid (must be a JWT starting with "eyJ"). ' +
+      'Copy the service_role key from Supabase → Settings → API and update your .env file.'
+    );
+  }
+
+  return createSupabaseClient(url, serviceRoleKey.trim(), {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
