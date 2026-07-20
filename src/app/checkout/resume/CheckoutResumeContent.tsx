@@ -82,7 +82,8 @@ export default function CheckoutResumeContent() {
       // ── Server-side configuration check ──────────────────
       // This check runs on the server where process.env is available.
       // Never rely on client-side env vars for payment configuration.
-      const configRes = await fetch('/api/payments/dodo/config-check');
+      // cache: 'no-store' ensures process.env is read fresh on every request.
+      const configRes = await fetch('/api/payments/dodo/config-check', { cache: 'no-store' });
       if (configRes.ok) {
         const configData = await configRes.json() as { isCheckoutReady: boolean };
         if (!configData.isCheckoutReady) {

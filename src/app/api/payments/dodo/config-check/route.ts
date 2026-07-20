@@ -37,5 +37,9 @@ export async function GET() {
     apiKeyFound: hasApiKey,
     webhookSecretFound: hasWebhookSecret,
     environment: process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test',
+  }, {
+    headers: {
+      'Cache-Control': 'no-store, no-cache, must-revalidate',
+    },
   });
 }
