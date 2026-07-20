@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 interface CategoryWithCount {
   id: string;
@@ -11,23 +12,24 @@ interface CategoryWithCount {
   label: string;
   description: string | null;
   count: number | null;
-  emoji: string;
   color: string;
   imageBg: string;
+  photoUrl: string | null;
+  photoAlt: string;
 }
 
-const categoryMeta: Record<string, { emoji: string; color: string; imageBg: string }> = {
-  fish: { emoji: '🐟', color: 'from-blue-900/80 to-blue-800/60', imageBg: 'bg-gradient-to-br from-blue-100 to-blue-200' },
-  crustaceans: { emoji: '🦐', color: 'from-orange-900/80 to-orange-800/60', imageBg: 'bg-gradient-to-br from-orange-100 to-orange-200' },
-  cephalopods: { emoji: '🐙', color: 'from-purple-900/80 to-purple-800/60', imageBg: 'bg-gradient-to-br from-purple-100 to-purple-200' },
-  molluscs: { emoji: '🦪', color: 'from-teal-900/80 to-teal-800/60', imageBg: 'bg-gradient-to-br from-teal-100 to-teal-200' },
-  'fillets-portions': { emoji: '🍣', color: 'from-red-900/80 to-red-800/60', imageBg: 'bg-gradient-to-br from-red-100 to-red-200' },
-  'frozen-products': { emoji: '🧊', color: 'from-cyan-900/80 to-cyan-800/60', imageBg: 'bg-gradient-to-br from-cyan-100 to-cyan-200' },
-  packaging: { emoji: '📦', color: 'from-slate-900/80 to-slate-800/60', imageBg: 'bg-gradient-to-br from-slate-100 to-slate-200' },
-  aquaculture: { emoji: '🌊', color: 'from-emerald-900/80 to-emerald-800/60', imageBg: 'bg-gradient-to-br from-emerald-100 to-emerald-200' },
+const categoryMeta: Record<string, { color: string; imageBg: string }> = {
+  fish: { color: 'from-blue-900/80 to-blue-800/60', imageBg: 'bg-gradient-to-br from-blue-100 to-blue-200' },
+  crustaceans: { color: 'from-orange-900/80 to-orange-800/60', imageBg: 'bg-gradient-to-br from-orange-100 to-orange-200' },
+  cephalopods: { color: 'from-purple-900/80 to-purple-800/60', imageBg: 'bg-gradient-to-br from-purple-100 to-purple-200' },
+  molluscs: { color: 'from-teal-900/80 to-teal-800/60', imageBg: 'bg-gradient-to-br from-teal-100 to-teal-200' },
+  'fillets-portions': { color: 'from-red-900/80 to-red-800/60', imageBg: 'bg-gradient-to-br from-red-100 to-red-200' },
+  'frozen-products': { color: 'from-cyan-900/80 to-cyan-800/60', imageBg: 'bg-gradient-to-br from-cyan-100 to-cyan-200' },
+  packaging: { color: 'from-slate-900/80 to-slate-800/60', imageBg: 'bg-gradient-to-br from-slate-100 to-slate-200' },
+  aquaculture: { color: 'from-emerald-900/80 to-emerald-800/60', imageBg: 'bg-gradient-to-br from-emerald-100 to-emerald-200' },
 };
 
-const fallbackCategories: CategoryWithCount[] = [
+const fallbackCategories: Omit<CategoryWithCount, 'photoUrl' | 'photoAlt'>[] = [
   { id: 'cat-fish', slug: 'fish', label: 'Fish', description: 'Whole, gutted, fillets, steaks', count: null, ...categoryMeta['fish'] },
   { id: 'cat-crustaceans', slug: 'crustaceans', label: 'Crustaceans', description: 'Shrimp, crab, lobster, langoustine', count: null, ...categoryMeta['crustaceans'] },
   { id: 'cat-cephalopods', slug: 'cephalopods', label: 'Cephalopods', description: 'Octopus, squid, cuttlefish', count: null, ...categoryMeta['cephalopods'] },
@@ -39,53 +41,91 @@ const fallbackCategories: CategoryWithCount[] = [
 ];
 
 export default function CategoryCards() {
-  const [categories, setCategories] = useState<CategoryWithCount[]>(fallbackCategories);
+  const [categories, setCategories] = useState<CategoryWithCount[]>(
+    fallbackCategories.map((c) => ({ ...c, photoUrl: null, photoAlt: c.label }))
+  );
 
   useEffect(() => {
-    const fetchCategoryCounts = async () => {
+    const fetchCategoriesWithPhotos = async () => {
       try {
         const supabase = createClient();
+
+        // Fetch active categories
         const { data: cats } = await supabase
           .from('categories')
           .select('id, slug, label, description')
           .eq('is_active', true)
           .order('sort_order');
 
-        if (!cats || cats.length === 0) return;
+        const sourceCats = cats && cats.length > 0 ? cats : fallbackCategories;
 
-        const countsPromises = cats.map(async (cat) => {
-          const { count } = await supabase
-            .from('assets')
-            .select('*', { count: 'exact', head: true })
-            .eq('category', cat.label)
-            .eq('is_demo', false)
-            .in('review_status', ['approved', 'commercial', 'editorial']);
-          return { slug: cat.slug, count: count ?? 0 };
-        });
-
-        const counts = await Promise.all(countsPromises);
-        const countMap = Object.fromEntries(counts.map((c) => [c.slug, c.count]));
-
-        setCategories(
-          cats.map((cat) => ({
-            id: cat.id,
-            slug: cat.slug,
-            label: cat.label,
-            description: cat.description,
-            count: countMap[cat.slug] ?? null,
-            ...(categoryMeta[cat.slug] || {
-              emoji: '🐠',
+        // For each category, fetch count + first approved asset thumbnail
+        const enriched = await Promise.all(
+          sourceCats.map(async (cat) => {
+            const meta = categoryMeta[cat.slug] || {
               color: 'from-blue-900/80 to-blue-800/60',
               imageBg: 'bg-gradient-to-br from-blue-100 to-blue-200',
-            }),
-          }))
+            };
+
+            // Count
+            const { count } = await supabase
+              .from('assets')
+              .select('*', { count: 'exact', head: true })
+              .eq('category', cat.label)
+              .eq('is_demo', false)
+              .in('review_status', ['approved', 'commercial', 'editorial']);
+
+            // First asset with a thumbnail file
+            const { data: assetRows } = await supabase
+              .from('assets')
+              .select('id, title, asset_files(file_level, storage_bucket, storage_path)')
+              .eq('category', cat.label)
+              .eq('is_demo', false)
+              .in('review_status', ['approved', 'commercial', 'editorial'])
+              .eq('is_real_photo', true)
+              .limit(5);
+
+            let photoUrl: string | null = null;
+            let photoAlt = cat.label;
+
+            if (assetRows && assetRows.length > 0) {
+              for (const asset of assetRows) {
+                const files = (asset as any).asset_files as Array<{ file_level: string; storage_bucket: string; storage_path: string }> | null;
+                if (!files || files.length === 0) continue;
+                const thumbFile =
+                  files.find((f) => f.file_level === 'thumbnail') ||
+                  files.find((f) => f.file_level === 'preview');
+                if (thumbFile) {
+                  const url = await getSignedStorageUrl(thumbFile.storage_bucket, thumbFile.storage_path, 7200);
+                  if (url) {
+                    photoUrl = url;
+                    photoAlt = `${cat.label} seafood — ${(asset as any).title || cat.label}`;
+                    break;
+                  }
+                }
+              }
+            }
+
+            return {
+              id: cat.id,
+              slug: cat.slug,
+              label: cat.label,
+              description: cat.description,
+              count: count ?? null,
+              ...meta,
+              photoUrl,
+              photoAlt,
+            };
+          })
         );
+
+        setCategories(enriched);
       } catch {
-        // Keep fallback categories without counts
+        // Keep fallback categories
       }
     };
 
-    fetchCategoryCounts();
+    fetchCategoriesWithPhotos();
   }, []);
 
   return (
@@ -116,8 +156,21 @@ export default function CategoryCards() {
             className="group relative rounded-2xl overflow-hidden border border-border card-hover bg-card shadow-card"
           >
             {/* Visual area */}
-            <div className={`relative h-36 ${cat?.imageBg} flex items-center justify-center overflow-hidden`}>
-              <span className="text-5xl">{cat?.emoji}</span>
+            <div className={`relative h-36 overflow-hidden ${!cat?.photoUrl ? cat?.imageBg : ''}`}>
+              {cat?.photoUrl ? (
+                <img
+                  src={cat.photoUrl}
+                  alt={cat.photoAlt}
+                  loading="lazy"
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+              ) : (
+                <div className={`w-full h-full ${cat?.imageBg} flex items-center justify-center`}>
+                  <span className="text-4xl font-bold text-muted-foreground/30 select-none">
+                    {cat?.label?.charAt(0)}
+                  </span>
+                </div>
+              )}
               {/* Hover overlay */}
               <div
                 className={`absolute inset-0 bg-gradient-to-t ${cat?.color} opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center`}
@@ -137,7 +190,7 @@ export default function CategoryCards() {
                     {cat?.description}
                   </p>
                 </div>
-                {cat?.count !== null && cat.count > 0 && (
+                {cat?.count !== null && cat.count !== undefined && cat.count > 0 && (
                   <span className="text-xs font-mono-data font-semibold text-muted-foreground bg-muted px-2 py-0.5 rounded-full shrink-0">
                     {cat.count.toLocaleString()}
                   </span>
