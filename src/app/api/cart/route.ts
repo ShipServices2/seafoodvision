@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   try {
     const user = await requireCartUser();
-    return NextResponse.json(await getCart(user.id));
+    return NextResponse?.json(await getCart(user?.id));
   } catch (error) {
     return cartRouteError(error);
   }
@@ -16,7 +16,7 @@ export async function GET() {
 export async function DELETE() {
   try {
     const user = await requireCartUser();
-    return NextResponse.json(await clearCart(user.id));
+    return NextResponse?.json(await clearCart(user?.id));
   } catch (error) {
     return cartRouteError(error);
   }

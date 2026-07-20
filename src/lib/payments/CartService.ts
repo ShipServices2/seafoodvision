@@ -389,10 +389,12 @@ export async function clearCart(userId: string): Promise<CartSnapshot> {
 
 async function revalidateStoredLine(item: CartLine, client = createServiceClient()): Promise<ValidatedLine> {
   if (item.itemType === 'asset_license') {
-    const [{ data: product }, { data: license }] = await Promise.all([
+    const [productResult, licenseResult] = await Promise.all([
       client.from('unit_products').select('product_code').eq('id', item.internalProductId).maybeSingle(),
       client.from('license_types').select('code').eq('id', item.licenseTypeId).maybeSingle(),
     ]);
+    const product = productResult.data;
+    const license = licenseResult.data;
     if (!item.assetId || !product?.product_code || !license?.code) {
       throw new CartError('invalid_line', 'Asset cart line references are incomplete');
     }

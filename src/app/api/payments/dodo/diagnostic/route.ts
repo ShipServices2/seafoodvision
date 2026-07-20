@@ -23,11 +23,11 @@ export async function GET() {
     // ── Variable audit (server-side only — never expose values) ──────────────
     // DODO_PAYMENTS_API_KEY: required for checkout
     const runtimeConfig = getDodoRuntimeConfig();
-    const apiKeyConfigured = runtimeConfig.apiKeyFound;
+    const apiKeyConfigured = runtimeConfig?.apiKeyFound;
     // DODO_PAYMENTS_WEBHOOK_SECRET: required for webhook signature verification
-    const webhookSecretConfigured = runtimeConfig.webhookSecretFound;
-    const environment = runtimeConfig.environment;
-    const providerEnabled = runtimeConfig.isEnabled;
+    const webhookSecretConfigured = runtimeConfig?.webhookSecretFound;
+    const environment = runtimeConfig?.environment;
+    const providerEnabled = runtimeConfig?.isEnabled;
     const returnUrlConfigured = !!(
       process.env.DODO_PAYMENTS_RETURN_URL &&
       process.env.DODO_PAYMENTS_RETURN_URL?.length > 0
@@ -38,9 +38,9 @@ export async function GET() {
     );
 
     // Checkout is ready when API key is present and provider is enabled
-    const checkoutReady = runtimeConfig.isCheckoutReady;
+    const checkoutReady = runtimeConfig?.isCheckoutReady;
     // Webhook verification is ready when webhook secret is present
-    const webhookReady = runtimeConfig.isWebhookReady;
+    const webhookReady = runtimeConfig?.isWebhookReady;
 
     // Return URLs (safe to show — not secrets)
     const returnUrl =
