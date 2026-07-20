@@ -32,7 +32,7 @@ export async function GET(req: NextRequest) {
       .or(`common_name.ilike.%${q}%,scientific_name.ilike.%${q}%,family.ilike.%${q}%`)
       .limit(limit);
 
-    let enrichment = null;
+    let enrichment: Awaited<ReturnType<typeof enrichSpeciesFromKnowledgeSources>> | null = null;
     if (enrich && q.includes(' ')) {
       // Only enrich if query looks like a scientific name (has space)
       enrichment = await enrichSpeciesFromKnowledgeSources(q);

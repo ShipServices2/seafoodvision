@@ -9,8 +9,9 @@
  *  - No silent empty result is returned as if a query succeeded.
  */
 
-import { describe, test, expect, beforeEach, afterEach } from '@jest/globals';
-import jest from 'jest-mock';
+/* eslint-disable @typescript-eslint/no-require-imports -- require() is intentional here so isolateModules reloads each module with the test-specific environment. */
+
+import { describe, test, expect, beforeEach, afterEach, jest } from '@jest/globals';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

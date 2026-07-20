@@ -776,7 +776,7 @@ export async function encyclopediaSearch(query: string, limit = 30): Promise<Sea
 
   // Add species found via synonym/local name search (avoid duplicates)
   if (speciesNamesRes.data && speciesNamesRes.data.length > 0) {
-    const nameSpeciesIds = [...new Set(speciesNamesRes.data.map((n: any) => n.species_id))].filter(id => !seenSpeciesIds.has(id));
+    const nameSpeciesIds = [...new Set<string>(speciesNamesRes.data.map((n: any) => String(n.species_id)))].filter(id => !seenSpeciesIds.has(id));
     if (nameSpeciesIds.length > 0) {
       const { data: extraSpecies } = await supabase
         .from('species')

@@ -1,6 +1,6 @@
 # SeafoodVision — Sprint 1 marketplace stabilization report
 
-Date: 2026-07-19  
+Date: 2026-07-19
 Branch: `feature/marketplace-cart-credits-dodo`
 
 ## Recovery state

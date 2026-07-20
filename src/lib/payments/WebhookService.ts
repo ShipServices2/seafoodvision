@@ -408,7 +408,7 @@ export async function handleSubscriptionActivated(
   }
 
   // Find order by internal order_id from metadata first
-  let order = null;
+  let order: Pick<CommerceOrder, 'id' | 'user_id' | 'metadata'> | null = null;
   if (orderId) {
     const { data: o } = await supabase
       .from('orders')
