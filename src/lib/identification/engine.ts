@@ -59,6 +59,8 @@ async function runOpenAIVision(
     return null;
   }
 
+  const model = process.env.OPENAI_MODEL ?? 'gpt-4o';
+
   const hintText = [
     hints.categoryHint ? `Category hint: ${hints.categoryHint}` : '',
     hints.stateHint ? `Product state: ${hints.stateHint}` : '',
@@ -115,7 +117,7 @@ Rules:
       Authorization: `Bearer ${apiKey}`,
     },
     body: JSON.stringify({
-      model: 'gpt-4o',
+      model,
       max_tokens: 1200,
       temperature: 0.1,
       messages: [
@@ -234,7 +236,7 @@ async function matchCandidatesWithSpeciesTable(
         confidenceScore: score,
         matchReasons: reasons,
         sourceType: 'openai_vision',
-        modelName: 'gpt-4o',
+        modelName: process.env.OPENAI_MODEL ?? 'gpt-4o',
         modelVersion: '2024-11',
         species: {
           id: speciesRow.id,
@@ -256,7 +258,7 @@ async function matchCandidatesWithSpeciesTable(
         confidenceScore: score,
         matchReasons: reasons,
         sourceType: 'openai_vision',
-        modelName: 'gpt-4o',
+        modelName: process.env.OPENAI_MODEL ?? 'gpt-4o',
         modelVersion: '2024-11',
         species: {
           id: '',
@@ -488,7 +490,7 @@ export async function runIdentificationEngine(
 
         return {
           candidates: mapped,
-          visualAI: { enabled: true, message: 'Results from cache (same image).', provider: 'openai', model: 'gpt-4o' },
+          visualAI: { enabled: true, message: 'Results from cache (same image).', provider: 'openai', model: process.env.OPENAI_MODEL ?? 'gpt-4o' },
           status: 'candidates_ready',
           fromCache: true,
           seafoodDetected: true,
@@ -559,7 +561,7 @@ export async function runIdentificationEngine(
 
               return {
                 candidates: mapped,
-                visualAI: { enabled: true, message: 'Results from cache (same image).', provider: 'openai', model: 'gpt-4o' },
+                visualAI: { enabled: true, message: 'Results from cache (same image).', provider: 'openai', model: process.env.OPENAI_MODEL ?? 'gpt-4o' },
                 status: 'candidates_ready',
                 fromCache: true,
                 seafoodDetected: true,
@@ -604,7 +606,7 @@ export async function runIdentificationEngine(
           enabled: true,
           message: 'No seafood detected in this image.',
           provider: 'openai',
-          model: 'gpt-4o',
+          model: process.env.OPENAI_MODEL ?? 'gpt-4o',
         },
         status: 'insufficient_quality',
         fromCache: false,
@@ -634,7 +636,7 @@ export async function runIdentificationEngine(
         enabled: true,
         message: featureNote,
         provider: 'openai',
-        model: 'gpt-4o',
+        model: process.env.OPENAI_MODEL ?? 'gpt-4o',
       },
       status: top5.length > 0 ? 'candidates_ready' : 'insufficient_quality',
       fromCache: false,
