@@ -44,17 +44,23 @@ export async function POST(request: NextRequest) {
       .update({ status: 'analyzing' })
       .eq('id', requestId);
 
-    // Run engine
-    const result = await runIdentificationEngine(requestId, {
-      categoryHint,
-      stateHint,
-      contextHint,
-      countryHint,
-      notes,
-    });
+    // Run engine — pass userId for credit debit
+    const result = await runIdentificationEngine(
+      requestId,
+      {
+        categoryHint,
+        stateHint,
+        contextHint,
+        countryHint,
+        notes,
+      },
+      user?.id ?? null
+    );
 
-    // Save candidates
-    await saveCandidates(requestId, result.candidates);
+    // Save candidates (skip save if from cache — candidates already exist in DB from original request)
+    if (!result.fromCache) {
+      await saveCandidates(requestId, result.candidates);
+    }
 
     // Update request status
     await supabase
@@ -75,7 +81,13 @@ export async function POST(request: NextRequest) {
       event_type: 'analysis_completed',
       previous_status: 'analyzing',
       new_status: result.status,
-      metadata: { candidate_count: result.candidates.length },
+      metadata: {
+        candidate_count: result.candidates.length,
+        from_cache: result.fromCache,
+        seafood_detected: result.seafoodDetected,
+        visual_ai_enabled: result.visualAI.enabled,
+        model: result.visualAI.model ?? null,
+      },
       created_by: user?.id || null,
     });
 
@@ -83,6 +95,8 @@ export async function POST(request: NextRequest) {
       status: result.status,
       candidateCount: result.candidates.length,
       visualAI: result.visualAI,
+      fromCache: result.fromCache,
+      seafoodDetected: result.seafoodDetected,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
