@@ -1,7 +1,9 @@
-'use server';
-
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+
+// Disable Next.js route cache — always process fresh uploads
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function POST(request: NextRequest) {
   try {
