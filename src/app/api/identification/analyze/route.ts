@@ -26,7 +26,7 @@ export async function POST(request: NextRequest) {
     // Verify ownership
     const { data: req } = await supabase
       .from('identification_requests')
-      .select('id, user_id, status')
+      .select('id, user_id, status, checksum')
       .eq('id', requestId)
       .maybeSingle();
 
@@ -37,6 +37,8 @@ export async function POST(request: NextRequest) {
     if (req.user_id && user?.id !== req.user_id) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
     }
+
+    console.log(`[analyze/route] requestId=${requestId} | existingChecksum=${req.checksum ?? 'none'} | userId=${user?.id ?? 'anonymous'}`);
 
     // Update status to analyzing
     await supabase
@@ -57,10 +59,12 @@ export async function POST(request: NextRequest) {
       user?.id ?? null
     );
 
-    // Save candidates (skip save if from cache — candidates already exist in DB from original request)
-    if (!result.fromCache) {
-      await saveCandidates(requestId, result.candidates);
-    }
+    console.log(`[analyze/route] Engine result | fromCache=${result.fromCache} | candidateCount=${result.candidates.length} | seafoodDetected=${result.seafoodDetected} | status=${result.status}`);
+
+    // Always save candidates — replaces any old mock-era candidates for this request.
+    // saveCandidates deletes existing rows before inserting, so re-analysis always
+    // reflects the latest OpenAI result rather than accumulating stale data.
+    await saveCandidates(requestId, result.candidates);
 
     // Update request status
     await supabase
@@ -100,6 +104,7 @@ export async function POST(request: NextRequest) {
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
+    console.error('[analyze/route] Unhandled error (no credits debited):', message);
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

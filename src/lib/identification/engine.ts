@@ -12,6 +12,9 @@ import type {
   ConfidenceLevel,
 } from './types';
 
+// ── Cache version prefix — bump this to invalidate all old cached results ──
+const CACHE_VERSION = 'vision-v2';
+
 interface HintContext {
   categoryHint?: string | null;
   stateHint?: string | null;
@@ -53,9 +56,10 @@ async function runOpenAIVision(
   imageBase64: string,
   mimeType: string,
   hints: HintContext
-): Promise<{ result: OpenAIVisionResponse; fromCache: false } | null> {
+): Promise<{ result: OpenAIVisionResponse; fromCache: false; httpStatus: number } | null> {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey || apiKey === 'your-openai-api-key-here' || apiKey.trim() === '') {
+    console.warn('[OpenAIVision] OPENAI_API_KEY not configured — skipping vision analysis');
     return null;
   }
 
@@ -110,6 +114,8 @@ Rules:
 - If confidence < 40, add uncertainty_reason
 - Do not include species not plausibly visible in the image`;
 
+  console.log(`[OpenAIVision] Calling model=${model} | imageBase64 length=${imageBase64.length} | mimeType=${mimeType}`);
+
   const response = await fetch('https://api.openai.com/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -139,9 +145,13 @@ Rules:
     }),
   });
 
+  const httpStatus = response.status;
+  console.log(`[OpenAIVision] HTTP status=${httpStatus}`);
+
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`OpenAI Vision API error ${response.status}: ${errText}`);
+    console.error(`[OpenAIVision] API error ${httpStatus}: ${errText}`);
+    throw new Error(`OpenAI Vision API error ${httpStatus}: ${errText}`);
   }
 
   const data = await response.json();
@@ -151,7 +161,12 @@ Rules:
   // Parse JSON — strip markdown code fences if present
   const jsonStr = content.replace(/^```json\s*/i, '').replace(/^```\s*/i, '').replace(/```\s*$/i, '').trim();
   const parsed: OpenAIVisionResponse = JSON.parse(jsonStr);
-  return { result: parsed, fromCache: false };
+
+  // Log raw scientific names returned by OpenAI
+  const rawNames = parsed.candidate_species?.map((c) => c.scientific_name).join(', ') ?? '(none)';
+  console.log(`[OpenAIVision] seafood_detected=${parsed.seafood_detected} | raw scientific names: ${rawNames}`);
+
+  return { result: parsed, fromCache: false, httpStatus };
 }
 
 // ============================================================
@@ -454,9 +469,14 @@ export async function runIdentificationEngine(
   const uploadPath: string | null = reqRow?.upload_path ?? null;
   const existingChecksum: string | null = reqRow?.checksum ?? null;
 
+  console.log(`[Engine] requestId=${requestId} | existingChecksum=${existingChecksum ?? 'none'} | uploadPath=${uploadPath ?? 'none'}`);
+
   // ── CACHE CHECK ──────────────────────────────────────────
-  // If we already have a checksum, look for a previous successful analysis
-  if (existingChecksum) {
+  // Only reuse cache for checksums that start with the current CACHE_VERSION prefix.
+  // Old mock-era checksums (without the prefix) are intentionally ignored.
+  if (existingChecksum && existingChecksum.startsWith(`${CACHE_VERSION}:`)) {
+    console.log(`[Engine] Cache lookup for checksum=${existingChecksum}`);
+
     const { data: cachedReq } = await supabase
       .from('identification_requests')
       .select('id')
@@ -467,7 +487,6 @@ export async function runIdentificationEngine(
       .maybeSingle();
 
     if (cachedReq) {
-      // Reuse candidates from cached request
       const { data: cachedCandidates } = await supabase
         .from('identification_candidates')
         .select('*, species:species_id(id, slug, common_name, scientific_name, family, category, description)')
@@ -475,6 +494,13 @@ export async function runIdentificationEngine(
         .order('rank');
 
       if (cachedCandidates && cachedCandidates.length > 0) {
+        const finalNames = cachedCandidates.map((c: Record<string, unknown>) => {
+          const sp = c.species as Record<string, unknown> | null;
+          return sp?.scientific_name ?? c.species_id ?? 'unknown';
+        }).join(', ');
+
+        console.log(`[Engine] fromCache=true | source requestId=${cachedReq.id} | candidates=${finalNames}`);
+
         const mapped: Partial<IdentificationCandidate>[] = cachedCandidates.map((c: Record<string, unknown>) => ({
           speciesId: c.species_id as string | null,
           candidateType: c.candidate_type as import('./types').CandidateType,
@@ -496,12 +522,23 @@ export async function runIdentificationEngine(
           seafoodDetected: true,
         };
       }
+    } else {
+      console.log(`[Engine] Cache miss — no prior candidates_ready request for this checksum`);
     }
+  } else if (existingChecksum && !existingChecksum.startsWith(`${CACHE_VERSION}:`)) {
+    // Old mock-era checksum — invalidate it so a fresh analysis runs
+    console.log(`[Engine] Old checksum detected (no vision-v2 prefix) — invalidating: ${existingChecksum}`);
+    await supabase
+      .from('identification_requests')
+      .update({ checksum: null })
+      .eq('id', requestId);
   }
 
   // ── OPENAI VISION ─────────────────────────────────────────
   let visionResult: OpenAIVisionResponse | null = null;
   let visionError: string | null = null;
+  let openaiHttpStatus: number | null = null;
+  let visionSucceeded = false;
 
   if (uploadPath) {
     try {
@@ -512,61 +549,70 @@ export async function runIdentificationEngine(
 
       if (downloadError || !fileData) {
         visionError = `Storage download failed: ${downloadError?.message ?? 'unknown'}`;
+        console.error(`[Engine] ${visionError}`);
       } else {
         const arrayBuffer = await fileData.arrayBuffer();
         const uint8 = new Uint8Array(arrayBuffer);
 
-        // Compute SHA-256 hash for cache key
+        // Compute SHA-256 hash with CACHE_VERSION prefix
         const hashBuffer = await crypto.subtle.digest('SHA-256', uint8);
         const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const imageHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+        const rawHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+        const versionedChecksum = `${CACHE_VERSION}:${rawHash}`;
 
-        // Store checksum if not already set
-        if (!existingChecksum) {
-          await supabase
-            .from('identification_requests')
-            .update({ checksum: imageHash })
-            .eq('id', requestId);
+        console.log(`[Engine] Computed checksum=${versionedChecksum}`);
 
-          // Re-check cache with newly computed hash
-          const { data: cachedReq2 } = await supabase
-            .from('identification_requests')
-            .select('id')
-            .eq('checksum', imageHash)
-            .eq('status', 'candidates_ready')
-            .neq('id', requestId)
-            .limit(1)
-            .maybeSingle();
+        // Store versioned checksum
+        await supabase
+          .from('identification_requests')
+          .update({ checksum: versionedChecksum })
+          .eq('id', requestId);
 
-          if (cachedReq2) {
-            const { data: cachedCandidates2 } = await supabase
-              .from('identification_candidates')
-              .select('*, species:species_id(id, slug, common_name, scientific_name, family, category, description)')
-              .eq('request_id', cachedReq2.id)
-              .order('rank');
+        // Re-check cache with newly computed versioned hash
+        const { data: cachedReq2 } = await supabase
+          .from('identification_requests')
+          .select('id')
+          .eq('checksum', versionedChecksum)
+          .eq('status', 'candidates_ready')
+          .neq('id', requestId)
+          .limit(1)
+          .maybeSingle();
 
-            if (cachedCandidates2 && cachedCandidates2.length > 0) {
-              const mapped: Partial<IdentificationCandidate>[] = cachedCandidates2.map((c: Record<string, unknown>) => ({
-                speciesId: c.species_id as string | null,
-                candidateType: c.candidate_type as import('./types').CandidateType,
-                rank: c.rank as number,
-                confidenceLevel: c.confidence_level as ConfidenceLevel,
-                confidenceScore: c.confidence_score as number | null,
-                matchReasons: c.match_reasons as MatchReason[],
-                sourceType: c.source_type as string,
-                modelName: c.model_name as string | null,
-                modelVersion: c.model_version as string | null,
-                species: c.species as Partial<IdentificationCandidate>['species'],
-              }));
+        if (cachedReq2) {
+          const { data: cachedCandidates2 } = await supabase
+            .from('identification_candidates')
+            .select('*, species:species_id(id, slug, common_name, scientific_name, family, category, description)')
+            .eq('request_id', cachedReq2.id)
+            .order('rank');
 
-              return {
-                candidates: mapped,
-                visualAI: { enabled: true, message: 'Results from cache (same image).', provider: 'openai', model: process.env.OPENAI_MODEL ?? 'gpt-4o' },
-                status: 'candidates_ready',
-                fromCache: true,
-                seafoodDetected: true,
-              };
-            }
+          if (cachedCandidates2 && cachedCandidates2.length > 0) {
+            const finalNames2 = cachedCandidates2.map((c: Record<string, unknown>) => {
+              const sp = c.species as Record<string, unknown> | null;
+              return sp?.scientific_name ?? 'unknown';
+            }).join(', ');
+
+            console.log(`[Engine] fromCache=true (post-hash) | source requestId=${cachedReq2.id} | candidates=${finalNames2}`);
+
+            const mapped: Partial<IdentificationCandidate>[] = cachedCandidates2.map((c: Record<string, unknown>) => ({
+              speciesId: c.species_id as string | null,
+              candidateType: c.candidate_type as import('./types').CandidateType,
+              rank: c.rank as number,
+              confidenceLevel: c.confidence_level as ConfidenceLevel,
+              confidenceScore: c.confidence_score as number | null,
+              matchReasons: c.match_reasons as MatchReason[],
+              sourceType: c.source_type as string,
+              modelName: c.model_name as string | null,
+              modelVersion: c.model_version as string | null,
+              species: c.species as Partial<IdentificationCandidate>['species'],
+            }));
+
+            return {
+              candidates: mapped,
+              visualAI: { enabled: true, message: 'Results from cache (same image).', provider: 'openai', model: process.env.OPENAI_MODEL ?? 'gpt-4o' },
+              status: 'candidates_ready',
+              fromCache: true,
+              seafoodDetected: true,
+            };
           }
         }
 
@@ -582,24 +628,29 @@ export async function runIdentificationEngine(
         };
         const mimeType = mimeMap[ext] ?? 'image/jpeg';
 
-        // Convert to base64
+        // Convert to base64 — this is the actual image bytes sent to OpenAI
         const base64 = Buffer.from(uint8).toString('base64');
+        console.log(`[Engine] Sending image to OpenAI | mimeType=${mimeType} | base64 bytes=${base64.length}`);
 
         const visionResponse = await runOpenAIVision(base64, mimeType, hints);
         if (visionResponse) {
           visionResult = visionResponse.result;
+          openaiHttpStatus = visionResponse.httpStatus;
+          visionSucceeded = true;
         }
       }
     } catch (err) {
       visionError = err instanceof Error ? err.message : 'Vision analysis failed';
-      console.error('[runIdentificationEngine] OpenAI Vision error:', err);
+      console.error('[Engine] OpenAI Vision error (no credits will be debited):', err);
+      // visionSucceeded remains false — credits will NOT be debited
     }
   }
 
   // ── PROCESS VISION RESULT ─────────────────────────────────
-  if (visionResult) {
+  if (visionResult && visionSucceeded) {
     // No seafood detected — return empty, no credits debited
     if (!visionResult.seafood_detected || visionResult.candidate_species.length === 0) {
+      console.log(`[Engine] fromCache=false | OpenAI HTTP=${openaiHttpStatus} | seafood_detected=false | no credits debited`);
       return {
         candidates: [],
         visualAI: {
@@ -621,8 +672,13 @@ export async function runIdentificationEngine(
     // Re-rank
     top5.forEach((c, idx) => { c.rank = idx + 1; });
 
-    // Debit 2 credits after successful analysis (not cached)
+    // Log final candidates
+    const finalCandidateNames = top5.map((c) => c.species?.scientificName ?? c.species?.commonName ?? 'unknown').join(', ');
+    console.log(`[Engine] fromCache=false | OpenAI HTTP=${openaiHttpStatus} | model=${process.env.OPENAI_MODEL ?? 'gpt-4o'} | finalCandidates=[${finalCandidateNames}]`);
+
+    // Debit 2 credits ONLY after successful OpenAI analysis (not cached, not error)
     if (userId) {
+      console.log(`[Engine] Debiting 2 credits for userId=${userId}`);
       await debitIdentificationCredits(userId);
     }
 
@@ -645,6 +701,9 @@ export async function runIdentificationEngine(
   }
 
   // ── FALLBACK: metadata + structured search ────────────────
+  // Note: credits are NOT debited for fallback path (no OpenAI call succeeded)
+  console.log(`[Engine] fromCache=false | OpenAI unavailable/failed | falling back to metadata+search | visionError=${visionError ?? 'none'}`);
+
   const [levelA, levelB] = await Promise.all([
     buildMetadataCandidates(hints),
     buildStructuredSearchCandidates(hints),
@@ -687,7 +746,7 @@ export async function runIdentificationEngine(
 }
 
 // ============================================================
-// SAVE CANDIDATES to DB
+// SAVE CANDIDATES to DB — always replaces existing candidates for this request
 // ============================================================
 export async function saveCandidates(
   requestId: string,
@@ -695,6 +754,8 @@ export async function saveCandidates(
 ): Promise<void> {
   const supabase = await createClient();
 
+  // Delete ALL existing candidates for this request before inserting new ones.
+  // This prevents accumulation of old mock-era or stale candidates.
   await supabase
     .from('identification_candidates')
     .delete()
@@ -717,5 +778,6 @@ export async function saveCandidates(
     status: 'active',
   }));
 
+  console.log(`[saveCandidates] Inserting ${rows.length} candidates for requestId=${requestId}`);
   await supabase.from('identification_candidates').insert(rows);
 }
