@@ -2,11 +2,23 @@ import { createServiceClient } from '@/lib/supabase/server';
 import { canonicalPlanCode } from './subscriptionPlanResolution';
 
 
+
+
 export { canonicalPlanCode } from './subscriptionPlanResolution';
 
 type CommerceClient = ReturnType<typeof createServiceClient>;
 type BillingCycle = 'monthly' | 'annual';
 type Environment = 'test' | 'production';
+
+export interface CommercialValidationResult<T = unknown> {
+  valid: boolean;
+  blockers: string[];
+  normalized_product: T | null;
+  authoritative_price: number | null;
+  currency: string | null;
+  dodo_product_id: string | null;
+  fulfillment_metadata: Record<string, unknown>;
+}
 
 export interface CommercialAssetSnapshot {
   id?: string;
@@ -75,16 +87,6 @@ export function getCommercialAssetBlockers(asset: CommercialAssetSnapshot): stri
   if (original && (!original.storage_bucket || !original.storage_path)) blockers.push('original storage source is incomplete');
 
   return blockers;
-}
-
-export interface CommercialValidationResult<T = unknown> {
-  valid: boolean;
-  blockers: string[];
-  normalized_product: T | null;
-  authoritative_price: number | null;
-  currency: string | null;
-  dodo_product_id: string | null;
-  fulfillment_metadata: Record<string, unknown>;
 }
 
 function invalid<T>(blockers: string[], product: T | null = null): CommercialValidationResult<T> {

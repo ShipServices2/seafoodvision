@@ -444,6 +444,32 @@ async function debitIdentificationCredits(userId: string): Promise<void> {
 }
 
 // ============================================================
+// CREDIT PRE-CHECK — verify balance >= 2 before calling OpenAI
+// Returns the current balance, or throws InsufficientCreditsError
+// ============================================================
+export class InsufficientCreditsError extends Error {
+  constructor() {
+    super('Crédits insuffisants — 2 crédits sont nécessaires pour cette identification.');
+    this.name = 'InsufficientCreditsError';
+  }
+}
+
+async function checkCreditBalance(userId: string): Promise<number> {
+  const serviceClient = createServiceClient();
+  const { data: balanceData, error } = await serviceClient.rpc('get_user_credit_balance', {
+    p_user_id: userId,
+  });
+  if (error) {
+    console.error('[CreditCheck] RPC error:', error.message);
+    // On RPC error, treat as 0 to be safe
+    return 0;
+  }
+  const balance = (balanceData as number) ?? 0;
+  console.log(`[CreditCheck] userId=${userId} | balance=${balance}`);
+  return balance;
+}
+
+// ============================================================
 // MAIN ENGINE — Run OpenAI Vision + fallback levels
 // ============================================================
 export async function runIdentificationEngine(
@@ -532,6 +558,18 @@ export async function runIdentificationEngine(
       .from('identification_requests')
       .update({ checksum: null })
       .eq('id', requestId);
+  }
+
+  // ── CREDIT PRE-CHECK ─────────────────────────────────────
+  // Block OpenAI call immediately if the user has fewer than 2 credits.
+  // This prevents the fallback path from running and returning stale results.
+  if (userId) {
+    const balance = await checkCreditBalance(userId);
+    console.log(`[Engine] Credit pre-check | userId=${userId} | balance=${balance}`);
+    if (balance < 2) {
+      console.warn(`[Engine] Insufficient credits (${balance}) — blocking OpenAI call for userId=${userId}`);
+      throw new InsufficientCreditsError();
+    }
   }
 
   // ── OPENAI VISION ─────────────────────────────────────────

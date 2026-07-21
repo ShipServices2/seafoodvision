@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@/lib/supabase/server';
-import { runIdentificationEngine, saveCandidates } from '@/lib/identification/engine';
+import { runIdentificationEngine, saveCandidates, InsufficientCreditsError } from '@/lib/identification/engine';
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function POST(request: NextRequest) {
@@ -46,18 +46,40 @@ export async function POST(request: NextRequest) {
       .update({ status: 'analyzing' })
       .eq('id', requestId);
 
-    // Run engine — pass userId for credit debit
-    const result = await runIdentificationEngine(
-      requestId,
-      {
-        categoryHint,
-        stateHint,
-        contextHint,
-        countryHint,
-        notes,
-      },
-      user?.id ?? null
-    );
+    // Run engine — pass userId for credit pre-check and debit
+    let result;
+    try {
+      result = await runIdentificationEngine(
+        requestId,
+        {
+          categoryHint,
+          stateHint,
+          contextHint,
+          countryHint,
+          notes,
+        },
+        user?.id ?? null
+      );
+    } catch (engineErr: unknown) {
+      // ── Insufficient credits: reset status and return 402 immediately ──
+      // NEVER fall through to fallback or return old candidates.
+      if (engineErr instanceof InsufficientCreditsError) {
+        console.warn(`[analyze/route] Insufficient credits for userId=${user?.id ?? 'anonymous'} — aborting, no OpenAI call made`);
+        await supabase
+          .from('identification_requests')
+          .update({ status: 'insufficient_quality' })
+          .eq('id', requestId);
+        return NextResponse.json(
+          {
+            error: engineErr.message,
+            code: 'INSUFFICIENT_CREDITS',
+            creditsRequired: 2,
+          },
+          { status: 402 }
+        );
+      }
+      throw engineErr;
+    }
 
     console.log(`[analyze/route] Engine result | fromCache=${result.fromCache} | candidateCount=${result.candidates.length} | seafoodDetected=${result.seafoodDetected} | status=${result.status}`);
 
