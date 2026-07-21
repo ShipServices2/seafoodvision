@@ -5,6 +5,59 @@
 
 BEGIN;
 
+-- ─── 0. Create asset_readiness table if it does not exist ────────────────────
+CREATE TABLE IF NOT EXISTS public.asset_readiness (
+  id                  uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+  asset_id            uuid        NOT NULL REFERENCES public.assets(id) ON DELETE CASCADE,
+  species_validated   boolean     NOT NULL DEFAULT false,
+  technical_quality   boolean     NOT NULL DEFAULT false,
+  rights_verified     boolean     NOT NULL DEFAULT false,
+  metadata_completed  boolean     NOT NULL DEFAULT false,
+  packaging_completed boolean     NOT NULL DEFAULT false,
+  keywords_completed  boolean     NOT NULL DEFAULT false,
+  preview_available   boolean     NOT NULL DEFAULT false,
+  thumbnail_available boolean     NOT NULL DEFAULT false,
+  original_available  boolean     NOT NULL DEFAULT false,
+  license_ready       boolean     NOT NULL DEFAULT false,
+  publication_ready   boolean     NOT NULL DEFAULT false,
+  commercial_score    numeric(5,2) DEFAULT 0,
+  technical_score     numeric(5,2) DEFAULT 0,
+  completion_pct      numeric(5,2) DEFAULT 0,
+  created_at          timestamptz NOT NULL DEFAULT now(),
+  updated_at          timestamptz NOT NULL DEFAULT now(),
+  CONSTRAINT asset_readiness_asset_id_key UNIQUE (asset_id)
+);
+
+-- Enable RLS on asset_readiness
+ALTER TABLE public.asset_readiness ENABLE ROW LEVEL SECURITY;
+
+-- RLS policies for asset_readiness
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'asset_readiness'
+      AND policyname = 'asset_readiness_select_public'
+  ) THEN
+    CREATE POLICY asset_readiness_select_public
+      ON public.asset_readiness FOR SELECT
+      USING (true);
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename  = 'asset_readiness'
+      AND policyname = 'asset_readiness_service_all'
+  ) THEN
+    CREATE POLICY asset_readiness_service_all
+      ON public.asset_readiness FOR ALL
+      USING (auth.role() = 'service_role')
+      WITH CHECK (auth.role() = 'service_role');
+  END IF;
+END $$;
+
 -- ─── 1. Mark eligible photo assets as commercially available ─────────────────
 -- Eligible = media_type='photo', review_status IN ('approved','commercial'),
 --            publication_status IN ('published','commercial'), not a demo.
