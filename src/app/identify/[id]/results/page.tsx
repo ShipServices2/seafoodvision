@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   ArrowLeft, AlertCircle, Loader2, CheckCircle, ThumbsUp, ThumbsDown,
-  HelpCircle, Users, ExternalLink, Fish, Eye, Info
+  HelpCircle, Users, ExternalLink, Fish, Eye, Info, Zap
 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
@@ -242,14 +242,23 @@ export default function IdentifyResultsPage() {
 
                 {/* Links */}
                 {candidate.species?.slug && (
-                  <Link
-                    href={`/species/${candidate.species.slug}`}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                    target="_blank"
-                  >
-                    <ExternalLink size={11} />
-                    View species fact sheet
-                  </Link>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Link
+                      href={`/species/${candidate.species.slug}`}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                      target="_blank"
+                    >
+                      <ExternalLink size={11} />
+                      View species fact sheet
+                    </Link>
+                    <Link
+                      href={`/hub/${candidate.species.slug}?from=identify&identify_id=${id}`}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold bg-secondary/10 text-secondary hover:bg-secondary hover:text-white px-2.5 py-1 rounded-lg transition-colors"
+                    >
+                      <Zap size={11} />
+                      Open Intelligence Hub
+                    </Link>
+                  </div>
                 )}
               </div>
             ))}

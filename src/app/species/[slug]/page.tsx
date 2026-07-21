@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import Head from 'next/head';
-import { CheckCircle, Globe, Award, FileText, Layers, ChevronRight, Fish, ShoppingBag, MapPin, Leaf, Scale, Package, FlaskConical, Anchor } from 'lucide-react';
+import { CheckCircle, Globe, Award, FileText, Layers, ChevronRight, Fish, ShoppingBag, MapPin, Leaf, Scale, Package, FlaskConical, Anchor, Zap } from 'lucide-react';
 import {
   fetchEncSpeciesBySlug,
   fetchSpeciesNames,
@@ -301,6 +301,17 @@ export default function SpeciesDetailPage() {
               {species.description && (
                 <p className="text-muted-foreground leading-relaxed text-sm max-w-2xl">{species.description}</p>
               )}
+
+              {/* Intelligence Hub CTA */}
+              <div className="mt-5">
+                <Link
+                  href={`/hub/${slug}`}
+                  className="inline-flex items-center gap-2 bg-gradient-to-r from-ocean-800 to-ocean-600 text-white font-semibold px-5 py-2.5 rounded-xl hover:from-ocean-900 hover:to-ocean-700 transition-all shadow-sm text-sm"
+                >
+                  <Zap size={15} />
+                  Open Seafood Intelligence Hub
+                </Link>
+              </div>
             </div>
 
             <div className="bg-card rounded-xl border border-border p-5 space-y-3 h-fit">
