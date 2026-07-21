@@ -1,21 +1,19 @@
 // SeafoodVision — Auto-configure credit pack Product IDs from Dodo TEST
-// Fetches real products, matches by price, writes to .env
+// Fetches real products, matches by price, saves to Supabase payment_product_mappings
 
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getDodoRuntimeConfig } from '@/lib/payments/dodo/config';
 import DodoPayments from 'dodopayments';
-import fs from 'fs';
-import path from 'path';
 
 export const dynamic = 'force-dynamic';
 
 // Credit pack definitions: price in cents → env key + credits
 const CREDIT_PACK_DEFINITIONS = [
-  { credits: 100,  priceEur: 900,  envKey: 'DODO_CREDIT_PACK_100_PRODUCT_ID',  label: '100 crédits — 9 EUR' },
-  { credits: 250,  priceEur: 1900, envKey: 'DODO_CREDIT_PACK_250_PRODUCT_ID',  label: '250 crédits — 19 EUR' },
-  { credits: 500,  priceEur: 3500, envKey: 'DODO_CREDIT_PACK_500_PRODUCT_ID',  label: '500 crédits — 35 EUR' },
-  { credits: 1000, priceEur: 5900, envKey: 'DODO_CREDIT_PACK_1000_PRODUCT_ID', label: '1000 crédits — 59 EUR' },
+  { credits: 100,  priceEur: 900,  envKey: 'DODO_CREDIT_PACK_100_PRODUCT_ID',  packCode: 'credits_100',  label: '100 crédits — 9 EUR' },
+  { credits: 250,  priceEur: 1900, envKey: 'DODO_CREDIT_PACK_250_PRODUCT_ID',  packCode: 'credits_250',  label: '250 crédits — 19 EUR' },
+  { credits: 500,  priceEur: 3500, envKey: 'DODO_CREDIT_PACK_500_PRODUCT_ID',  packCode: 'credits_500',  label: '500 crédits — 35 EUR' },
+  { credits: 1000, priceEur: 5900, envKey: 'DODO_CREDIT_PACK_1000_PRODUCT_ID', packCode: 'credits_1000', label: '1000 crédits — 59 EUR' },
 ];
 
 // Placeholder patterns to detect unset values
@@ -165,37 +163,68 @@ export async function POST(request: Request) {
       }
     }
 
-    // Write to .env file
-    const envPath = path.resolve(process.cwd(), '.env');
-    let envContent = '';
-    try {
-      envContent = fs.readFileSync(envPath, 'utf-8');
-    } catch {
-      return NextResponse.json({ error: '.env file not found' }, { status: 500 });
+    const runtime = getDodoRuntimeConfig();
+    const environment = runtime.environment === 'production' ? 'production' : 'test';
+
+    // Fetch credit_packs rows to get their UUIDs
+    const { data: creditPacks, error: packsError } = await supabase
+      .from('credit_packs')
+      .select('id, pack_code, credits');
+
+    if (packsError || !creditPacks) {
+      return NextResponse.json({ error: 'Failed to fetch credit_packs from Supabase' }, { status: 500 });
     }
 
-    let updated = envContent;
     const appliedKeys: string[] = [];
 
-    for (const key of required) {
-      const newValue = mappings[key].trim();
-      // Replace existing line (with or without placeholder)
-      const lineRegex = new RegExp(`^(${key}=.*)$`, 'm');
-      if (lineRegex.test(updated)) {
-        updated = updated.replace(lineRegex, `${key}=${newValue}`);
-      } else {
-        // Append if key doesn't exist
-        updated += `\n${key}=${newValue}`;
-      }
-      appliedKeys.push(`${key}=${newValue}`);
-    }
+    for (const packDef of CREDIT_PACK_DEFINITIONS) {
+      const dodoProductId = mappings[packDef.envKey]?.trim();
+      if (!dodoProductId) continue;
 
-    fs.writeFileSync(envPath, updated, 'utf-8');
+      // Find the matching credit_pack row by credits count or pack_code
+      const packRow = creditPacks.find(
+        (p) => p.pack_code === packDef.packCode || p.credits === packDef.credits
+      );
+
+      if (!packRow) {
+        console.warn(`[auto-configure-credits] No credit_pack row found for ${packDef.packCode} (${packDef.credits} credits)`);
+        continue;
+      }
+
+      // Upsert into payment_product_mappings
+      // Use conflict on (internal_product_type, internal_product_id, environment)
+      const { error: upsertError } = await supabase
+        .from('payment_product_mappings')
+        .upsert(
+          {
+            internal_product_type: 'credit_pack',
+            internal_product_id: packRow.id,
+            dodo_product_id: dodoProductId,
+            environment,
+            currency: 'EUR',
+            is_active: true,
+          },
+          {
+            onConflict: 'internal_product_type,internal_product_id,environment',
+            ignoreDuplicates: false,
+          }
+        );
+
+      if (upsertError) {
+        console.error(`[auto-configure-credits] Upsert error for ${packDef.packCode}:`, upsertError.message);
+        return NextResponse.json(
+          { error: `Failed to save mapping for ${packDef.label}: ${upsertError.message}` },
+          { status: 500 }
+        );
+      }
+
+      appliedKeys.push(`${packDef.envKey}=${dodoProductId} → saved to Supabase (pack: ${packRow.id})`);
+    }
 
     return NextResponse.json({
       success: true,
       applied: appliedKeys,
-      message: 'Product IDs written to .env. Restart the server to apply.',
+      message: `${appliedKeys.length} Product ID(s) saved to Supabase payment_product_mappings (${environment} environment). Active immediately — no server restart needed.`,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Apply configuration failed';

@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
+import { useAuth } from '@/contexts/AuthContext';
 
 interface DodoProduct {
   product_id: string;
@@ -31,16 +33,22 @@ interface ConfigData {
 }
 
 export default function DodoCreditConfigPage() {
-  const [loading, setLoading] = useState(false);
+  const { user, profile, loading } = useAuth();
+  const router = useRouter();
+  const [fetchLoading, setFetchLoading] = useState(false);
   const [applying, setApplying] = useState(false);
   const [data, setData] = useState<ConfigData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [applyResult, setApplyResult] = useState<{ success: boolean; message: string; applied?: string[] } | null>(null);
-  // Manual override IDs per pack
   const [manualIds, setManualIds] = useState<Record<string, string>>({});
 
+  useEffect(() => {
+    if (!loading && !user) router.replace('/auth?next=/admin/commerce/dodo-credit-config');
+    if (!loading && profile && !['administrator', 'super_admin'].includes(profile.role ?? '')) router.replace('/admin');
+  }, [loading, user, profile, router]);
+
   const fetchConfig = useCallback(async () => {
-    setLoading(true);
+    setFetchLoading(true);
     setError(null);
     setApplyResult(null);
     try {
@@ -48,7 +56,6 @@ export default function DodoCreditConfigPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? 'Failed to fetch');
       setData(json);
-      // Pre-fill manual IDs with matched product IDs
       const ids: Record<string, string> = {};
       for (const m of json.credit_pack_matches ?? []) {
         ids[m.pack.envKey] = m.matched_product?.product_id ?? m.current_env_value ?? '';
@@ -57,13 +64,13 @@ export default function DodoCreditConfigPage() {
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Unknown error');
     } finally {
-      setLoading(false);
+      setFetchLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    if (user) fetchConfig();
+  }, [user, fetchConfig]);
 
   const applyConfig = async () => {
     setApplying(true);
@@ -86,6 +93,8 @@ export default function DodoCreditConfigPage() {
 
   const allFilled = Object.values(manualIds).every((v) => v && v.trim() !== '' && !v.startsWith('YOUR_'));
 
+  if (loading) return null;
+
   return (
     <div className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-4xl mx-auto">
@@ -99,15 +108,16 @@ export default function DodoCreditConfigPage() {
         <p className="text-gray-400 text-sm mb-6">
           Fetches real Product IDs from your Dodo TEST account and maps them to the 4 credit packs.
           Matching is done by price (EUR). You can also enter IDs manually.
+          Product IDs are saved durably in Supabase (<code className="text-cyan-400">payment_product_mappings</code>) — no server restart needed.
         </p>
 
         {/* Refresh */}
         <button
           onClick={fetchConfig}
-          disabled={loading}
+          disabled={fetchLoading}
           className="mb-6 px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 rounded-lg text-sm font-medium transition-colors"
         >
-          {loading ? 'Fetching from Dodo...' : '🔄 Fetch from Dodo TEST'}
+          {fetchLoading ? 'Fetching from Dodo...' : '🔄 Fetch from Dodo TEST'}
         </button>
 
         {error && (
@@ -217,10 +227,10 @@ export default function DodoCreditConfigPage() {
                 disabled={applying || !allFilled}
                 className="px-6 py-3 bg-green-600 hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed rounded-lg font-semibold text-sm transition-colors"
               >
-                {applying ? 'Applying...' : '✅ Apply Product IDs to .env'}
+                {applying ? 'Saving to Supabase...' : '✅ Save Product IDs to Supabase'}
               </button>
               {!allFilled && (
-                <span className="text-yellow-400 text-xs">Fill all 4 Product IDs before applying</span>
+                <span className="text-yellow-400 text-xs">Fill all 4 Product IDs before saving</span>
               )}
             </div>
 
