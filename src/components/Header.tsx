@@ -18,13 +18,13 @@ const languages = [
 const navLinks = [
   { href: '/library', label: 'Library', icon: Library },
   { href: '/species', label: 'Species', icon: BookOpen },
-  { href: '/knowledge', label: 'Knowledge', icon: Database },
-  { href: '/assistant', label: 'Assistant', icon: Sparkles },
+  { href: '/knowledge', label: 'Knowledge', icon: Database, hidden: true },
+  { href: '/assistant', label: 'Assistant', icon: Sparkles, hidden: true },
   { href: '/identify', label: 'Identify', icon: Microscope },
-  { href: '/discover', label: 'Discover', icon: Compass },
+  { href: '/discover', label: 'Discover', icon: Compass, hidden: true },
   { href: '/products', label: 'Products', icon: ShoppingBag },
   { href: '/how-it-works', label: 'How it works', icon: HelpCircle },
-  { href: '/licensing', label: 'Licensing', icon: Tag },
+  { href: '/licensing', label: 'Licensing', icon: Tag, hidden: true },
   { href: '/pricing', label: 'Pricing', icon: DollarSign },
   { href: '/enterprise', label: 'Enterprise', icon: Building2 },
   { href: '/about', label: 'About', icon: Info },
@@ -117,7 +117,7 @@ export default function Header({ transparent = false }: HeaderProps) {
 
             {/* Desktop Nav */}
             <nav className="hidden lg:flex items-center gap-1 ml-4">
-              {navLinks.map((link) => (
+              {navLinks.filter((link) => !link.hidden).map((link) => (
                 <Link
                   key={`nav-${link.href}`}
                   href={link.href}
@@ -126,7 +126,7 @@ export default function Header({ transparent = false }: HeaderProps) {
                       ? 'text-white/80 hover:bg-white/10 hover:text-white' :'text-muted-foreground'
                   }`}
                 >
-                  {link.label}
+                  {link.label.toUpperCase()}
                 </Link>
               ))}
             </nav>
@@ -280,7 +280,7 @@ export default function Header({ transparent = false }: HeaderProps) {
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-1">
-              {navLinks.map((link) => {
+              {navLinks.filter((link) => !link.hidden).map((link) => {
                 const Icon = link.icon;
                 return (
                   <Link
@@ -290,7 +290,7 @@ export default function Header({ transparent = false }: HeaderProps) {
                     className="flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-foreground hover:bg-muted transition-colors duration-150"
                   >
                     <Icon size={16} className="text-muted-foreground" />
-                    {link.label}
+                    {link.label.toUpperCase()}
                   </Link>
                 );
               })}
