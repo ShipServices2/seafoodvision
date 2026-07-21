@@ -580,8 +580,10 @@ export async function runIdentificationEngine(
 
   if (uploadPath) {
     try {
-      // Download image from Supabase Storage
-      const { data: fileData, error: downloadError } = await supabase.storage
+      // Download image from Supabase Storage using service client
+      // (service role bypasses RLS and can access all uploaded files)
+      const serviceClient = createServiceClient();
+      const { data: fileData, error: downloadError } = await serviceClient.storage
         .from('identification-uploads')
         .download(uploadPath);
 
