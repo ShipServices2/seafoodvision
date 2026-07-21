@@ -32,16 +32,23 @@ function formatDimensions(w: number | null, h: number | null): string {
 const LICENSE_OPTIONS = [
   {
     code: 'commercial',
-    name: 'Commercial License',
+    name: 'Photo Web',
+    unitProductCode: 'photo_web',
+    description: 'Web-optimised (72 dpi, up to 1920px)',
+    price: '5€',
+  },
+  {
+    code: 'commercial',
+    name: 'Photo HD',
     unitProductCode: 'photo_hd',
-    description: 'Commercial web, social media, presentations and print use',
+    description: 'High-definition (300 dpi, up to 4K)',
     price: '20€',
   },
   {
-    code: 'extended',
-    name: 'Extended License',
+    code: 'commercial',
+    name: 'Photo Ultra HD',
     unitProductCode: 'photo_ultrahd',
-    description: 'Unlimited digital use, print, merchandise',
+    description: 'Full resolution (up to 8K)',
     price: '40€',
   },
 ];
@@ -61,7 +68,7 @@ function getCommercialCriteria(asset: AssetRow): CommercialCriterion[] {
     {
       key: 'asset_approved',
       label: 'Asset approved',
-      passed: asset.review_status === 'approved',
+      passed: ['approved', 'commercial'].includes(asset.review_status ?? ''),
       value: asset.review_status ?? 'unknown',
       required: true,
     },
@@ -161,7 +168,7 @@ export default function AssetSlugPage() {
   async function handleBuyLicense() {
     if (!asset || !selectedLicense) return;
 
-    const licenseOption = LICENSE_OPTIONS.find((l) => l.code === selectedLicense);
+    const licenseOption = LICENSE_OPTIONS.find((l) => l.unitProductCode === selectedLicense);
     if (!licenseOption) return;
 
     // If not logged in, redirect to sign-in with checkout intent
@@ -357,11 +364,11 @@ export default function AssetSlugPage() {
                       <div className="flex flex-col gap-2">
                         {LICENSE_OPTIONS.map((opt) => (
                           <button
-                            key={opt.code}
-                            onClick={() => setSelectedLicense(opt.code)}
+                            key={opt.unitProductCode}
+                            onClick={() => setSelectedLicense(opt.unitProductCode)}
                             className={`w-full text-left rounded-xl border p-3 transition-all duration-150 ${
-                              selectedLicense === opt.code
-                                ? 'border-secondary bg-secondary/5 ring-1 ring-secondary/20' :'border-border hover:border-secondary/40 hover:bg-muted/40'
+                              selectedLicense === opt.unitProductCode
+                                ? 'border-secondary bg-secondary/5 ring-1 ring-secondary/20' : 'border-border hover:border-secondary/40 hover:bg-muted/40'
                             }`}
                           >
                             <div className="flex items-center justify-between mb-0.5">
@@ -378,7 +385,7 @@ export default function AssetSlugPage() {
                         disabled={!selectedLicense || checkoutLoading}
                         className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-all duration-150 ${
                           selectedLicense && !checkoutLoading
-                            ? 'bg-secondary text-white hover:bg-secondary/90' :'bg-muted text-muted-foreground cursor-not-allowed'
+                            ? 'bg-secondary text-white hover:bg-secondary/90' : 'bg-muted text-muted-foreground cursor-not-allowed'
                         }`}
                       >
                         {checkoutLoading ? (
@@ -395,7 +402,7 @@ export default function AssetSlugPage() {
                       </button>
 
                       {selectedLicense && (() => {
-                        const option = LICENSE_OPTIONS.find((entry) => entry.code === selectedLicense);
+                        const option = LICENSE_OPTIONS.find((entry) => entry.unitProductCode === selectedLicense);
                         return option ? (
                           <AddToCartButton
                             item={{
