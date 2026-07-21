@@ -10,6 +10,7 @@ import { canonicalPlanCode } from './subscriptionPlanResolution';
 
 
 
+
 export { canonicalPlanCode } from './subscriptionPlanResolution';
 
 type CommerceClient = ReturnType<typeof createServiceClient>;
@@ -171,17 +172,45 @@ export async function validateAssetLicensePurchase(
       .is('billing_cycle', null)
       .maybeSingle();
     mapping = result.data;
-    if (!mapping?.dodo_product_id) blockers.push('Dodo mapping is missing for the unit product');
   }
 
-  if (blockers.length || !license || !product || !mapping?.dodo_product_id) return invalid(blockers);
+  // Resolve Dodo product ID: DB mapping first, then env-var fallback
+  // (same pattern as validateCreditPackPurchase for credit packs)
+  let dodoProductId: string | null = mapping?.dodo_product_id ?? null;
+
+  if (!dodoProductId && product) {
+    const photoEnvKeyMap: Record<string, string> = {
+      photo_web:     'DODO_PHOTO_WEB_PRODUCT_ID',
+      photo_hd:      'DODO_PHOTO_HD_PRODUCT_ID',
+      photo_ultrahd: 'DODO_PHOTO_ULTRAHD_PRODUCT_ID',
+    };
+    const envKey = photoEnvKeyMap[params.unitProductCode];
+    const envValue = envKey ? (process.env[envKey]?.trim() ?? null) : null;
+    // Reject placeholder values — they cause 422 from Dodo
+    const isPlaceholder = !envValue ||
+      /^YOUR_DODO/i.test(envValue) ||
+      /^YOUR_/i.test(envValue) ||
+      /^pdt_xxx/i.test(envValue) ||
+      /^placeholder/i.test(envValue) ||
+      /^REPLACE/i.test(envValue);
+    if (envValue && !isPlaceholder) {
+      dodoProductId = envValue;
+      console.log(`[validateAssetLicensePurchase] Using env-var Dodo product ID for ${params.unitProductCode}: ${dodoProductId}`);
+    } else if (isPlaceholder) {
+      console.warn(`[validateAssetLicensePurchase] Env var ${envKey} contains a placeholder value — ignoring. Set real Dodo TEST Product IDs in your environment.`);
+    }
+  }
+
+  if (!dodoProductId) blockers.push('Dodo mapping is missing for the unit product');
+
+  if (blockers.length || !license || !product || !dodoProductId) return invalid(blockers);
   return {
     valid: true,
     blockers: [],
     normalized_product: { asset, license, product },
     authoritative_price: Number(product.price),
     currency: product.currency,
-    dodo_product_id: mapping.dodo_product_id,
+    dodo_product_id: dodoProductId,
     fulfillment_metadata: {
       assetId: asset.id,
       licenseTypeId: license.id,
