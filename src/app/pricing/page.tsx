@@ -208,7 +208,7 @@ export default function PricingPage() {
                 <div className="text-xl font-extrabold text-foreground font-mono-data mb-1">{product.price}€</div>
                 <div className="text-sm font-semibold text-foreground mb-1">{product.name}</div>
                 <div className="text-xs text-muted-foreground leading-tight">{product.description}</div>
-                <Link href="/library" className="mt-3 inline-flex text-xs font-semibold text-secondary hover:underline">Select an asset</Link>
+                <Link href="/library?licenseType=commercial" className="mt-3 inline-flex text-xs font-semibold text-secondary hover:underline">Select an asset →</Link>
               </div>
             ))}
           </div>
