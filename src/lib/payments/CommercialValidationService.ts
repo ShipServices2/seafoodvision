@@ -6,6 +6,7 @@ import { canonicalPlanCode } from './subscriptionPlanResolution';
 
 
 
+
 export { canonicalPlanCode } from './subscriptionPlanResolution';
 
 type CommerceClient = ReturnType<typeof createServiceClient>;
@@ -209,7 +210,26 @@ export async function validateCreditPackPurchase(
     .eq('is_active', true)
     .is('billing_cycle', null)
     .maybeSingle();
-  const dodoProductId = mapping?.dodo_product_id ?? null;
+
+  // Resolve Dodo product ID: DB mapping first, then env var fallback
+  let dodoProductId: string | null = mapping?.dodo_product_id ?? null;
+
+  if (!dodoProductId) {
+    // Env var fallback — allows wiring up real Dodo TEST product IDs without a DB migration
+    const envKeyMap: Record<string, string> = {
+      credits_100:  'DODO_CREDIT_PACK_100_PRODUCT_ID',
+      credits_250:  'DODO_CREDIT_PACK_250_PRODUCT_ID',
+      credits_500:  'DODO_CREDIT_PACK_500_PRODUCT_ID',
+      credits_1000: 'DODO_CREDIT_PACK_1000_PRODUCT_ID',
+    };
+    const envKey = envKeyMap[params.packCode];
+    const envValue = envKey ? (process.env[envKey]?.trim() ?? null) : null;
+    if (envValue) {
+      dodoProductId = envValue;
+      console.log(`[validateCreditPackPurchase] Using env-var Dodo product ID for ${params.packCode}: ${dodoProductId}`);
+    }
+  }
+
   if (!dodoProductId) blockers.push('Dodo mapping is missing for the credit pack');
   if (blockers.length) return invalid(blockers, pack);
 
@@ -260,7 +280,7 @@ export async function validateSubscriptionPurchase(
       .limit(1)
       .maybeSingle(),
   ]);
-  const dodoProductId = mapping?.dodo_product_id ?? null;
+  let dodoProductId = mapping?.dodo_product_id ?? null;
   if (!dodoProductId) blockers.push(`Dodo ${params.billingCycle} mapping is missing for this plan`);
   if (activeSubscription) blockers.push('user already has an active subscription');
   if (blockers.length) return invalid(blockers, plan);
