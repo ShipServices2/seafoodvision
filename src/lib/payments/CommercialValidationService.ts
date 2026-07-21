@@ -7,6 +7,7 @@ import { canonicalPlanCode } from './subscriptionPlanResolution';
 
 
 
+
 export { canonicalPlanCode } from './subscriptionPlanResolution';
 
 type CommerceClient = ReturnType<typeof createServiceClient>;
@@ -224,13 +225,22 @@ export async function validateCreditPackPurchase(
     };
     const envKey = envKeyMap[params.packCode];
     const envValue = envKey ? (process.env[envKey]?.trim() ?? null) : null;
-    if (envValue) {
+    // Reject placeholder values — they cause 422 from Dodo
+    const isPlaceholder = !envValue ||
+      /^YOUR_DODO/i.test(envValue) ||
+      /^YOUR_/i.test(envValue) ||
+      /^pdt_xxx/i.test(envValue) ||
+      /^placeholder/i.test(envValue) ||
+      /^REPLACE/i.test(envValue);
+    if (envValue && !isPlaceholder) {
       dodoProductId = envValue;
       console.log(`[validateCreditPackPurchase] Using env-var Dodo product ID for ${params.packCode}: ${dodoProductId}`);
+    } else if (isPlaceholder) {
+      console.warn(`[validateCreditPackPurchase] Env var ${envKey} contains a placeholder value — ignoring. Go to /admin/commerce/dodo-credit-config to set real Product IDs.`);
     }
   }
 
-  if (!dodoProductId) blockers.push('Dodo mapping is missing for the credit pack');
+  if (!dodoProductId) blockers.push('Dodo mapping is missing for the credit pack. Visit /admin/commerce/dodo-credit-config to configure real Product IDs.');
   if (blockers.length) return invalid(blockers, pack);
 
   return {
