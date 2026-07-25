@@ -58,8 +58,17 @@ async function runOpenAIVision(
   hints: HintContext
 ): Promise<{ result: OpenAIVisionResponse; fromCache: false; httpStatus: number } | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  if (!apiKey || apiKey === 'your-openai-api-key-here' || apiKey.trim() === '') {
-    console.warn('[OpenAIVision] OPENAI_API_KEY not configured — skipping vision analysis');
+  const apiKeyLower = (apiKey ?? '').toLowerCase().trim();
+  if (
+    !apiKey ||
+    apiKey.trim() === '' ||
+    apiKeyLower === 'your-openai-api-key-here' ||
+    apiKeyLower === 'your_openai_api_key_here'|| apiKeyLower.startsWith('your_') ||
+    apiKeyLower.includes('_here') ||
+    apiKeyLower.includes('placeholder') ||
+    apiKeyLower.includes('your-ope')
+  ) {
+    console.warn('[OpenAIVision] OPENAI_API_KEY not configured or is a placeholder — skipping vision analysis');
     return null;
   }
 

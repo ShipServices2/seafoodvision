@@ -173,7 +173,16 @@ export class OpenAIProvider implements IAIProvider {
   readonly isAvailable: boolean;
 
   constructor() {
-    this.isAvailable = !!(process.env.OPENAI_API_KEY && process.env.OPENAI_API_KEY !== 'your-openai-api-key-here');
+    const key = process.env.OPENAI_API_KEY ?? '';
+    const keyLower = key.toLowerCase().trim();
+    this.isAvailable = !!(
+      key &&
+      key.trim() !== '' &&
+      keyLower !== 'your-openai-api-key-here' &&
+      keyLower !== 'your_openai_api_key_here'&& !keyLower.startsWith('your_') &&
+      !keyLower.includes('_here') &&
+      !keyLower.includes('placeholder')
+    );
   }
 
   async identify(request: AIIdentificationRequest): Promise<AIIdentificationResult> {
