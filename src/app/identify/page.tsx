@@ -80,6 +80,12 @@ export default function IdentifyPage() {
     setError(null);
     setResult(null);
 
+    // Global timeout: abort everything after 90 seconds to prevent stuck state
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => {
+      controller.abort();
+    }, 90_000);
+
     try {
       // ── STEP 1: Upload the actual image file ──────────────────────────────
       setStepLabel('Uploading image…');
@@ -95,6 +101,7 @@ export default function IdentifyPage() {
         body: fd,
         // No Content-Type header — browser sets it with boundary for FormData
         cache: 'no-store',
+        signal: controller.signal,
       });
 
       const uploadData = await uploadRes.json();
@@ -129,6 +136,7 @@ export default function IdentifyPage() {
           notes: null,
         }),
         cache: 'no-store',
+        signal: controller.signal,
       });
 
       const analyzeData = await analyzeRes.json();
@@ -195,10 +203,15 @@ export default function IdentifyPage() {
       });
 
     } catch (err: unknown) {
-      const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';
-      console.error('[identify/page] Identification error:', msg);
-      setError(msg);
+      if (err instanceof Error && err.name === 'AbortError') {
+        setError('The request timed out after 90 seconds. Please try again.');
+      } else {
+        const msg = err instanceof Error ? err.message : 'An unexpected error occurred.';
+        console.error('[identify/page] Identification error:', msg);
+        setError(msg);
+      }
     } finally {
+      clearTimeout(timeoutId);
       setRunning(false);
       setStepLabel('');
     }

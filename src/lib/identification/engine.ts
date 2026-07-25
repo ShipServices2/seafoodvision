@@ -58,19 +58,34 @@ async function runOpenAIVision(
   hints: HintContext
 ): Promise<{ result: OpenAIVisionResponse; fromCache: false; httpStatus: number } | null> {
   const apiKey = process.env.OPENAI_API_KEY;
-  const apiKeyLower = (apiKey ?? '').toLowerCase().trim();
-  if (
-    !apiKey ||
-    apiKey.trim() === '' ||
-    apiKeyLower === 'your-openai-api-key-here' ||
-    apiKeyLower === 'your_openai_api_key_here'|| apiKeyLower.startsWith('your_') ||
-    apiKeyLower.includes('_here') ||
-    apiKeyLower.includes('placeholder') ||
-    apiKeyLower.includes('your-ope')
-  ) {
-    console.warn('[OpenAIVision] OPENAI_API_KEY not configured or is a placeholder — skipping vision analysis');
+
+  // A real OpenAI key always starts with "sk-"
+  // Only reject keys that are clearly placeholders (empty, or known placeholder strings)
+  if (!apiKey || apiKey.trim() === '') {
+    console.warn('[OpenAIVision] OPENAI_API_KEY is not set — skipping vision analysis');
     return null;
   }
+
+  const trimmedKey = apiKey.trim();
+  const keyLower = trimmedKey.toLowerCase();
+
+  // Only reject obvious placeholder strings — never reject a key that starts with "sk-"
+  const isPlaceholder =
+    !trimmedKey.startsWith('sk-') && (
+      keyLower === 'your-openai-api-key-here' ||
+      keyLower === 'your_openai_api_key_here'|| keyLower.startsWith('your_openai') ||
+      keyLower.startsWith('your-openai') ||
+      keyLower.includes('placeholder') ||
+      keyLower === 'changeme' ||
+      keyLower === 'todo'
+    );
+
+  if (isPlaceholder) {
+    console.warn('[OpenAIVision] OPENAI_API_KEY appears to be a placeholder — skipping vision analysis');
+    return null;
+  }
+
+  console.log(`[OpenAIVision] API key present | starts_with=${trimmedKey.substring(0, 7)}... | valid_format=${trimmedKey.startsWith('sk-')}`);
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-4o';
 
@@ -129,7 +144,7 @@ Rules:
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${trimmedKey}`,
     },
     body: JSON.stringify({
       model,
@@ -749,9 +764,21 @@ export async function runIdentificationEngine(
     };
   }
 
-  // ── FALLBACK: metadata + structured search ────────────────
+  // ── IMAGE WAS UPLOADED BUT VISION FAILED ─────────────────
+  // When an image was uploaded (uploadPath is set), we must NOT silently fall back
+  // to metadata candidates. Return a real technical error instead.
+  if (uploadPath) {
+    const technicalError = visionError
+      ? `OpenAI Vision failed: ${visionError}`
+      : 'OpenAI Vision could not be called. Check that OPENAI_API_KEY is set to a valid sk-... key in the environment variables.';
+
+    console.error(`[Engine] Image was uploaded but OpenAI Vision did not run | uploadPath=${uploadPath} | visionError=${visionError ?? 'API key missing or invalid'}`);
+    throw new Error(technicalError);
+  }
+
+  // ── FALLBACK: metadata + structured search (only when NO image was uploaded) ──
   // Note: credits are NOT debited for fallback path (no OpenAI call succeeded)
-  console.log(`[Engine] fromCache=false | OpenAI unavailable/failed | falling back to metadata+search | visionError=${visionError ?? 'none'}`);
+  console.log(`[Engine] No image uploaded | falling back to metadata+search | visionError=${visionError ?? 'none'}`);
 
   const [levelA, levelB] = await Promise.all([
     buildMetadataCandidates(hints),
@@ -781,13 +808,9 @@ export async function runIdentificationEngine(
     }
   });
 
-  const fallbackMessage = visionError
-    ? `Visual AI unavailable: ${visionError}. Showing metadata-based candidates.`
-    : 'No image available. Showing metadata-based candidates only.';
-
   return {
     candidates: merged.slice(0, 8),
-    visualAI: { enabled: false, message: fallbackMessage },
+    visualAI: { enabled: false, message: 'No image provided. Showing text-search candidates only.' },
     status: merged.length > 0 ? 'candidates_ready' : 'insufficient_quality',
     fromCache: false,
     seafoodDetected: true,
