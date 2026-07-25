@@ -59,33 +59,15 @@ async function runOpenAIVision(
 ): Promise<{ result: OpenAIVisionResponse; fromCache: false; httpStatus: number } | null> {
   const apiKey = process.env.OPENAI_API_KEY;
 
-  // A real OpenAI key always starts with "sk-"
-  // Only reject keys that are clearly placeholders (empty, or known placeholder strings)
+  // Only reject if the key is completely absent or empty
   if (!apiKey || apiKey.trim() === '') {
     console.warn('[OpenAIVision] OPENAI_API_KEY is not set — skipping vision analysis');
     return null;
   }
 
   const trimmedKey = apiKey.trim();
-  const keyLower = trimmedKey.toLowerCase();
 
-  // Only reject obvious placeholder strings — never reject a key that starts with "sk-"
-  const isPlaceholder =
-    !trimmedKey.startsWith('sk-') && (
-      keyLower === 'your-openai-api-key-here' ||
-      keyLower === 'your_openai_api_key_here'|| keyLower.startsWith('your_openai') ||
-      keyLower.startsWith('your-openai') ||
-      keyLower.includes('placeholder') ||
-      keyLower === 'changeme' ||
-      keyLower === 'todo'
-    );
-
-  if (isPlaceholder) {
-    console.warn('[OpenAIVision] OPENAI_API_KEY appears to be a placeholder — skipping vision analysis');
-    return null;
-  }
-
-  console.log(`[OpenAIVision] API key present | starts_with=${trimmedKey.substring(0, 7)}... | valid_format=${trimmedKey.startsWith('sk-')}`);
+  console.log(`[OpenAIVision] API key present | starts_with=${trimmedKey.substring(0, 7)}... | length=${trimmedKey.length}`);
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-4o';
 
