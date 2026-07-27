@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
-import { RefreshCw, CircleAlert as AlertCircle, CircleCheck as CheckCircle2, Circle as XCircle, Search } from 'lucide-react';
+import { RefreshCw, AlertCircle, CheckCircle2, XCircle, Search } from 'lucide-react';
 
 interface DodoProduct {
   product_id: string;

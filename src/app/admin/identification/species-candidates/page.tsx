@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Microscope, Loader as Loader2, Fish } from 'lucide-react';
+import { ChevronRight, Microscope, Loader2, Fish } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { CONFIDENCE_LABELS, CONFIDENCE_COLORS } from '@/lib/identification/types';
 import type { ConfidenceLevel } from '@/lib/identification/types';

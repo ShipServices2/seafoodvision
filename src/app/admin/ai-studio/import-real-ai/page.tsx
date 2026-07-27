@@ -7,7 +7,11 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Upload, FileText, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle2, Circle as XCircle, Loader as Loader2, Eye, Database, Zap, ArrowRight, RefreshCw, Info, ShieldAlert, ChartBar as BarChart2, Fish, Tag, Globe, Hash, Star, Brain, Package } from 'lucide-react';
+import {
+  Upload, FileText, AlertTriangle, CheckCircle2, XCircle, Loader2,
+  Eye, Database, Zap, ArrowRight, RefreshCw, Info, ShieldAlert,
+  BarChart2, Fish, Tag, Globe, Hash, Star, Brain, Package
+} from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

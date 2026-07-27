@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Clock, ChevronRight, Loader as Loader2, Fish, Plus, CircleAlert as AlertCircle } from 'lucide-react';
+import { Clock, ChevronRight, Loader2, Fish, Plus, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { STATUS_LABELS } from '@/lib/identification/types';
 import type { IdentificationStatus } from '@/lib/identification/types';

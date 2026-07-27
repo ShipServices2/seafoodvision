@@ -1,5 +1,5 @@
 import React from 'react';
-import { Scan, Package, BookOpen, Code as Code2, Star } from 'lucide-react';
+import { Scan, Package, BookOpen, Code2, Star } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
 import Icon from '@/components/ui/AppIcon';
 

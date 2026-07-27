@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CircleCheck as CheckCircle2, Camera, Clock, Eye, ShoppingCart, FileText, Star, Archive, Circle as XCircle } from 'lucide-react';
+import { CheckCircle2, Camera, Clock, Eye, ShoppingCart, FileText, Star, Archive, XCircle } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 
 

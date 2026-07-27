@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Package, CreditCard, Tag, RefreshCw, CircleCheck as CheckCircle2, Circle as XCircle } from 'lucide-react';
+import { Package, CreditCard, Tag, RefreshCw, CheckCircle2, XCircle } from 'lucide-react';
 
 interface UnitProduct { id: string; product_code: string; name: string; price: number; currency: string; is_active: boolean; product_type: string; }
 interface CreditPack { id: string; pack_code: string; name: string; credits: number; price: number; currency: string; is_active: boolean; is_popular: boolean; }

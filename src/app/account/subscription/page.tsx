@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { CreditCard, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, RefreshCw } from 'lucide-react';
+import { CreditCard, CheckCircle2, AlertCircle, RefreshCw } from 'lucide-react';
 
 interface Subscription {
   id: string;

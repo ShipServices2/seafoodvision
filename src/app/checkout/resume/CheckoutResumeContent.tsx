@@ -6,7 +6,7 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowRight, RefreshCw, CircleAlert as AlertCircle, ShoppingCart, CircleCheck as CheckCircle2, Settings } from 'lucide-react';
+import { ArrowRight, RefreshCw, AlertCircle, ShoppingCart, CheckCircle2, Settings } from 'lucide-react';
 import { resolveSubscriptionSelection } from '@/lib/payments/subscriptionPlanResolution';
 
 type ResumeState =

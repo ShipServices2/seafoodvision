@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronLeft, ChevronRight, Heart, Plus, Image as ImageIcon, CircleCheck as CheckCircle2, Camera, ImageOff } from 'lucide-react';
+import { ChevronLeft, ChevronRight, Heart, Plus, Image as ImageIcon, CheckCircle2, Camera, ImageOff } from 'lucide-react';
 import type { ViewMode } from './LibraryContent';
 import Badge from '@/components/ui/Badge';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';

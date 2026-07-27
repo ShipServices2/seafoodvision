@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect } from 'react';
-import { Settings, DollarSign, CreditCard, Package, Shield, Save, RotateCcw, CircleCheck as CheckCircle2 } from 'lucide-react';
+import { Settings, DollarSign, CreditCard, Package, Shield, Save, RotateCcw, CheckCircle2,  } from 'lucide-react';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, LICENSE_TYPES, type SubscriptionPlan, type UnitProduct, type CreditPack, type LicenseType,  } from '@/lib/pricingConfig';
 import Icon from '@/components/ui/AppIcon';
 

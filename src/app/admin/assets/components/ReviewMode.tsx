@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight, X, Zap } from 'lucide-react';
+import { CheckCircle2, XCircle, ArrowRight, X, Zap } from 'lucide-react';
 import type { Asset } from '@/lib/supabase/types';
 import { getSignedStorageUrl, getAssetThumbnailFile } from '@/lib/supabase/assetService';
 

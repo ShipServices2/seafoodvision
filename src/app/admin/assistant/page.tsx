@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Sparkles, MessageSquare, ChartBar as BarChart2, CircleAlert as AlertCircle, ThumbsUp, ThumbsDown, Clock, TrendingUp, ChevronRight, Settings, Shield, Database, Circle as HelpCircle, Activity } from 'lucide-react';
+import { Sparkles, MessageSquare, BarChart2, AlertCircle, ThumbsUp, ThumbsDown, Clock, TrendingUp, ChevronRight, Settings, Shield, Database, HelpCircle, Activity } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

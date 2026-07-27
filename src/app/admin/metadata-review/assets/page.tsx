@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { ArrowLeft, Search, CircleCheck as CheckCircle2, Circle as XCircle, Circle as HelpCircle, RotateCcw, Loader as Loader2, RefreshCw, Eye, Star, Fish, Zap } from 'lucide-react';
+import { ArrowLeft, Search, CheckCircle2, XCircle, HelpCircle, RotateCcw, Loader2, RefreshCw, Eye, Star, Fish, Zap } from 'lucide-react';
 
 interface ReviewAsset {
   id: string;

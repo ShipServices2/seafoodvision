@@ -3,7 +3,11 @@
 import React, { useEffect, useState, useCallback, useRef, Suspense } from 'react';
 import Link from 'next/link';
 import { useSearchParams, useRouter } from 'next/navigation';
-import { Search, ChevronRight, Fish, ShoppingBag, Package, Globe, Award, FileText, X, ListFilter as Filter, CircleCheck as CheckCircle, Clock, TriangleAlert as AlertTriangle, Layers, Image, BookOpen, ArrowRight, Sparkles, TrendingUp } from 'lucide-react';
+import {
+  Search, ChevronRight, Fish, ShoppingBag, Package, Globe, Award, FileText,
+  X, Filter, CheckCircle, Clock, AlertTriangle, Layers, Image, BookOpen,
+  ArrowRight, Sparkles, TrendingUp,
+} from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import {

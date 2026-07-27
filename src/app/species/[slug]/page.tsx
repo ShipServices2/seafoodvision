@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import Head from 'next/head';
-import { CircleCheck as CheckCircle, Globe, Award, FileText, Layers, ChevronRight, Fish, ShoppingBag, MapPin, Leaf, Scale, Package, FlaskConical, Anchor, Zap } from 'lucide-react';
+import { CheckCircle, Globe, Award, FileText, Layers, ChevronRight, Fish, ShoppingBag, MapPin, Leaf, Scale, Package, FlaskConical, Anchor, Zap } from 'lucide-react';
 import {
   fetchEncSpeciesBySlug,
   fetchSpeciesNames,

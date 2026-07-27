@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { TriangleAlert as AlertTriangle, ChevronRight, CircleCheck as CheckCircle } from 'lucide-react';
+import { AlertTriangle, ChevronRight, CheckCircle } from 'lucide-react';
 
 interface Conflict {
   id: string;

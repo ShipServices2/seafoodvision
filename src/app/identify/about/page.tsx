@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { CircleAlert as AlertCircle, ArrowLeft, Shield, Eye, Trash2, FileText } from 'lucide-react';
+import { AlertCircle, ArrowLeft, Shield, Eye, Trash2, FileText } from 'lucide-react';
 
 export default function IdentifyAboutPage() {
   return (

@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { FolderOpen, ArrowLeft, Plus, Trash2, CreditCard as Edit2, ChevronRight, X, Check } from 'lucide-react';
+import { FolderOpen, ArrowLeft, Plus, Trash2, Edit2, ChevronRight, X, Check } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import {

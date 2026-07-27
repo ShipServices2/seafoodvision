@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Microscope, ClipboardList, Eye, ChartBar as BarChart2, Settings, MessageSquare, ChevronRight, Loader as Loader2, TrendingUp, Clock, CircleCheck as CheckCircle, CircleAlert as AlertCircle } from 'lucide-react';
+import { Microscope, ClipboardList, Eye, BarChart2, Settings, MessageSquare, ChevronRight, Loader2, TrendingUp, Clock, CheckCircle, AlertCircle } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Icon from '@/components/ui/AppIcon';
 

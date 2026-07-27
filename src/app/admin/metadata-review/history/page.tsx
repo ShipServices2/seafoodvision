@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { ArrowLeft, Search, Loader as Loader2, RefreshCw, User, Calendar, ArrowRight } from 'lucide-react';
+import { ArrowLeft, Search, Loader2, RefreshCw, User, Calendar, ArrowRight } from 'lucide-react';
 
 interface HistoryEntry {
   id: string;

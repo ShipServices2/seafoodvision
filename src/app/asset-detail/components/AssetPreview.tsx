@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Maximize2, ZoomIn, ZoomOut, Lock, ImageOff, CircleAlert as AlertCircle } from 'lucide-react';
+import { Maximize2, ZoomIn, ZoomOut, Lock, ImageOff, AlertCircle } from 'lucide-react';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 interface AssetPreviewProps {

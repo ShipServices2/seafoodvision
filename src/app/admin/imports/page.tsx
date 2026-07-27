@@ -3,7 +3,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Upload, CircleAlert as AlertCircle, CircleCheck as CheckCircle2, Circle as XCircle, FileText, Eye, Play, Loader as Loader2, ChevronDown, ChevronUp, Package, Fish, Tag, Hash, Image, FileImage, ClipboardList, RefreshCw, ShieldAlert, Database } from 'lucide-react';
+import {
+  ArrowLeft, Upload, AlertCircle, CheckCircle2, XCircle, FileText, Eye,
+  Play, Loader2, ChevronDown, ChevronUp, Package, Fish, Tag, Hash,
+  Image, FileImage, ClipboardList, RefreshCw, ShieldAlert, Database,
+} from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import type { ImportBatch } from '@/lib/supabase/types';

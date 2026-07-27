@@ -3,7 +3,10 @@
 import React, { useState, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Upload, Camera, X, CircleAlert as AlertCircle, CircleCheck as CheckCircle, ArrowRight, ArrowLeft, Loader as Loader2, Image as ImageIcon, Info, ChevronDown } from 'lucide-react';
+import {
+  Upload, Camera, X, AlertCircle, CheckCircle, ArrowRight, ArrowLeft,
+  Loader2, Image as ImageIcon, Info, ChevronDown
+} from 'lucide-react';
 import type { QualityFlag } from '@/lib/identification/types';
 
 type Step = 1 | 2 | 3 | 4;

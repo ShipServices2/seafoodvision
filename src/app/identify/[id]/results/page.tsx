@@ -3,7 +3,10 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, CircleAlert as AlertCircle, Loader as Loader2, CircleCheck as CheckCircle, ThumbsUp, ThumbsDown, Circle as HelpCircle, Users, ExternalLink, Fish, Eye, Info, Zap } from 'lucide-react';
+import {
+  ArrowLeft, AlertCircle, Loader2, CheckCircle, ThumbsUp, ThumbsDown,
+  HelpCircle, Users, ExternalLink, Fish, Eye, Info, Zap
+} from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
   CONFIDENCE_LABELS, CONFIDENCE_COLORS, STATUS_LABELS

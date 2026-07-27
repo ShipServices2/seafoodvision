@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { User, ArrowLeft, Save, CircleCheck as CheckCircle2 } from 'lucide-react';
+import { User, ArrowLeft, Save, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { useAuth } from '@/contexts/AuthContext';
 import { updateProfile } from '@/lib/supabase/queries';

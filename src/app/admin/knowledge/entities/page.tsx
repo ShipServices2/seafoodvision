@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { Search, ListFilter as Filter, ChevronRight, Database, Plus, Eye } from 'lucide-react';
+import { Search, Filter, ChevronRight, Database, Plus, Eye } from 'lucide-react';
 
 interface KGEntity {
   id: string;

@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Brain, Zap, Layers, Eye, CircleCheck as CheckCircle2, ChartBar as BarChart2, TriangleAlert as AlertTriangle, Database, Cpu, TrendingUp, Sparkles, ArrowRight, Fish, Target, SquareCheck as CheckSquare, Star, Globe, RefreshCw, Upload } from 'lucide-react';
+import { Brain, Zap, Layers, Eye, CheckCircle2, BarChart2, AlertTriangle, Database, Cpu, TrendingUp, Sparkles, ArrowRight, Fish, Target, CheckSquare, Star, Globe, RefreshCw, Upload } from 'lucide-react';
 
 interface SIEStats {
   totalJobs: number;

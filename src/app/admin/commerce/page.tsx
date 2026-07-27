@@ -7,7 +7,11 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { ChartBar as BarChart2, ShoppingCart, CreditCard, FileText, Download, Coins, Package, Map, Webhook, Settings, Users, Tag, Layers, RefreshCw, TrendingUp, CircleAlert as AlertCircle } from 'lucide-react';
+import {
+  BarChart2, ShoppingCart, CreditCard, FileText, Download, Coins,
+  Package, Map, Webhook, Settings, Users, Tag, Layers, RefreshCw,
+  TrendingUp, AlertCircle
+} from 'lucide-react';
 
 interface CommerceStats {
   totalOrders: number;

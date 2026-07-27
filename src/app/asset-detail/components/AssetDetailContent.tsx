@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
-import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Info, Tag, Globe as Globe2, FileImage, Hash, MapPin, Layers, Thermometer, Ruler, ShoppingCart, Loader as Loader2 } from 'lucide-react';
+import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Info, Tag, Globe2, FileImage, Hash, MapPin, Layers, Thermometer, Ruler, ShoppingCart, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '@/components/ui/Badge';
 import AssetPreview from './AssetPreview';

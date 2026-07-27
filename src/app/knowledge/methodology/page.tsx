@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { ChevronRight, CircleCheck as CheckCircle, Clock, CircleAlert as AlertCircle, BookOpen, Layers, Shield, Users, Database, GitBranch } from 'lucide-react';
+import { ChevronRight, CheckCircle, Clock, AlertCircle, BookOpen, Layers, Shield, Users, Database, GitBranch } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Icon from '@/components/ui/AppIcon';

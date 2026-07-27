@@ -3,7 +3,11 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader as Loader2, CircleAlert as AlertCircle, Coins, Crown, User, Fish, Image as ImageIcon, Package, Scale, Package2, Award, Globe, FileText, Bot, Layers, Briefcase } from 'lucide-react';
+import {
+  ArrowLeft, Loader2, AlertCircle, Coins, Crown, User,
+  Fish, Image as ImageIcon, Package, Scale, Package2,
+  Award, Globe, FileText, Bot, Layers, Briefcase
+} from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { createClient } from '@/lib/supabase/client';

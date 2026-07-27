@@ -3,7 +3,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import AppLogo from '@/components/ui/AppLogo';
-import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, Circle as HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, ShoppingCart, Compass, Sparkles, Microscope, Building2 } from 'lucide-react';
+import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, ShoppingCart, Compass, Sparkles, Microscope, Building2 } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
 

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Circle as HelpCircle, ChevronLeft, Globe, CircleAlert as AlertCircle } from 'lucide-react';
+import { HelpCircle, ChevronLeft, Globe, AlertCircle } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

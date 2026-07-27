@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { FileText, CircleCheck as CheckCircle2, Circle as XCircle, Clock } from 'lucide-react';
+import { FileText, CheckCircle2, XCircle, Clock } from 'lucide-react';
 
 interface PurchasedLicense {
   id: string;

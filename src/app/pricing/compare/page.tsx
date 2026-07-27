@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight } from 'lucide-react';
+import { CheckCircle2, XCircle, ArrowRight } from 'lucide-react';
 import { SUBSCRIPTION_PLANS } from '@/lib/pricingConfig';
 
 const compareRows = [

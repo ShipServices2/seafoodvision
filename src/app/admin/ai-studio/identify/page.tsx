@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Brain, SquareCheck as CheckSquare, Square, TriangleAlert as AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader as Loader2, Zap, Eye, Database, Cpu, CircleCheck as CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, ListFilter as Filter, ShieldAlert, Target } from 'lucide-react';
+import { Brain, CheckSquare, Square, AlertTriangle, ChevronDown, ChevronLeft, ChevronRight, X, Loader2, Zap, Eye, Database, Cpu, CheckCircle2, Search, RefreshCw, Fish, Clock, Globe, Star, Pause, Play, RotateCcw, ArrowRight, Tag, Filter, ShieldAlert, Target } from 'lucide-react';
 import { generateEnrichedMockCandidates, toSieProductForm, MockAssetContext } from '@/lib/ai/mockEngine';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 

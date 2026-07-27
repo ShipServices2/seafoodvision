@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Search, ListFilter as Filter, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Zap, History, X } from 'lucide-react';
+import { ArrowLeft, Search, Filter, CheckCircle2, AlertCircle, Zap, History, X } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { fetchAdminAssets, updateAssetStatus } from '@/lib/supabase/queries';
 import type { Asset } from '@/lib/supabase/types';

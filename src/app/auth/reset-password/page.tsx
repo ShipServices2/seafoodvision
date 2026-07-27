@@ -3,7 +3,7 @@
 import React, { useState, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { Fish, Lock, Eye, EyeOff, ArrowRight, CircleCheck as CheckCircle2 } from 'lucide-react';
+import { Fish, Lock, Eye, EyeOff, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { updatePassword } from '@/lib/supabase/auth';
 import { createClient } from '@/lib/supabase/client';

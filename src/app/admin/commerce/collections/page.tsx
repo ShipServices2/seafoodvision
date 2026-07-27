@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Layers, Plus, CircleCheck as CheckCircle2, Circle as XCircle, ShoppingBag } from 'lucide-react';
+import { Layers, Plus, CheckCircle2, XCircle, ShoppingBag } from 'lucide-react';
 
 interface Collection {
   id: string;

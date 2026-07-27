@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { RefreshCw, CircleAlert as AlertCircle, CircleCheck as CheckCircle2, Circle as XCircle, ExternalLink } from 'lucide-react';
+import { RefreshCw, AlertCircle, CheckCircle2, XCircle, ExternalLink } from 'lucide-react';
 
 interface Mapping {
   id: string;

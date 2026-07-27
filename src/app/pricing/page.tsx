@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight, Zap, ChartBar as BarChart2, Circle as HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
+import { CheckCircle2, XCircle, ArrowRight, Zap, BarChart2, HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle } from '@/lib/pricingConfig';
 import { useAuth } from '@/contexts/AuthContext';
 

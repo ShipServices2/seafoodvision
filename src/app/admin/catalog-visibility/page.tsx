@@ -5,7 +5,7 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { createClient } from '@/lib/supabase/client';
-import { CircleCheck as CheckCircle2, Circle as XCircle, CircleAlert as AlertCircle, RefreshCw, ExternalLink, Library, Search, Eye, Fish, Database, Shield, ChevronRight, BookOpen, Layers } from 'lucide-react';
+import { CheckCircle2, XCircle, AlertCircle, RefreshCw, ExternalLink, Library, Search, Eye, Fish, Database, Shield, ChevronRight, BookOpen, Layers } from 'lucide-react';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 

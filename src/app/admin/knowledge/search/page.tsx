@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, ChevronRight, Fish, ShoppingBag, Globe, Award, FileText, BookOpen, ChartBar as BarChart2, TrendingUp, CircleAlert as AlertCircle, Clock, X, Eye, Database, Layers } from 'lucide-react';
+import { Search, ChevronRight, Fish, ShoppingBag, Globe, Award, FileText, BookOpen, BarChart2, TrendingUp, AlertCircle, Clock, X, Eye, Database, Layers,  } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Fish, ShoppingBag, Package, Globe, Award, FileText, Search, BookOpen, CircleCheck as CheckCircle, Clock, CircleAlert as AlertCircle, ArrowRight, Layers, ChevronRight } from 'lucide-react';
+import { Fish, ShoppingBag, Package, Globe, Award, FileText, Search, BookOpen, CheckCircle, Clock, AlertCircle, ArrowRight, Layers, ChevronRight } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { fetchKnowledgeStats, encyclopediaSearch, type SearchResult } from '@/lib/supabase/encyclopediaQueries';

@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Award, CircleCheck as CheckCircle, Clock, CircleAlert as AlertCircle } from 'lucide-react';
+import { Award, CheckCircle, Clock, AlertCircle } from 'lucide-react';
 import type { EncCertification } from '@/lib/supabase/encyclopediaQueries';
 
 interface Props {

@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { Link2, ChevronRight, Fish, ShoppingBag, Package, Globe, Award, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle, Circle as XCircle } from 'lucide-react';
+import { Link2, ChevronRight, Fish, ShoppingBag, Package, Globe, Award, AlertTriangle, CheckCircle, XCircle } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 
 

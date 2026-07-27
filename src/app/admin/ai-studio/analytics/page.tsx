@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { ChartBar as BarChart2, TrendingUp, Users, Target, Clock, CircleCheck as CheckCircle2, Circle as XCircle, Circle as HelpCircle, Zap } from 'lucide-react';
+import { BarChart2, TrendingUp, Users, Target, Clock, CheckCircle2, XCircle, HelpCircle, Zap } from 'lucide-react';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 import Icon from '@/components/ui/AppIcon';
 

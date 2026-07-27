@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { FileText, ChevronRight, Search, CircleCheck as CheckCircle, Circle as XCircle, Clock, TriangleAlert as AlertTriangle } from 'lucide-react';
+import { FileText, ChevronRight, Search, CheckCircle, XCircle, Clock, AlertTriangle } from 'lucide-react';
 
 interface Claim {
   id: string;
