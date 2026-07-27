@@ -41,7 +41,7 @@
   "scripts": {
     "dev": "next dev --turbopack -p 4028",
     "build": "next build",
-    "start": "next dev -p 4028",
+    "start": "next dev --turbopack -p 4028",
     "lint": "eslint src",
     "lint:fix": "eslint src --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx,css,md,json}\"",
