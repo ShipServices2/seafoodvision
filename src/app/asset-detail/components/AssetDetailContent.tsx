@@ -2,15 +2,50 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useSearchParams } from 'next/navigation';
-import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Info, Tag, Globe2, FileImage, Hash, MapPin, Layers, Thermometer, Ruler } from 'lucide-react';
+import { ChevronRight, Heart, Plus, Share2, Download, ShieldCheck, Camera, CheckCircle2, AlertCircle, Info, Tag, Globe2, FileImage, Hash, MapPin, Layers, Thermometer, Ruler, ShoppingCart, Loader2 } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '@/components/ui/Badge';
 import AssetPreview from './AssetPreview';
 import SimilarAssets from './SimilarAssets';
 import CollectionModal from './CollectionModal';
+import { useAuth } from '@/contexts/AuthContext';
 
 import { fetchAssetBySlug, getAssetPreviewUrl, type AssetRow } from '@/lib/supabase/assetService';
+
+// ─── License options for photo assets ────────────────────────────────────────
+interface PhotoLicenseOption {
+  unitProductCode: string;
+  licenseTypeCode: string;
+  label: string;
+  description: string;
+  price: number;
+}
+
+const PHOTO_LICENSE_OPTIONS: PhotoLicenseOption[] = [
+  {
+    unitProductCode: 'photo_web',
+    licenseTypeCode: 'commercial',
+    label: 'Photo Web',
+    description: 'Web-optimised (72 dpi, up to 1920px)',
+    price: 5,
+  },
+  {
+    unitProductCode: 'photo_hd',
+    licenseTypeCode: 'commercial',
+    label: 'Photo HD',
+    description: 'High-definition (300 dpi, up to 4K)',
+    price: 20,
+  },
+  {
+    unitProductCode: 'photo_ultrahd',
+    licenseTypeCode: 'commercial',
+    label: 'Photo Ultra HD',
+    description: 'Full resolution (up to 8K)',
+    price: 40,
+  },
+];
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -26,6 +61,8 @@ function formatDimensions(w: number | null, h: number | null): string {
 
 export default function AssetDetailContent({ slugOverride }: { slugOverride?: string } = {}) {
   const searchParams = useSearchParams();
+  const router = useRouter();
+  const { user } = useAuth();
   const slug = slugOverride || searchParams.get('slug');
 
   const [asset, setAsset] = useState<AssetRow | null>(null);
@@ -33,6 +70,11 @@ export default function AssetDetailContent({ slugOverride }: { slugOverride?: st
   const [notFound, setNotFound] = useState(false);
   const [favorited, setFavorited] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
+
+  // License purchase state
+  const [selectedLicense, setSelectedLicense] = useState<PhotoLicenseOption>(PHOTO_LICENSE_OPTIONS[0]);
+  const [purchasing, setPurchasing] = useState(false);
+  const [purchaseError, setPurchaseError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!slug) {
@@ -58,6 +100,56 @@ export default function AssetDetailContent({ slugOverride }: { slugOverride?: st
     }
     toast.success('Link copied to clipboard');
   };
+
+  // Determine if this asset is commercially available for purchase
+  const isCommerciallyAvailable = !!(
+    asset &&
+    asset.media_type === 'photo' &&
+    asset.commercial_use &&
+    asset.license_type &&
+    asset.license_type !== 'none' &&
+    ['approved', 'commercial'].includes(asset.review_status) &&
+    ['published', 'commercial'].includes(asset.publication_status) &&
+    !asset.is_demo &&
+    !asset.restrictions
+  );
+
+  async function handleBuyLicense() {
+    if (!asset || purchasing) return;
+    setPurchaseError(null);
+
+    if (!user) {
+      const params = new URLSearchParams({
+        return_to: `/asset-detail?slug=${asset.slug}`,
+        checkout_intent: '1',
+      });
+      router.push(`/auth/sign-in?${params.toString()}`);
+      return;
+    }
+
+    setPurchasing(true);
+    try {
+      const response = await fetch('/api/payments/dodo/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          assetId: asset.id,
+          licenseTypeCode: selectedLicense.licenseTypeCode,
+          unitProductCode: selectedLicense.unitProductCode,
+        }),
+      });
+      const data = await response.json() as { checkoutUrl?: string; error?: string };
+      if (!response.ok || !data.checkoutUrl) {
+        throw new Error(data.error ?? 'License checkout is unavailable. Please try again.');
+      }
+      window.location.assign(data.checkoutUrl);
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : 'License checkout failed.';
+      setPurchaseError(msg);
+      toast.error(msg);
+      setPurchasing(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -292,24 +384,80 @@ export default function AssetDetailContent({ slugOverride }: { slugOverride?: st
 
           {/* Action buttons */}
           <div className="bg-card rounded-xl border border-border p-5 flex flex-col gap-3">
-            {/* License CTA */}
-            <div className="relative">
-              <button
-                disabled
-                className="w-full btn-primary opacity-60 cursor-not-allowed justify-center"
-                aria-label="License this image — coming soon"
-              >
-                <Download size={15} />
-                License this image
-              </button>
-              <div className="absolute -top-2 right-2">
-                <Badge variant="coming-soon" label="Coming Soon" size="sm" showIcon={false} />
-              </div>
-            </div>
+            {isCommerciallyAvailable ? (
+              /* ── Commercial asset: show license selector + buy button ── */
+              <>
+                {/* License type selector */}
+                <div className="flex flex-col gap-1.5">
+                  <p className="text-xs font-semibold text-foreground mb-1">Select license</p>
+                  {PHOTO_LICENSE_OPTIONS.map((opt) => (
+                    <button
+                      key={opt.unitProductCode}
+                      onClick={() => { setSelectedLicense(opt); setPurchaseError(null); }}
+                      className={`flex items-center justify-between px-3 py-2.5 rounded-lg border text-sm transition-all duration-150 ${
+                        selectedLicense.unitProductCode === opt.unitProductCode
+                          ? 'border-secondary bg-secondary/5 text-foreground'
+                          : 'border-border bg-card text-muted-foreground hover:border-secondary/40 hover:bg-muted'
+                      }`}
+                    >
+                      <div className="flex flex-col items-start gap-0.5">
+                        <span className="font-semibold text-xs">{opt.label}</span>
+                        <span className="text-xs text-muted-foreground">{opt.description}</span>
+                      </div>
+                      <span className="font-bold text-sm text-foreground ml-3 shrink-0">{opt.price}€</span>
+                    </button>
+                  ))}
+                </div>
 
-            <p className="text-xs text-muted-foreground text-center leading-relaxed">
-              Commercial licensing is not yet active. This is a preview platform — final license terms will be published before commercial launch.
-            </p>
+                {/* Buy button */}
+                <button
+                  onClick={handleBuyLicense}
+                  disabled={purchasing}
+                  className="w-full btn-primary justify-center disabled:opacity-70 disabled:cursor-not-allowed"
+                  aria-label={`Buy ${selectedLicense.label} license for ${selectedLicense.price}€`}
+                >
+                  {purchasing ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      Redirecting to checkout…
+                    </>
+                  ) : (
+                    <>
+                      <ShoppingCart size={15} />
+                      Buy License — {selectedLicense.price}€
+                    </>
+                  )}
+                </button>
+
+                {purchaseError && (
+                  <p className="text-xs text-red-600 text-center leading-relaxed">{purchaseError}</p>
+                )}
+
+                <p className="text-xs text-muted-foreground text-center leading-relaxed">
+                  Secure checkout via Dodo Payments. License granted immediately after payment.
+                </p>
+              </>
+            ) : (
+              /* ── Non-commercial asset: keep preview-only notice ── */
+              <>
+                <div className="relative">
+                  <button
+                    disabled
+                    className="w-full btn-primary opacity-60 cursor-not-allowed justify-center"
+                    aria-label="License not available for this asset"
+                  >
+                    <Download size={15} />
+                    License not available
+                  </button>
+                </div>
+                <p className="text-xs text-muted-foreground text-center leading-relaxed">
+                  {asset.is_demo
+                    ? 'Demo assets cannot be licensed.'
+                    : asset.restrictions
+                      ? 'This asset has usage restrictions.' :'This asset is not available for commercial licensing.'}
+                </p>
+              </>
+            )}
 
             <div className="section-divider" />
 

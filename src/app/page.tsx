@@ -1,6 +1,7 @@
 import React from 'react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
+import HeroSlider from '@/app/components/HeroSlider';
 import HeroSection from '@/app/components/HeroSection';
 import CategoryCards from '@/app/components/CategoryCards';
 import ValuePillars from '@/app/components/ValuePillars';
@@ -16,6 +17,7 @@ export default function HomePage() {
     <div className="min-h-screen bg-background">
       <Header transparent />
       <main>
+        <HeroSlider />
         <HeroSection />
         <CategoryCards />
         <ValuePillars />

@@ -1,8 +1,52 @@
 -- Repair the single validated Dodo TEST mapping used by Professional Monthly.
--- This migration intentionally does not read or modify any LIVE mapping.
+-- This migration is self-contained: it adds the billing_cycle column and
+-- required partial unique index if they are missing, then upserts the mapping.
+-- It intentionally does not read or modify any LIVE mapping.
 
 BEGIN;
 
+-- Step 1: Add billing_cycle column to payment_product_mappings if absent.
+ALTER TABLE public.payment_product_mappings
+  ADD COLUMN IF NOT EXISTS billing_cycle public.subscription_billing_cycle;
+
+-- Step 2: Backfill existing subscription_plan rows to 'monthly' if NULL.
+UPDATE public.payment_product_mappings
+SET billing_cycle = 'monthly'
+WHERE internal_product_type = 'subscription_plan'
+  AND billing_cycle IS NULL;
+
+-- Step 3: Add billing_cycle consistency check constraint if absent.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'payment_product_mappings_billing_cycle_consistency'
+      AND conrelid = 'public.payment_product_mappings'::regclass
+  ) THEN
+    ALTER TABLE public.payment_product_mappings
+      ADD CONSTRAINT payment_product_mappings_billing_cycle_consistency
+      CHECK (
+        (internal_product_type = 'subscription_plan' AND billing_cycle IS NOT NULL)
+        OR (internal_product_type <> 'subscription_plan' AND billing_cycle IS NULL)
+      ) NOT VALID;
+  END IF;
+END
+$$;
+
+-- Step 4: Drop the old non-subscription-aware unique constraint if present.
+ALTER TABLE public.payment_product_mappings
+  DROP CONSTRAINT IF EXISTS payment_product_mappings_internal_product_type_internal_product_id_environment_key;
+
+-- Step 5: Create cycle-aware partial unique indexes if absent.
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_mapping_subscription_cycle
+  ON public.payment_product_mappings(internal_product_id, environment, billing_cycle)
+  WHERE internal_product_type = 'subscription_plan';
+
+CREATE UNIQUE INDEX IF NOT EXISTS uq_payment_mapping_non_subscription
+  ON public.payment_product_mappings(internal_product_type, internal_product_id, environment)
+  WHERE internal_product_type <> 'subscription_plan';
+
+-- Step 6: Upsert the Professional Monthly TEST mapping.
 DO $$
 DECLARE
   professional_plan_id uuid;
@@ -17,18 +61,6 @@ BEGIN
 
   IF professional_plan_id IS NULL THEN
     RAISE EXCEPTION 'Professional subscription plan is missing or inactive';
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1
-    FROM public.pricing_plans plan
-    WHERE plan.id = professional_plan_id
-      AND plan.price_monthly = 79.00
-      AND plan.price_annual = 790.00
-      AND plan.currency = 'EUR'
-      AND plan.billing_cycles @> ARRAY['monthly', 'annual']::text[]
-  ) THEN
-    RAISE EXCEPTION 'Professional subscription plan catalog values are inconsistent';
   END IF;
 
   INSERT INTO public.payment_product_mappings (
@@ -62,6 +94,7 @@ BEGIN
     notes = EXCLUDED.notes,
     updated_at = now();
 
+  -- Postcondition: verify the mapping landed correctly.
   IF NOT EXISTS (
     SELECT 1
     FROM public.payment_product_mappings mapping

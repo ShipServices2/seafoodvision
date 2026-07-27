@@ -29,7 +29,7 @@ const COMMERCE_SECTIONS = [
   { href: '/admin/commerce/payments', icon: CreditCard, label: 'Payments', desc: 'Payment transactions and provider status', badge: 'Payments' },
   { href: '/admin/commerce/licenses', icon: FileText, label: 'Licenses', desc: 'Purchased licenses and entitlements', badge: 'Licenses' },
   { href: '/admin/commerce/downloads', icon: Download, label: 'Downloads', desc: 'Download events and quota monitoring', badge: 'Downloads' },
-  { href: '/admin/commerce/credits', icon: Coins, label: 'Credits', desc: 'Credit ledger and pack management', badge: 'Credits' },
+  { href: '/admin/commerce/dodo-credit-config', icon: Coins, label: 'Credits', desc: 'Credit ledger and pack management', badge: 'Credits' },
   { href: '/admin/commerce/products', icon: Package, label: 'Products', desc: 'Unit products, plans and credit packs', badge: 'Catalog' },
   { href: '/admin/commerce/plans', icon: TrendingUp, label: 'Plans', desc: 'Subscription plans, pricing and quotas', badge: 'Plans' },
   { href: '/admin/commerce/coupons', icon: Tag, label: 'Coupons & Promotions', desc: 'Discount codes, campaigns and promotions', badge: 'Promos' },

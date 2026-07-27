@@ -9,12 +9,12 @@ import { getDodoReturnUrl, getDodoCancelUrl, getDodoRuntimeConfig } from './dodo
 import { createOrder, updateOrderCheckoutRef } from './PaymentService';
 import {
   assertCommercialValidation,
-  canonicalPlanCode,
   validateAssetLicensePurchase,
   validateCreditPackPurchase,
   validateSubscriptionPurchase,
   getCommercialAssetBlockers,
 } from './CommercialValidationService';
+import { canonicalPlanCode } from './subscriptionPlanResolution';
 import type { CommercialAssetSnapshot } from './CommercialValidationService';
 
 export { getCommercialAssetBlockers };

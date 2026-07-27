@@ -8,7 +8,7 @@ import Footer from '@/components/Footer';
 import { CheckCircle2, XCircle, ArrowRight, Zap, BarChart2, HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle } from '@/lib/pricingConfig';
 import { useAuth } from '@/contexts/AuthContext';
-import AddToCartButton from '@/components/AddToCartButton';
+
 
 export default function PricingPage() {
   const [billing, setBilling] = useState<BillingCycle>('monthly');
@@ -208,7 +208,7 @@ export default function PricingPage() {
                 <div className="text-xl font-extrabold text-foreground font-mono-data mb-1">{product.price}€</div>
                 <div className="text-sm font-semibold text-foreground mb-1">{product.name}</div>
                 <div className="text-xs text-muted-foreground leading-tight">{product.description}</div>
-                <Link href="/library" className="mt-3 inline-flex text-xs font-semibold text-secondary hover:underline">Select an asset</Link>
+                <Link href="/library?licenseType=commercial" className="mt-3 inline-flex text-xs font-semibold text-secondary hover:underline">Select an asset →</Link>
               </div>
             ))}
           </div>
@@ -248,10 +248,7 @@ export default function PricingPage() {
                 >
                   {purchasingPack === pack.id ? 'Opening checkout…' : 'Buy credits'}
                 </button>
-                <AddToCartButton
-                  item={{ itemType: 'credit_pack', packCode: pack.id, quantity: 1 }}
-                  className="mt-2 w-full flex items-center justify-center gap-2 rounded-lg border border-secondary px-3 py-2 text-sm font-semibold text-secondary transition-colors hover:bg-secondary/5 disabled:opacity-60"
-                />
+                {/* Add to cart is not supported for credit packs — direct checkout only */}
               </div>
             ))}
           </div>

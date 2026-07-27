@@ -1,6 +1,7 @@
 'use client';
 
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
+import { useSearchParams, useRouter } from 'next/navigation';
 import LibraryFilters from './LibraryFilters';
 import LibraryGrid from './LibraryGrid';
 import LibraryToolbar from './LibraryToolbar';
@@ -105,7 +106,13 @@ function mapAssetRow(asset: AssetRow) {
 const ITEMS_PER_PAGE_OPTIONS = [12, 24, 48];
 
 export default function LibraryContent() {
-  const [filters, setFilters] = useState<FilterState>(defaultFilters);
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  // Read initial q param from URL (handles accents, spaces, URL encoding automatically)
+  const initialQuery = searchParams.get('q') ?? '';
+
+  const [filters, setFilters] = useState<FilterState>({ ...defaultFilters, query: initialQuery });
   const [sort, setSort] = useState<SortOption>('newest');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [filtersOpen, setFiltersOpen] = useState(true);
@@ -119,6 +126,35 @@ export default function LibraryContent() {
   // Semantic search results (shown alongside regular results when query is present)
   const [semanticResults, setSemanticResults] = useState<LibrarySearchResult[]>([]);
   const [semanticLoading, setSemanticLoading] = useState(false);
+
+  // Track whether the URL param has been applied on first mount
+  const initializedRef = useRef(false);
+
+  // Sync URL when query changes (preserves back/forward navigation and shareable URLs)
+  useEffect(() => {
+    if (!initializedRef.current) {
+      initializedRef.current = true;
+      return;
+    }
+    const params = new URLSearchParams(searchParams.toString());
+    if (filters.query.trim()) {
+      params.set('q', filters.query.trim());
+    } else {
+      params.delete('q');
+    }
+    const newUrl = params.toString() ? `/library?${params.toString()}` : '/library';
+    router.replace(newUrl, { scroll: false });
+  }, [filters.query]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // When browser back/forward changes the URL q param, sync it into filters
+  useEffect(() => {
+    const urlQuery = searchParams.get('q') ?? '';
+    setFilters((prev) => {
+      if (prev.query === urlQuery) return prev;
+      return { ...prev, query: urlQuery };
+    });
+    setCurrentPage(1);
+  }, [searchParams]);
 
   const loadAssets = useCallback(async () => {
     setLoading(true);
