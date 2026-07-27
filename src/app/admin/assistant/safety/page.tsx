@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Shield, ChevronLeft, AlertTriangle, CheckCircle } from 'lucide-react';
+import { Shield, ChevronLeft, TriangleAlert as AlertTriangle, CircleCheck as CheckCircle } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
