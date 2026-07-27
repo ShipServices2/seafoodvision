@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Bookmark, Trash2, ChevronLeft, CheckCircle, Clock, AlertTriangle } from 'lucide-react';
+import { Bookmark, Trash2, ChevronLeft, CircleCheck as CheckCircle, Clock, TriangleAlert as AlertTriangle } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

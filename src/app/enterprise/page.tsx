@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { ArrowRight, CheckCircle2, Zap, Globe, Lock, BarChart2, Users, Cpu, Headphones, Database } from 'lucide-react';
+import { ArrowRight, CircleCheck as CheckCircle2, Zap, Globe, Lock, ChartBar as BarChart2, Users, Cpu, Headphones, Database } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 
 

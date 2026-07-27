@@ -8,7 +8,7 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
-import { Target, CheckCircle2, XCircle, HelpCircle, Edit3, RotateCcw, ChevronLeft, ChevronRight, AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader2, Eye, BarChart2, List, ChevronDown, RefreshCw } from 'lucide-react';
+import { Target, CircleCheck as CheckCircle2, Circle as XCircle, Circle as HelpCircle, CreditCard as Edit3, RotateCcw, ChevronLeft, ChevronRight, TriangleAlert as AlertTriangle, MessageSquare, Clock, Fish, Tag, Layers, Star, Brain, Globe, Zap, SquareCheck as CheckSquare, ArrowRight, Package, Hash, BookOpen, Search, Loader as Loader2, Eye, ChartBar as BarChart2, List, ChevronDown, RefreshCw } from 'lucide-react';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

@@ -2,24 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
-  Clock,
-  Database,
-  Image as ImageIcon,
-  Filter,
-  Search,
-  Heart,
-  FolderOpen,
-  Globe,
-  Tag,
-  Fish,
-  Layers,
-  ArrowRight,
-  RefreshCw,
-} from 'lucide-react';
+import { CircleCheck as CheckCircle2, Circle as XCircle, CircleAlert as AlertCircle, Clock, Database, Image as ImageIcon, ListFilter as Filter, Search, Heart, FolderOpen, Globe, Tag, Fish, Layers, ArrowRight, RefreshCw } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';

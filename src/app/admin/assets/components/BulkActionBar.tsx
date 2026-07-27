@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { CheckCircle2, XCircle, TrendingUp, RotateCcw, Eye, ShoppingBag, Archive, Trash2, Tag, Download, ChevronDown, X, Loader2, Undo2 } from 'lucide-react';
+import { CircleCheck as CheckCircle2, Circle as XCircle, TrendingUp, RotateCcw, Eye, ShoppingBag, Archive, Trash2, Tag, Download, ChevronDown, X, Loader as Loader2, Undo2 } from 'lucide-react';
 
 export interface BulkActionBarProps {
   selectedIds: string[];

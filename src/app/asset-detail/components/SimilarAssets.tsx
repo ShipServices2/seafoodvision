@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ArrowRight, CheckCircle2, Camera, ImageOff } from 'lucide-react';
+import { ArrowRight, CircleCheck as CheckCircle2, Camera, ImageOff } from 'lucide-react';
 import { fetchSimilarAssets, getAssetThumbnailFile, getSignedStorageUrl, type AssetRow } from '@/lib/supabase/assetService';
 
 interface SimilarAssetsProps {

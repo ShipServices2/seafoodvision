@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { Bot, Send, Coins, ChevronDown, ChevronUp, Loader2 } from 'lucide-react';
+import { Bot, Send, Coins, ChevronDown, ChevronUp, Loader as Loader2 } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface Props {

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, BarChart2, Loader2, TrendingUp, Fish, Users, MessageSquare, Eye } from 'lucide-react';
+import { ChevronRight, ChartBar as BarChart2, Loader as Loader2, TrendingUp, Fish, Users, MessageSquare, Eye } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import Icon from '@/components/ui/AppIcon';
 

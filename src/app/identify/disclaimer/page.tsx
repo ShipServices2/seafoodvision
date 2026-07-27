@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ArrowLeft, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, TriangleAlert as AlertTriangle } from 'lucide-react';
 
 export default function IdentifyDisclaimerPage() {
   return (

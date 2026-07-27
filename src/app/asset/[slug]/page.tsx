@@ -7,7 +7,7 @@ import Footer from '@/components/Footer';
 import { fetchAssetBySlug, getAssetPreviewFile } from '@/lib/supabase/assetService';
 import type { AssetRow } from '@/lib/supabase/assetService';
 import Link from 'next/link';
-import { ChevronRight, Heart, Plus, Share2, ShieldCheck, Camera, CheckCircle2, AlertCircle, Globe2, Hash, Layers, Thermometer, Ruler, ShoppingCart, Lock, Info, XCircle } from 'lucide-react';
+import { ChevronRight, Heart, Plus, Share2, ShieldCheck, Camera, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Globe as Globe2, Hash, Layers, Thermometer, Ruler, ShoppingCart, Lock, Info, Circle as XCircle } from 'lucide-react';
 import { toast } from 'sonner';
 import Badge from '@/components/ui/Badge';
 import AssetPreview from '@/app/asset-detail/components/AssetPreview';

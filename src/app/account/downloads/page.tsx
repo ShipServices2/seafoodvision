@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Download, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
+import { Download, CircleCheck as CheckCircle2, Clock, CircleAlert as AlertCircle } from 'lucide-react';
 
 interface Entitlement {
   id: string;

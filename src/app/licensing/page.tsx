@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { CheckCircle2, XCircle, ArrowRight, Shield, FileText } from 'lucide-react';
+import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight, Shield, FileText } from 'lucide-react';
 import { LICENSE_TYPES } from '@/lib/pricingConfig';
 
 export default function LicensingPage() {

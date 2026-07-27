@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { Clock, User, CheckCircle2, XCircle, Loader2, RefreshCw } from 'lucide-react';
+import { Clock, User, CircleCheck as CheckCircle2, Circle as XCircle, Loader as Loader2, RefreshCw } from 'lucide-react';
 
 interface BulkLogEntry {
   id: string;

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Search, ArrowRight, CheckCircle2, Camera } from 'lucide-react';
+import { Search, ArrowRight, CircleCheck as CheckCircle2, Camera } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 const heroSuggestions = [

@@ -2,11 +2,7 @@
 
 import React, { useState, useCallback } from 'react';
 import Link from 'next/link';
-import {
-  ArrowLeft, RefreshCw, CheckCircle2, AlertCircle, XCircle,
-  Loader2, Database, HardDrive, Link2, Eye, Play, Info,
-  ChevronDown, ChevronUp, FileImage,
-} from 'lucide-react';
+import { ArrowLeft, RefreshCw, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Circle as XCircle, Loader as Loader2, Database, HardDrive, Link2, Eye, Play, Info, ChevronDown, ChevronUp, FileImage } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';

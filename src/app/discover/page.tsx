@@ -2,10 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import {
-  Fish, ShoppingBag, Package, Globe, Award, FileText, Search,
-  ChevronRight, CheckCircle, Clock, Compass, ArrowRight,
-} from 'lucide-react';
+import { Fish, ShoppingBag, Package, Globe, Award, FileText, Search, ChevronRight, CircleCheck as CheckCircle, Clock, Compass, ArrowRight } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { fetchDiscoverData, type DiscoverSection } from '@/lib/supabase/semanticSearch';

@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, MessageSquare, Loader2, ThumbsUp, ThumbsDown, HelpCircle, Users } from 'lucide-react';
+import { ChevronRight, MessageSquare, Loader as Loader2, ThumbsUp, ThumbsDown, Circle as HelpCircle, Users } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface FeedbackRow {

@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
-import { Search, Filter, ChevronRight, CheckCircle, ArrowRight, X, SlidersHorizontal, BookOpen } from 'lucide-react';
+import { Search, ListFilter as Filter, ChevronRight, CircleCheck as CheckCircle, ArrowRight, X, SlidersHorizontal, BookOpen } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { fetchEncSpeciesListWithNames, type EncSpecies } from '@/lib/supabase/encyclopediaQueries';

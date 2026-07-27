@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Brain, Clock, Layers, TrendingUp, ArrowRight, Database, BarChart2, AlertTriangle, Target } from 'lucide-react';
+import { Brain, Clock, Layers, TrendingUp, ArrowRight, Database, ChartBar as BarChart2, TriangleAlert as AlertTriangle, Target } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 
 
