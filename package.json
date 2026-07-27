@@ -39,7 +39,7 @@
     "warning": "🚨 CRITICAL: DO NOT REMOVE OR MODIFY ABOVE DEPENDENCIES - Required for Next.js 15 TypeScript app functionality"
   },
   "scripts": {
-    "dev": "next dev --turbopack -p 4028",
+    "dev": "next dev -p 4028",
     "build": "next build",
     "start": "next dev -p 4028",
     "lint": "eslint src",
