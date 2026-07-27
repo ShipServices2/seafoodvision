@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ChevronRight, CheckCircle, Globe, Layers, Fish } from 'lucide-react';
+import { ChevronRight, CircleCheck as CheckCircle, Globe, Layers, Fish } from 'lucide-react';
 import {
   fetchEncProductBySlug,
   fetchProductSpecies,

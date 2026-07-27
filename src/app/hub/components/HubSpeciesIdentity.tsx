@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { CheckCircle, Fish, MapPin, Anchor, Leaf, Scale, FlaskConical } from 'lucide-react';
+import { CircleCheck as CheckCircle, Fish, MapPin, Anchor, Leaf, Scale, FlaskConical } from 'lucide-react';
 import type { EncSpecies } from '@/lib/supabase/encyclopediaQueries';
 
 interface Props {

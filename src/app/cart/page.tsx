@@ -3,7 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { CheckCircle2, Loader2, Minus, Plus, ShoppingCart, Trash2, XCircle } from 'lucide-react';
+import { CircleCheck as CheckCircle2, Loader as Loader2, Minus, Plus, ShoppingCart, Trash2, Circle as XCircle } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

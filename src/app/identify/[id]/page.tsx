@@ -3,7 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Clock, AlertCircle, Loader2, Trash2, Users, ChevronRight } from 'lucide-react';
+import { ArrowLeft, Clock, CircleAlert as AlertCircle, Loader as Loader2, Trash2, Users, ChevronRight } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { STATUS_LABELS } from '@/lib/identification/types';
 import type { IdentificationStatus } from '@/lib/identification/types';

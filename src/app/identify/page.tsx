@@ -4,7 +4,7 @@ import React, { useState, useRef } from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { Upload, AlertCircle, Fish, Sparkles, X, Loader2, Star, ExternalLink, Image as ImageIcon, Info } from 'lucide-react';
+import { Upload, CircleAlert as AlertCircle, Fish, Sparkles, X, Loader as Loader2, Star, ExternalLink, Image as ImageIcon, Info } from 'lucide-react';
 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
