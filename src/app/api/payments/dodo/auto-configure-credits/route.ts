@@ -4,6 +4,7 @@
 import { NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { getDodoRuntimeConfig } from '@/lib/payments/dodo/config';
+import { isPlaceholderDodoValue as isPlaceholder } from '@/lib/payments/dodoPlaceholders';
 import DodoPayments from 'dodopayments';
 
 export const dynamic = 'force-dynamic';
@@ -15,20 +16,6 @@ const CREDIT_PACK_DEFINITIONS = [
   { credits: 500,  priceEur: 3500, envKey: 'DODO_CREDIT_PACK_500_PRODUCT_ID',  packCode: 'credits_500',  label: '500 crédits — 35 EUR' },
   { credits: 1000, priceEur: 5900, envKey: 'DODO_CREDIT_PACK_1000_PRODUCT_ID', packCode: 'credits_1000', label: '1000 crédits — 59 EUR' },
 ];
-
-// Placeholder patterns to detect unset values
-const PLACEHOLDER_PATTERNS = [
-  /^YOUR_DODO/i,
-  /^pdt_xxx/i,
-  /^placeholder/i,
-  /^YOUR_/i,
-  /^REPLACE/i,
-];
-
-function isPlaceholder(value: string | undefined | null): boolean {
-  if (!value || value.trim() === '') return true;
-  return PLACEHOLDER_PATTERNS.some((re) => re.test(value.trim()));
-}
 
 function createDodoClient(): DodoPayments {
   const apiKey = process.env.DODO_PAYMENTS_API_KEY?.trim();

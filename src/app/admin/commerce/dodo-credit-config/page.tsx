@@ -210,7 +210,7 @@ export default function DodoCreditConfigPage() {
                           type="text"
                           value={currentId}
                           onChange={(e) => setManualIds((prev) => ({ ...prev, [envKey]: e.target.value }))}
-                          placeholder="pdt_xxxxxxxxxxxxxxxxxxxxxxx"
+                          placeholder="Dodo Product ID"
                           className="w-full bg-gray-800 border border-gray-600 rounded px-3 py-1.5 text-sm font-mono text-white placeholder-gray-600 focus:outline-none focus:border-blue-500"
                         />
                       </div>

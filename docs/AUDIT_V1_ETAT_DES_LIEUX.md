@@ -242,3 +242,72 @@ Décision : les 8 migrations ci-dessous sont marquées `applied` via `migration 
 Conséquence connue : `/admin/reviews`, `/admin/reviewer-dashboard`, le compteur de `/admin`, `/licensing-center` et la recherche sémantique (`/knowledge/search`, `/discover`) restent cassés ou dégradés jusqu'aux étapes ci-dessus.
 
 Après neutralisation : `npx supabase@latest migration list` → 40 migrations locales, 40 distantes, aucune différence.
+
+## Fusion du travail Rocket
+
+`origin/main` (11e8ece) a été fusionné dans `main` local, sans conflit (merge commit `818961a`, non poussé). 82 commits, du 2026-07-20 au 2026-07-27 (21 le 20/07, 15 le 21/07, 3 le 25/07, 43 le 27/07), 180 fichiers (+6 463 / −1 435), dont 9 nouvelles migrations. Aucun repair ni SQL exécuté pour ces migrations.
+
+### Fonctionnalités apportées
+
+- Page `/identify` : identification d'espèces par OpenAI Vision, calcul de checksum et cache, débit de crédits seulement après succès.
+- Route d'upload d'identification : erreur HTTP 500 explicite si le stockage échoue, bucket `identification-uploads`.
+- Achat de licence photo depuis la fiche asset (Photo Web 5 €, HD 20 €, Ultra HD 40 €) via `/api/payments/dodo/checkout`.
+- Administration Dodo : `/admin/commerce/dodo-products`, `/admin/commerce/dodo-credit-config`, API `list-products` et `auto-configure-credits` (écrit dans `payment_product_mappings`).
+- Validation commerciale des packs de crédits : détection des identifiants placeholder, repli par variables d'environnement.
+- Seafood Intelligence Hub, phase 1 : composants `src/app/hub/*`, tables `hub_*`, coûts en crédits.
+- Page d'accueil : slider de 4 photos, vraies photos pour catégories, médias et espèces, nouveau logo.
+- Menu : Knowledge, Assistant, Discover et Licensing masqués, libellés en majuscules.
+- Bibliothèque : paramètre `?q` synchronisé avec l'URL (Suspense).
+- Pricing : « Select an asset » mène à `/library?licenseType=commercial`, boutons panier retirés des packs de crédits.
+- Divers : `netlify.toml`, `mcp.json`, durcissement de `createServiceClient`, nettoyage des URL Dodo de retour et d'annulation, retrait de plusieurs imports circulaires.
+
+### Problèmes constatés après fusion
+
+- **`LibraryContent.tsx` et `LibraryFilters.tsx` sont corrompus sur `origin/main`** : 142 octets chacun, ils contiennent le texte d'une erreur de limite de débit (`{"code":"rate-limited",...}`) à la place du code (avant : 14 879 et 7 954 octets). Dernière bonne version : `c281c2b` pour les deux. `/library` ne peut pas compiler.
+- type-check : 8 erreurs (ces deux fichiers). lint : 2 erreurs de parsing (mêmes fichiers), 285 warnings. Tests : 4 échecs (voir ci-dessous).
+- Tests en échec : `supabaseRuntimeConfig` (normalisation du service client), `dodoTestMappings` (aucun identifiant Dodo dans un composant front), `marketplaceStabilization` (message d'erreur de mapping de pack de crédits modifié), `multiProductCart` (le panier n'accepte plus les packs de crédits).
+
+### Les 9 migrations (lecture seule)
+
+| Migration | Verdict | Constaté en base |
+|---|---|---|
+| `20260720230000_repair_credit_pack_test_mappings` | ABSENTE | les 4 mappings de packs existent avec d'autres identifiants et la note « Placeholder » ; ses identifiants (`…5ltiwa…`, `…FPXk`) ne sont pas ceux en base |
+| `20260720240000_fix_credit_pack_test_mappings_real_ids` | ABSENTE, dangereuse | son `DELETE` supprimerait les mappings `credits_500` et `credits_1000` actuels (leurs identifiants sont dans sa liste) |
+| `20260721160000_activate_photo_license_commerce` | APPLIQUÉE | `asset_readiness` + 2 politiques ; 608 assets `commercial_use` + `commercial` ; 608 lignes de préparation, 5 indicateurs vrais ; 608 fichiers `original` |
+| `20260721180000_fix_sv_b500_0500_and_photo_commerce` | APPLIQUÉE | `SV-B500-0500` approved, published, commercial ; 3 mappings photo (note « Fix SV-B500-0500 ») |
+| `20260721190000_add_test_credits_identify` | APPLIQUÉE | ligne `credit_ledger` : 20 crédits, référence `test_credit_identify_20260721` |
+| `20260721200000_seafood_intelligence_hub` | APPLIQUÉE | 3 tables `hub_*`, RLS active, 5 politiques, 8 lignes `hub_credit_costs` |
+| `20260721210000_credit_pack_env_var_mappings` | APPLIQUÉE, puis modifiée | 4 mappings de packs avec ses notes ; identifiants réels et actifs, donc mis à jour ensuite par l'administration Dodo |
+| `20260721220000_photo_license_env_var_mappings` | SANS OBJET VÉRIFIABLE | licence `commercial` et 3 `unit_products` présents (déjà par d'autres migrations) ; ses mappings placeholder n'ont pas d'effet (`DO NOTHING`) ; `unit_products.license_type_code` est NULL |
+| `20260721230000_create_identification_uploads_bucket` | APPLIQUÉE | bucket privé, 20 Mo, 6 types d'images, 5 politiques `identification_uploads_*` |
+
+Point d'attention sur `20260721160000` et `20260721180000` : les 608 fichiers `original` créés pointent vers le même chemin que l'aperçu (bucket `asset-previews`, 608 sur 608). Ce ne sont pas de vrais originaux : la livraison payante d'un fichier « original » enverrait l'aperçu.
+
+### `20260720220000` modifiée par Rocket
+
+Le contenu ajoute la création de la colonne `billing_cycle`, de la contrainte de cohérence (non validée) et des deux index uniques, et retire le contrôle des prix. Rien ne contredit la base : colonne, contrainte non validée, index `uq_payment_mapping_*` et mapping Professional mensuel sont présents (plan 79 / 790 EUR). Une incohérence demeure : l'ancienne contrainte unique `payment_product_mappings_internal_product_type_internal_pro_key` existe toujours (le nom du `DROP` dépasse 63 caractères et ne correspond pas). Elle empêche d'avoir un mapping mensuel et annuel pour le même plan : à traiter à l'étape 6 avant les mappings annuels.
+
+Historique distant : parmi les versions ≥ 20260720, seules `20260720120000`, `20260720180000` et `20260720220000` sont enregistrées.
+
+### Migrations Rocket : décision
+
+Les 9 migrations Rocket sont marquées `applied` via `migration repair` (aucun SQL exécuté). `migration list` : 49 locales, 49 distantes, toutes alignées.
+
+- **`20260720230000` et `20260720240000` : NEUTRALISÉES, ne doivent jamais être exécutées.** `20260720230000` contient des identifiants Dodo faux (confusions I/l, X/x). `20260720240000` fait un `DELETE` sur les mappings `credits_500` et `credits_1000` actuels.
+- **`20260721220000` : neutralisée car sans effet propre** (ses licences et produits existent déjà, ses mappings placeholder n'ont pas d'effet).
+- Les 6 autres (`20260721160000`, `180000`, `190000`, `200000`, `210000`, `230000`) sont APPLIQUÉES : leur effet est constaté en base.
+
+### Corrections après fusion
+
+- `LibraryContent.tsx` et `LibraryFilters.tsx` restaurés depuis `c281c2b` (les versions de `origin/main` contenaient un message d'erreur de limite de débit). Aucune adaptation d'import ou de type n'a été nécessaire : le type-check passe.
+- 4 tests corrigés :
+  - `supabaseRuntimeConfig` : le TEST était faux (clé factice sans le préfixe `eyJ`, alors que le code valide désormais la forme JWT) ; clé factice de forme JWT.
+  - `marketplaceStabilization` : le TEST était faux (le message de blocage a été volontairement allongé) ; comparaison par sous-chaîne.
+  - `multiProductCart` : le TEST était faux (le code retire volontairement le panier des packs de crédits) ; il vérifie maintenant le paiement direct (`credit_pack: packCode`) et l'absence de `itemType: 'credit_pack'`.
+  - `dodoTestMappings` (aucun `pdt_` dans le front) : le CODE était à corriger. Aucun vrai identifiant Dodo n'était dans le front : seulement un texte indicatif (`placeholder` d'un champ de l'admin) et une expression de détection de placeholder dans une route API sous `src/app`. Le texte indicatif est neutre, la détection est déplacée côté serveur dans `src/lib/payments/dodoPlaceholders.ts`. Les identifiants réels viennent de `payment_product_mappings` via les API serveur.
+
+## Points bloquants avant vente réelle
+
+- **Aucune vente réelle n'est possible avant l'étape 4.** Les 608 fichiers `original` de `asset_files` pointent vers les aperçus filigranés (même chemin, bucket `asset-previews`, 608 sur 608). Il faut de vrais originaux dans un bucket privé, et remplacer ces lignes.
+- **Contrainte unique `payment_product_mappings_internal_product_type_internal_pro_key` toujours présente** (étape 6) : elle empêche un mapping mensuel et un mapping annuel pour le même plan. Le nom utilisé par les migrations dépasse 63 caractères, donc le `DROP` ne l'atteint pas.
+- Mappings Dodo à rejouer en version additive et à vérifier contre le tableau de bord Dodo (étape 6) ; ne jamais réutiliser les identifiants de `20260719120000` et `20260720230000`.

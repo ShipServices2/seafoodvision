@@ -117,7 +117,9 @@ describe('credit pack checkout rules', () => {
       { packCode: 'credits_100', environment: 'test' },
       client as never
     );
-    expect(validation.blockers).toContain('Dodo mapping is missing for the credit pack');
+    expect(validation.blockers).toEqual(
+      expect.arrayContaining([expect.stringContaining('Dodo mapping is missing for the credit pack')])
+    );
   });
 
   test('blocks an inactive credit pack', async () => {

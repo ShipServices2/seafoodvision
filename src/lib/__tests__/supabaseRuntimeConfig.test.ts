@@ -28,7 +28,7 @@ describe('createServiceClient runtime normalization', () => {
 
   test('accepts trimmed runtime server credentials', () => {
     process.env.NEXT_PUBLIC_SUPABASE_URL = ' https://runtime-project.supabase.co ';
-    process.env.SUPABASE_SERVICE_ROLE_KEY = ' runtime-service-role-key ';
+    process.env.SUPABASE_SERVICE_ROLE_KEY = ' eyJruntime-service-role-key ';
     jest?.isolateModules(() => {
       jest?.mock('next/headers', () => ({ cookies: () => ({ getAll: () => [], set: () => {} }) }));
       const { createServiceClient } = require('../supabase/server');

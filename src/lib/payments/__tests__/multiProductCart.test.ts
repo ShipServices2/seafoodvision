@@ -135,8 +135,9 @@ describe('cart interface and accessibility contracts', () => {
     expect(header).toContain('lineCount');
   });
   test('adds an asset purchase cart action', () => expect(assetPage).toContain('<AddToCartButton'));
-  test('adds credit packs but sends generic media buyers to Library', () => {
-    expect(pricingPage).toContain("itemType: 'credit_pack'");
+  test('keeps credit packs on direct checkout and sends generic media buyers to Library', () => {
+    expect(pricingPage).not.toContain("itemType: 'credit_pack'");
+    expect(pricingPage).toContain('credit_pack: packCode');
     expect(pricingPage).toContain('Select an asset');
   });
 });
