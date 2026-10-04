@@ -15,6 +15,7 @@ import SimilarAssets from '@/app/asset-detail/components/SimilarAssets';
 import CollectionModal from '@/app/asset-detail/components/CollectionModal';
 import { useAuth } from '@/contexts/AuthContext';
 import AddToCartButton from '@/components/AddToCartButton';
+import { isV1HiddenUnitProduct } from '@/lib/v1Scope';
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -29,7 +30,7 @@ function formatDimensions(w: number | null, h: number | null): string {
 }
 
 // License options shown when asset is commercially available
-const LICENSE_OPTIONS = [
+const ALL_LICENSE_OPTIONS = [
   {
     code: 'commercial',
     name: 'Photo Web',
@@ -52,6 +53,9 @@ const LICENSE_OPTIONS = [
     price: '40€',
   },
 ];
+
+// V1 scope: Ultra HD is not sold.
+const LICENSE_OPTIONS = ALL_LICENSE_OPTIONS.filter((option) => !isV1HiddenUnitProduct(option.unitProductCode));
 
 interface CommercialCriterion {
   key: string;

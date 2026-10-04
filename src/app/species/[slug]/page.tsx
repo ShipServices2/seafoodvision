@@ -27,6 +27,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 
 import SpeciesAssetCard from '@/components/SpeciesAssetCard';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://seafoodvis1067.builtwithrocket.new';
 
@@ -258,8 +259,12 @@ export default function SpeciesDetailPage() {
           <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6" aria-label="Breadcrumb">
             <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
             <ChevronRight size={12} />
-            <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
-            <ChevronRight size={12} />
+            {!isV1HiddenPath('/knowledge') && (
+            <>
+              <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
+              <ChevronRight size={12} />
+            </>
+          )}
             <Link href="/species" className="hover:text-foreground transition-colors">Species</Link>
             <ChevronRight size={12} />
             <span className="text-foreground font-medium truncate max-w-[200px]">{species.common_name}</span>
@@ -302,8 +307,8 @@ export default function SpeciesDetailPage() {
                 <p className="text-muted-foreground leading-relaxed text-sm max-w-2xl">{species.description}</p>
               )}
 
-              {/* Intelligence Hub CTA */}
-              <div className="mt-5">
+              {/* Intelligence Hub CTA (hidden in V1 scope) */}
+              {!isV1HiddenPath('/hub') && (<div className="mt-5">
                 <Link
                   href={`/hub/${slug}`}
                   className="inline-flex items-center gap-2 bg-gradient-to-r from-ocean-800 to-ocean-600 text-white font-semibold px-5 py-2.5 rounded-xl hover:from-ocean-900 hover:to-ocean-700 transition-all shadow-sm text-sm"
@@ -311,7 +316,7 @@ export default function SpeciesDetailPage() {
                   <Zap size={15} />
                   Open Seafood Intelligence Hub
                 </Link>
-              </div>
+              </div>)}
             </div>
 
             <div className="bg-card rounded-xl border border-border p-5 space-y-3 h-fit">

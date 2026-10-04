@@ -13,6 +13,7 @@ import CollectionModal from './CollectionModal';
 import { useAuth } from '@/contexts/AuthContext';
 
 import { fetchAssetBySlug, getAssetPreviewUrl, type AssetRow } from '@/lib/supabase/assetService';
+import { isV1HiddenUnitProduct } from '@/lib/v1Scope';
 
 // ─── License options for photo assets ────────────────────────────────────────
 interface PhotoLicenseOption {
@@ -23,7 +24,7 @@ interface PhotoLicenseOption {
   price: number;
 }
 
-const PHOTO_LICENSE_OPTIONS: PhotoLicenseOption[] = [
+const ALL_PHOTO_LICENSE_OPTIONS: PhotoLicenseOption[] = [
   {
     unitProductCode: 'photo_web',
     licenseTypeCode: 'commercial',
@@ -46,6 +47,9 @@ const PHOTO_LICENSE_OPTIONS: PhotoLicenseOption[] = [
     price: 40,
   },
 ];
+
+// V1 scope: Ultra HD is not sold.
+const PHOTO_LICENSE_OPTIONS = ALL_PHOTO_LICENSE_OPTIONS.filter((option) => !isV1HiddenUnitProduct(option.unitProductCode));
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';

@@ -1,6 +1,6 @@
 import React from 'react';
 import Link from 'next/link';
-import { ArrowRight, Library } from 'lucide-react';
+import { ArrowRight, BookOpen, Library } from 'lucide-react';
 
 export default function HomepageCTA() {
   return (
@@ -14,20 +14,24 @@ export default function HomepageCTA() {
             The seafood visual library your work deserves
           </h2>
           <p className="text-white/65 text-base leading-relaxed mb-8">
-            Browse the library, preview assets, and create a free account to save favorites and build collections. Licensing is coming — join early to follow the launch.
+            Explore verified real photographs, browse the species index, and license the images you need. Looking for a larger volume? Ask us for a quote.
           </p>
           <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
             <Link href="/library" className="btn-secondary w-full sm:w-auto">
               <Library size={16} />
-              Browse the library
+              Explore the library
             </Link>
-            <Link href="/auth" className="btn-outline border-white/20 text-white hover:bg-white/10 w-full sm:w-auto">
-              Create free account
+            <Link href="/species" className="btn-secondary w-full sm:w-auto">
+              <BookOpen size={16} />
+              View species
+            </Link>
+            <Link href="/enterprise" className="btn-secondary w-full sm:w-auto">
+              Request a quote
               <ArrowRight size={14} />
             </Link>
           </div>
           <p className="text-xs text-white/35 mt-6">
-            Preview platform — commercial licensing terms subject to review before launch.
+            Licences are issued per asset. Enterprise volumes and custom terms on request.
           </p>
         </div>
       </div>

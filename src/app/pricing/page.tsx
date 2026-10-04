@@ -8,6 +8,7 @@ import Footer from '@/components/Footer';
 import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight, Zap, ChartBar as BarChart2, Circle as HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle } from '@/lib/pricingConfig';
 import { useAuth } from '@/contexts/AuthContext';
+import { isV1HiddenOfferText, isV1HiddenUnitProduct, isV1ScopeEnabled } from '@/lib/v1Scope';
 
 
 export default function PricingPage() {
@@ -145,7 +146,7 @@ export default function PricingPage() {
                 </div>
 
                 <ul className="flex flex-col gap-2 mb-6 flex-1">
-                  {plan.features.map((f) => (
+                  {plan.features.filter((f) => !isV1HiddenOfferText(f.label)).map((f) => (
                     <li key={f.label} className="flex items-start gap-2 text-xs text-foreground">
                       {f.included ? (
                         <CheckCircle2 size={13} className="text-green-verified shrink-0 mt-0.5" />
@@ -203,7 +204,7 @@ export default function PricingPage() {
             </div>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-            {UNIT_PRODUCTS.map((product) => (
+            {UNIT_PRODUCTS.filter((product) => !isV1HiddenUnitProduct(product.id)).map((product) => (
               <div key={product.id} className="bg-card border border-border rounded-xl p-4 text-center hover:border-secondary/40 hover:shadow-sm transition-all duration-150">
                 <div className="text-xl font-extrabold text-foreground font-mono-data mb-1">{product.price}€</div>
                 <div className="text-sm font-semibold text-foreground mb-1">{product.name}</div>
@@ -214,7 +215,8 @@ export default function PricingPage() {
           </div>
         </section>
 
-        {/* Credit packs */}
+        {/* Credit packs (hidden in V1 scope) */}
+        {!isV1ScopeEnabled() && (
         <section className="mb-16">
           <div className="flex items-center gap-3 mb-6">
             <Package size={18} className="text-secondary" />
@@ -259,6 +261,7 @@ export default function PricingPage() {
             Credits can be used for downloads (1–15 credits), AI identification (2 credits), smart search (1 credit) and AI generation (5 credits).
           </p>
         </section>
+        )}
 
         {/* Footer note */}
         <div className="border-t border-border pt-8 text-center">

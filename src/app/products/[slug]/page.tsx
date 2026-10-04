@@ -15,6 +15,7 @@ import {
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Icon from '@/components/ui/AppIcon';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 
 const STATUS_BADGE: Record<string, string> = {
@@ -91,8 +92,12 @@ export default function ProductDetailPage() {
       <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
 
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6">
-          <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
-          <ChevronRight size={12} />
+          {!isV1HiddenPath('/knowledge') && (
+            <>
+              <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
+              <ChevronRight size={12} />
+            </>
+          )}
           <Link href="/products" className="hover:text-foreground transition-colors">Products</Link>
           <ChevronRight size={12} />
           <span className="text-foreground font-medium truncate max-w-[200px]">{product.public_name}</span>

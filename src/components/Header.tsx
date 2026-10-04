@@ -3,9 +3,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
 import AppLogo from '@/components/ui/AppLogo';
-import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, Circle as HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, ShoppingCart, Compass, Sparkles, Microscope, Building2 } from 'lucide-react';
+import { Menu, X, ChevronDown, Globe, User, BookOpen, Tag, Circle as HelpCircle, DollarSign, Info, Library, Database, ShoppingBag, ShoppingCart, Compass, Sparkles, Microscope, Building2, Mail } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 import { useAuth } from '@/contexts/AuthContext';
+import { isV1HiddenPath, isV1ScopeEnabled } from '@/lib/v1Scope';
 
 
 const languages = [
@@ -29,6 +30,22 @@ const navLinks = [
   { href: '/enterprise', label: 'Enterprise', icon: Building2 },
   { href: '/about', label: 'About', icon: Info },
 ];
+
+// V1 menu: library, species, collections, pricing, enterprise (quote), about, contact.
+const v1NavLinks = [
+  { href: '/library', label: 'Library', icon: Library },
+  { href: '/species', label: 'Species', icon: BookOpen },
+  { href: '/discover', label: 'Collections', icon: Compass },
+  { href: '/pricing', label: 'Pricing', icon: DollarSign },
+  { href: '/enterprise', label: 'Enterprise', icon: Building2 },
+  { href: '/about', label: 'About', icon: Info },
+  { href: '/contact', label: 'Contact', icon: Mail },
+];
+
+const visibleNavLinks: Array<{ href: string; label: string; icon: typeof Library; hidden?: boolean }> =
+  isV1ScopeEnabled()
+    ? v1NavLinks
+    : navLinks.filter((link) => !link.hidden && !isV1HiddenPath(link.href));
 
 interface HeaderProps {
   transparent?: boolean;
@@ -117,7 +134,7 @@ export default function Header({ transparent = false }: HeaderProps) {
 
             {/* Desktop Nav */}
             <nav className="hidden lg:flex items-center gap-1 ml-4">
-              {navLinks.filter((link) => !link.hidden).map((link) => (
+              {visibleNavLinks.map((link) => (
                 <Link
                   key={`nav-${link.href}`}
                   href={link.href}
@@ -280,7 +297,7 @@ export default function Header({ transparent = false }: HeaderProps) {
               </button>
             </div>
             <nav className="flex-1 overflow-y-auto px-4 py-4 flex flex-col gap-1">
-              {navLinks.filter((link) => !link.hidden).map((link) => {
+              {visibleNavLinks.map((link) => {
                 const Icon = link.icon;
                 return (
                   <Link

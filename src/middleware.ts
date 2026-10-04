@@ -1,6 +1,7 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 import { canAccessAdminRoute, type AppRole } from '@/lib/supabase/roleAuth';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 /**
  * Routes that are fully public and require no Supabase check.
@@ -68,6 +69,17 @@ function injectTokenFromHeader(request: NextRequest, url: string): void {
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
+
+  // ── V1 scope: hidden routes answer 404 (nothing is deleted, only masked) ───
+  if (isV1HiddenPath(pathname)) {
+    if (pathname.startsWith('/api/')) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
+    // Rewrite to a path that does not exist: Next.js renders not-found with a 404 status.
+    const notFoundUrl = request.nextUrl.clone();
+    notFoundUrl.pathname = '/__v1_hidden__';
+    return NextResponse.rewrite(notFoundUrl);
+  }
 
   // ── Public routes: never need Supabase ──────────────────────────────────
   if (isPublicRoute(pathname)) {

@@ -6,6 +6,7 @@ import { Search, ChevronRight, CircleCheck as CheckCircle, ArrowRight, SlidersHo
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { fetchEncProductList, type EncProduct } from '@/lib/supabase/encyclopediaQueries';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 const PAGE_SIZE = 24;
 
@@ -93,8 +94,12 @@ export default function ProductsPage() {
       <main className="flex-1 max-w-screen-2xl mx-auto w-full px-4 lg:px-8 xl:px-10 2xl:px-16 pt-24 pb-16">
 
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6">
-          <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
-          <ChevronRight size={12} />
+          {!isV1HiddenPath('/knowledge') && (
+            <>
+              <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
+              <ChevronRight size={12} />
+            </>
+          )}
           <span className="text-foreground font-medium">Products</span>
         </nav>
 

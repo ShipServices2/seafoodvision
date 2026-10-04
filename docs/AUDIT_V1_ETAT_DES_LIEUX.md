@@ -311,3 +311,39 @@ Les 9 migrations Rocket sont marquées `applied` via `migration repair` (aucun S
 - **Aucune vente réelle n'est possible avant l'étape 4.** Les 608 fichiers `original` de `asset_files` pointent vers les aperçus filigranés (même chemin, bucket `asset-previews`, 608 sur 608). Il faut de vrais originaux dans un bucket privé, et remplacer ces lignes.
 - **Contrainte unique `payment_product_mappings_internal_product_type_internal_pro_key` toujours présente** (étape 6) : elle empêche un mapping mensuel et un mapping annuel pour le même plan. Le nom utilisé par les migrations dépasse 63 caractères, donc le `DROP` ne l'atteint pas.
 - Mappings Dodo à rejouer en version additive et à vérifier contre le tableau de bord Dodo (étape 6) ; ne jamais réutiliser les identifiants de `20260719120000` et `20260720230000`.
+
+## Étape 2 — Recentrage V1
+
+Branche `v1/etape-2-recentrage` (non commitée au moment de l'écriture). Libellés conservés en anglais (français prévu à l'étape 8).
+
+### Interrupteur
+- `NEXT_PUBLIC_V1_SCOPE=true` (voir `.env.example`), logique dans `src/lib/v1Scope.ts`. Rien n'est supprimé : les routes sont masquées, pas effacées. Retour à la V2 = passer la variable à `false`.
+- Script `dev` fixé sur le port 4028.
+
+### Routes masquées (404 via `src/middleware.ts`)
+- Pages publiques : `/identify`, `/assistant`, `/knowledge`, `/api-access`, `/mvp-report`, `/marketing-kit`, `/account/credits`.
+- Admin : `/admin/ai-identification`, `/admin/ai-studio`, `/admin/assistant`, `/admin/knowledge`, `/admin/identification`, `/admin/reviewer-dashboard`.
+- Hub (validé comme V2) : `/hub`, `/admin/hub`, `/api/hub`.
+- API : `/api/ai`, `/api/sie`, `/api/assistant`, `/api/identification`, `/api/payments/dodo/credit-checkout` (réponse JSON 404).
+- Produits à l'unité non vendus en V1 : `photo_ultrahd`, `video`, `view_360` (filtrés dans tarifs, panier, `/api/cart/items`, pages asset/produit). Offres crédits/AI/API/Marketing kit filtrées dans `/pricing`, `/pricing/compare`, `/pricing/faq`.
+
+### Liens retirés / navigation
+- Menu V1 : Library, Species, Collections (`/discover`), Pricing, Enterprise, About, Contact. Le lien « Collections » du footer pointe désormais vers `/discover`.
+- Footer : liens vers routes masquées filtrés ; une section vide n'est pas affichée.
+- Accueil : 3 boutons (HeroSection, HomepageCTA).
+- `/discover` affiche les collections ; l'ancienne vue est conservée dans `src/app/discover/DiscoverKnowledgeView.tsx`.
+
+### Migration appliquée
+- `20261004120000_v1_restore_review_workflow.sql` appliquée avec `supabase db push` sur le projet lié (`pbrjxdpnonkfcjavfdsh`).
+- `migration list` : 50/50 locales = distantes, aucun écart.
+- Vérifié en base : tables `asset_workflow`, `asset_badges`, `asset_review_comments`, `license_definitions` présentes ; `license_definitions` = 5 lignes ; fonction `recalculate_asset_completion` présente.
+- `asset_workflow` est vide (620 assets). `/admin/reviews` et `/admin` lisent les assets depuis `assets` et traitent le workflow comme optionnel (`workflow ?? null`, statut par défaut `imported`) : pas de seed nécessaire, aucune migration de seed ajoutée. `asset_readiness`, `asset_status_history` et `profiles` existent.
+
+### Résultats
+- `type-check` : OK, 0 erreur.
+- `lint` : 0 erreur, 289 avertissements (surtout `no-explicit-any`, dont `prefer-const` dans `middleware.ts:129`).
+- `test` : 11 suites, 283 tests OK.
+- `build` : OK.
+- `npm run dev` (port 4028) : `/`, `/library`, `/species`, `/discover`, `/pricing`, `/enterprise`, `/contact` → 200 ; `/identify`, `/assistant`, `/knowledge`, `/hub` → 404 ; `/admin` et `/admin/reviews` → 307 vers `/auth`.
+- Remarque : juste après `npm run build`, le serveur dev renvoyait 500 partout (erreur Turbopack `next/font/google`, cache `.next` périmé). Après suppression de `.next`, tout est revenu normal. Si cela se reproduit, supprimer `.next` avant `npm run dev`.
+- Non testé : le rendu de `/admin` et `/admin/reviews` une fois connecté (nécessite une session admin) ; à regarder dans le navigateur.

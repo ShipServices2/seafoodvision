@@ -1,9 +1,12 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Search, ArrowRight, CircleCheck as CheckCircle2, Camera } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { isV1ScopeEnabled } from '@/lib/v1Scope';
+import HeroSlider from '@/app/components/HeroSlider';
 
 const heroSuggestions = [
   'Atlantic mackerel fillet',
@@ -84,6 +87,9 @@ export default function HeroSection() {
     query.length > 1
       ? heroSuggestions.filter((s) => s.toLowerCase().includes(query.toLowerCase()))
       : heroSuggestions.slice(0, 5);
+
+  // The verified counter is hidden in V1 (no asset is verified yet).
+  const showVerifiedStat = !isV1ScopeEnabled();
 
   const hasRealCatalog =
     !stats.loading && stats.totalAssets !== null && stats.totalAssets > 0;
@@ -177,6 +183,13 @@ export default function HeroSection() {
             )}
           </form>
 
+          {/* Primary calls to action */}
+          <div className="flex flex-col sm:flex-row items-center justify-center gap-3 mt-6">
+            <Link href="/library" className="btn-secondary w-full sm:w-auto">Explore the library</Link>
+            <Link href="/species" className="btn-secondary w-full sm:w-auto">View species</Link>
+            <Link href="/enterprise" className="btn-secondary w-full sm:w-auto">Request a quote</Link>
+          </div>
+
           {/* Quick category links */}
           <div className="flex flex-wrap justify-center gap-2 mt-6">
             {['Fish', 'Crustaceans', 'Cephalopods', 'Molluscs', 'Fillets & Portions', 'Frozen Products'].map(
@@ -192,8 +205,13 @@ export default function HeroSection() {
             )}
           </div>
 
+          {/* Photo slider: framed card, below the title and calls to action */}
+          <div className="w-full mt-12">
+            <HeroSlider />
+          </div>
+
           {/* Dynamic stats or neutral message */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-6 sm:gap-10 mt-14 pt-10 border-t border-white/10 w-full max-w-2xl">
+          <div className={`grid grid-cols-2 ${showVerifiedStat ? 'sm:grid-cols-4' : 'sm:grid-cols-3'} gap-6 sm:gap-10 mt-14 pt-10 border-t border-white/10 w-full max-w-2xl`}>
             {hasRealCatalog ? (
               <>
                 <div className="flex flex-col items-center gap-1">
@@ -204,14 +222,16 @@ export default function HeroSection() {
                     Catalog assets
                   </span>
                 </div>
-                <div className="flex flex-col items-center gap-1">
-                  <span className="text-2xl sm:text-3xl font-extrabold text-white font-mono-data">
-                    {stats.verifiedAssets?.toLocaleString()}
-                  </span>
-                  <span className="text-xs text-white/50 font-medium uppercase tracking-wider">
-                    Verified assets
-                  </span>
-                </div>
+                {showVerifiedStat && (
+                  <div className="flex flex-col items-center gap-1">
+                    <span className="text-2xl sm:text-3xl font-extrabold text-white font-mono-data">
+                      {stats.verifiedAssets?.toLocaleString()}
+                    </span>
+                    <span className="text-xs text-white/50 font-medium uppercase tracking-wider">
+                      Verified assets
+                    </span>
+                  </div>
+                )}
                 <div className="flex flex-col items-center gap-1">
                   <span className="text-2xl sm:text-3xl font-extrabold text-white font-mono-data">
                     {stats.speciesCount?.toLocaleString()}

@@ -10,6 +10,7 @@ import { fetchExtendedCatalogStats } from '@/lib/supabase/queries';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import Icon from '@/components/ui/AppIcon';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 
 interface AdminStats {
@@ -319,7 +320,7 @@ export default function AdminPage() {
 
         {/* Navigation grid */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {adminSections.map((section) => {
+          {adminSections.filter((section) => !isV1HiddenPath(section.href)).map((section) => {
             const Icon = section.icon;
             return (
               <Link

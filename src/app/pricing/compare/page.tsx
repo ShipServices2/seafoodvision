@@ -4,6 +4,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight } from 'lucide-react';
 import { SUBSCRIPTION_PLANS } from '@/lib/pricingConfig';
+import { isV1HiddenOfferText } from '@/lib/v1Scope';
 
 const compareRows = [
   { label: 'Monthly price', key: 'price' },
@@ -100,7 +101,7 @@ export default function ComparePlansPage() {
               </tr>
             </thead>
             <tbody>
-              {compareRows.map((row, idx) => (
+              {compareRows.filter((row) => !isV1HiddenOfferText(row.label)).map((row, idx) => (
                 <tr
                   key={row.key}
                   className={`border-b border-border last:border-0 ${

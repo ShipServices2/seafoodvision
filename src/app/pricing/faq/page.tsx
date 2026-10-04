@@ -3,6 +3,7 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { ArrowRight, Circle as HelpCircle } from 'lucide-react';
+import { isV1HiddenOfferText } from '@/lib/v1Scope';
 
 const faqs = [
   {
@@ -124,13 +125,13 @@ export default function PricingFaqPage() {
           </p>
 
           <div className="space-y-12">
-            {faqs?.map((section) => (
+            {faqs?.filter((section) => section.items.some((item) => !isV1HiddenOfferText(`${item.q} ${item.a}`)))?.map((section) => (
               <div key={section?.category}>
                 <h2 className="text-xs font-semibold uppercase tracking-widest text-secondary mb-5 pb-2 border-b border-border">
                   {section?.category}
                 </h2>
                 <div className="space-y-6">
-                  {section?.items?.map((item) => (
+                  {section?.items?.filter((item) => !isV1HiddenOfferText(`${item.q} ${item.a}`))?.map((item) => (
                     <div key={item?.q}>
                       <h3 className="font-semibold text-foreground mb-2 text-sm">{item?.q}</h3>
                       <p className="text-sm text-muted-foreground leading-relaxed">{item?.a}</p>

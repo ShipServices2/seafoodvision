@@ -10,6 +10,7 @@ import { fetchAssets, getAssetThumbnailFile, type AssetRow, type SortOption } fr
 import { searchLibraryAssets, type LibrarySearchResult } from '@/lib/supabase/semanticSearch';
 import Link from 'next/link';
 import { Search, BookOpen } from 'lucide-react';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 export type { SortOption };
 export type ViewMode = 'grid' | 'list';
@@ -253,13 +254,13 @@ export default function LibraryContent() {
             )}
           </p>
         </div>
-        <Link
+        {!isV1HiddenPath('/knowledge') && (<Link
           href="/knowledge/search"
           className="hidden sm:flex items-center gap-2 text-xs text-muted-foreground hover:text-foreground border border-border rounded-lg px-3 py-2 bg-card hover:border-secondary/40 transition-colors shrink-0"
         >
           <BookOpen size={13} />
           Search Encyclopedia
-        </Link>
+        </Link>)}
       </div>
 
       <LibraryToolbar

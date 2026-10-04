@@ -3,6 +3,7 @@ import Link from 'next/link';
 import AppLogo from '@/components/ui/AppLogo';
 import { Mail } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 
 
@@ -50,7 +51,7 @@ const footerLinks = {
     links: [
       { href: '/library', label: 'Visual Library' },
       { href: '/species', label: 'Species Index' },
-      { href: '/collections', label: 'Collections' },
+      { href: '/discover', label: 'Collections' },
       { href: '/pricing', label: 'Pricing' },
       { href: '/pricing/compare', label: 'Compare Plans' },
     ],
@@ -84,6 +85,14 @@ const footerLinks = {
     ],
   },
 };
+
+// Links to hidden V1 routes are removed; a section left without links is not rendered.
+const visibleFooterSections = Object.entries(footerLinks)
+  .map(([key, section]) => [
+    key,
+    { ...section, links: section.links.filter((link) => !isV1HiddenPath(link.href)) },
+  ] as const)
+  .filter(([, section]) => section.links.length > 0);
 
 export default function Footer() {
   return (
@@ -128,7 +137,7 @@ export default function Footer() {
           </div>
 
           {/* Nav columns */}
-          {Object.entries(footerLinks)?.map(([key, section]) => (
+          {visibleFooterSections.map(([key, section]) => (
             <div key={`footer-section-${key}`}>
               <h4 className="text-xs font-semibold uppercase tracking-widest text-white/40 mb-4">
                 {section?.title}

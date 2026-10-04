@@ -6,6 +6,7 @@ import { Search, ListFilter as Filter, ChevronRight, CircleCheck as CheckCircle,
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { fetchEncSpeciesListWithNames, type EncSpecies } from '@/lib/supabase/encyclopediaQueries';
+import { isV1HiddenPath } from '@/lib/v1Scope';
 
 const CATEGORIES = ['Fish', 'Crustaceans', 'Cephalopods', 'Molluscs', 'Aquaculture'];
 const PAGE_SIZE = 24;
@@ -102,8 +103,12 @@ export default function SpeciesPage() {
         <nav className="flex items-center gap-1.5 text-xs text-muted-foreground mb-6" aria-label="Breadcrumb">
           <Link href="/" className="hover:text-foreground transition-colors">Home</Link>
           <ChevronRight size={12} />
-          <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
-          <ChevronRight size={12} />
+          {!isV1HiddenPath('/knowledge') && (
+            <>
+              <Link href="/knowledge" className="hover:text-foreground transition-colors">Knowledge</Link>
+              <ChevronRight size={12} />
+            </>
+          )}
           <span className="text-foreground font-medium">Species Center</span>
         </nav>
 

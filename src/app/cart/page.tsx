@@ -143,7 +143,7 @@ function CartPageContent() {
           <div className="rounded-2xl border bg-card p-10 text-center">
             <ShoppingCart className="mx-auto mb-4 text-muted-foreground" size={36} />
             <h2 className="mb-2 text-xl font-semibold">Your cart is empty</h2>
-            <p className="mb-6 text-sm text-muted-foreground">Add licensed assets or credit packs to begin.</p>
+            <p className="mb-6 text-sm text-muted-foreground">Add licensed assets to begin.</p>
             <div className="flex justify-center gap-3"><Link href="/library" className="btn-primary">Browse Library</Link><Link href="/pricing" className="btn-outline">View Pricing</Link></div>
           </div>
         ) : (
