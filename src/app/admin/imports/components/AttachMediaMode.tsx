@@ -1,11 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import {
-  Upload, FileText, Image, FileImage, AlertCircle, CheckCircle2,
-  XCircle, Loader2, Eye, Play, RefreshCw, ShieldAlert, Link2,
-  Hash, ClipboardList, ChevronDown, ChevronUp, Info,
-} from 'lucide-react';
+import { Upload, FileText, Image, FileImage, CircleAlert as AlertCircle, CircleCheck as CheckCircle2, Circle as XCircle, Loader as Loader2, Eye, Play, RefreshCw, ShieldAlert, Link2, Hash, ClipboardList, ChevronDown, ChevronUp, Info } from 'lucide-react';
 
 // ============================================================
 // TYPES

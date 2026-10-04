@@ -5,21 +5,20 @@
 // ============================================================
 
 import { DodoPaymentsProvider } from './dodo/DodoPaymentsProvider';
-import { getDodoReturnUrl, getDodoCancelUrl } from './dodo/config';
+import { getDodoReturnUrl, getDodoCancelUrl, getDodoRuntimeConfig } from './dodo/config';
 import { createOrder, updateOrderCheckoutRef } from './PaymentService';
 import {
   assertCommercialValidation,
-  canonicalPlanCode,
   validateAssetLicensePurchase,
   validateCreditPackPurchase,
   validateSubscriptionPurchase,
-} from './CommercialValidationService';
-import { getDodoRuntimeConfig } from './dodo/config';
-
-export {
   getCommercialAssetBlockers,
-  type CommercialAssetSnapshot,
 } from './CommercialValidationService';
+import { canonicalPlanCode } from './subscriptionPlanResolution';
+import type { CommercialAssetSnapshot } from './CommercialValidationService';
+
+export { getCommercialAssetBlockers };
+export type { CommercialAssetSnapshot };
 
 const provider = new DodoPaymentsProvider();
 

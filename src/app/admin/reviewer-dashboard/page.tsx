@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Clock, CheckCircle, Star, BarChart2, TrendingUp, Award, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Clock, CircleCheck as CheckCircle, Star, ChartBar as BarChart2, TrendingUp, Award, CircleAlert as AlertCircle } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';

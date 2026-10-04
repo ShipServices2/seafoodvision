@@ -7,7 +7,7 @@ import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { Database, GitBranch, FileText, AlertTriangle, Clock, CheckCircle, XCircle, Package, Globe, Award, Fish, ShoppingBag, ChevronRight, Layers, BookOpen, Shield } from 'lucide-react';
+import { Database, GitBranch, FileText, TriangleAlert as AlertTriangle, Clock, CircleCheck as CheckCircle, Circle as XCircle, Package, Globe, Award, Fish, ShoppingBag, ChevronRight, Layers, BookOpen, Shield } from 'lucide-react';
 
 interface KGStats {
   totalEntities: number;

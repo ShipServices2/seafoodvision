@@ -1,107 +1,61 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Heart, Plus, ArrowRight } from 'lucide-react';
 import Badge from '@/components/ui/Badge';
+import { createClient } from '@/lib/supabase/client';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
-const featuredAssets = [
-  {
-    id: 'asset-demo-001',
-    slug: 'atlantic-mackerel-whole-fresh-sv001',
-    title: 'Atlantic Mackerel — Whole, Fresh',
-    species: 'Atlantic Mackerel',
-    scientificName: 'Scomber scombrus',
-    category: 'Fish',
-    productForm: 'Whole, ungutted',
-    orientation: 'Landscape',
-    isVerified: true,
-    isRealPhoto: true,
-    licenseType: 'commercial',
-    thumbnailColor: 'bg-gradient-to-br from-blue-200 via-blue-100 to-slate-100',
-    emoji: '🐟',
-    span: 'col-span-2 row-span-2',
-  },
-  {
-    id: 'asset-demo-002',
-    slug: 'common-octopus-whole-fresh-sv002',
-    title: 'Common Octopus — Whole, Fresh',
-    species: 'Common Octopus',
-    scientificName: 'Octopus vulgaris',
-    category: 'Cephalopods',
-    productForm: 'Whole, uncleaned',
-    orientation: 'Portrait',
-    isVerified: true,
-    isRealPhoto: true,
-    licenseType: 'editorial',
-    thumbnailColor: 'bg-gradient-to-br from-purple-200 via-purple-100 to-pink-100',
-    emoji: '🐙',
-    span: 'col-span-1 row-span-1',
-  },
-  {
-    id: 'asset-demo-003',
-    slug: 'tiger-shrimp-headless-frozen-sv003',
-    title: 'Tiger Shrimp — Headless, Frozen',
-    species: 'Giant Tiger Prawn',
-    scientificName: 'Penaeus monodon',
-    category: 'Crustaceans',
-    productForm: 'Headless shell-on',
-    orientation: 'Landscape',
-    isVerified: true,
-    isRealPhoto: true,
-    licenseType: 'commercial',
-    thumbnailColor: 'bg-gradient-to-br from-orange-200 via-orange-100 to-amber-100',
-    emoji: '🦐',
-    span: 'col-span-1 row-span-1',
-  },
-  {
-    id: 'asset-demo-004',
-    slug: 'yellowfin-tuna-steak-sv004',
-    title: 'Yellowfin Tuna — Steak, Fresh',
-    species: 'Yellowfin Tuna',
-    scientificName: 'Thunnus albacares',
-    category: 'Fish',
-    productForm: 'Steak',
-    orientation: 'Landscape',
-    isVerified: true,
-    isRealPhoto: true,
-    licenseType: 'commercial',
-    thumbnailColor: 'bg-gradient-to-br from-red-200 via-red-100 to-rose-100',
-    emoji: '🍣',
-    span: 'col-span-1 row-span-1',
-  },
-  {
-    id: 'asset-demo-005',
-    slug: 'european-sardine-whole-sv005',
-    title: 'European Sardine — Whole',
-    species: 'European Pilchard',
-    scientificName: 'Sardina pilchardus',
-    category: 'Fish',
-    productForm: 'Whole, fresh',
-    orientation: 'Portrait',
-    isVerified: false,
-    isRealPhoto: true,
-    licenseType: 'editorial',
-    thumbnailColor: 'bg-gradient-to-br from-slate-200 via-slate-100 to-blue-100',
-    emoji: '🐠',
-    span: 'col-span-1 row-span-1',
-  },
+interface FeaturedAsset {
+  id: string;
+  slug: string;
+  title: string;
+  scientificName: string | null;
+  category: string | null;
+  licenseType: string | null;
+  isVerified: boolean;
+  isRealPhoto: boolean;
+  photoUrl: string | null;
+  photoAlt: string;
+  span: string;
+}
+
+const SPANS = [
+  'col-span-2 row-span-2',
+  'col-span-1 row-span-1',
+  'col-span-1 row-span-1',
+  'col-span-1 row-span-1',
+  'col-span-1 row-span-1',
 ];
 
 interface AssetCardProps {
-  asset: typeof featuredAssets[0];
-  span?: string;
+  asset: FeaturedAsset;
 }
 
-function FeaturedAssetCard({ asset, span }: AssetCardProps) {
+function FeaturedAssetCard({ asset }: AssetCardProps) {
   const [favorited, setFavorited] = useState(false);
+  const isLarge = asset.span.includes('row-span-2');
 
   return (
-    <div className={`group relative rounded-2xl overflow-hidden border border-border card-hover bg-card shadow-card ${span || ''}`}>
-      {/* Thumbnail */}
+    <div className={`group relative rounded-2xl overflow-hidden border border-border card-hover bg-card shadow-card ${asset.span}`}>
       <Link href={`/asset-detail?slug=${asset.slug}`} className="block h-full">
-        <div className={`relative ${span?.includes('row-span-2') ? 'h-72' : 'h-44'} ${asset.thumbnailColor} flex items-center justify-center overflow-hidden`}>
-          <span className="text-6xl">{asset.emoji}</span>
+        {/* Thumbnail */}
+        <div className={`relative ${isLarge ? 'h-72' : 'h-44'} bg-muted overflow-hidden`}>
+          {asset.photoUrl ? (
+            <img
+              src={asset.photoUrl}
+              alt={asset.photoAlt}
+              loading="lazy"
+              className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+            />
+          ) : (
+            <div className="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 flex items-center justify-center">
+              <span className="text-muted-foreground/30 text-sm font-medium select-none">
+                {asset.category || 'Seafood'}
+              </span>
+            </div>
+          )}
 
           {/* Hover overlay */}
           <div className="absolute inset-0 bg-primary/40 opacity-0 group-hover:opacity-100 transition-opacity duration-200 flex items-center justify-center">
@@ -148,18 +102,24 @@ function FeaturedAssetCard({ asset, span }: AssetCardProps) {
           <h3 className="text-sm font-semibold text-foreground line-clamp-1">
             {asset.title}
           </h3>
-          <p className="text-xs font-mono-data text-muted-foreground mt-0.5 italic">
-            {asset.scientificName}
-          </p>
+          {asset.scientificName && (
+            <p className="text-xs font-mono-data text-muted-foreground mt-0.5 italic">
+              {asset.scientificName}
+            </p>
+          )}
           <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-            <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
-              {asset.category}
-            </span>
-            <Badge
-              variant={asset.licenseType as 'commercial' | 'editorial'}
-              size="sm"
-              showIcon={false}
-            />
+            {asset.category && (
+              <span className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">
+                {asset.category}
+              </span>
+            )}
+            {asset.licenseType && (
+              <Badge
+                variant={asset.licenseType as 'commercial' | 'editorial'}
+                size="sm"
+                showIcon={false}
+              />
+            )}
           </div>
         </div>
       </Link>
@@ -168,6 +128,93 @@ function FeaturedAssetCard({ asset, span }: AssetCardProps) {
 }
 
 export default function FeaturedMedia() {
+  const [assets, setAssets] = useState<FeaturedAsset[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    const fetchFeaturedAssets = async () => {
+      try {
+        const supabase = createClient();
+
+        // Fetch 5 diverse real approved assets with their files and species
+        const { data: rows } = await supabase
+          .from('assets')
+          .select(
+            'id, slug, title, category, license_type, is_verified, is_real_photo, asset_files(file_level, storage_bucket, storage_path), species:species_id(scientific_name)'
+          )
+          .eq('is_demo', false)
+          .eq('is_real_photo', true)
+          .in('review_status', ['approved', 'commercial', 'editorial'])
+          .not('asset_files', 'is', null)
+          .order('created_at', { ascending: false })
+          .limit(20);
+
+        if (!rows || rows.length === 0) {
+          setLoading(false);
+          return;
+        }
+
+        // Pick up to 5 assets from different categories
+        const seen = new Set<string>();
+        const picked: typeof rows = [];
+        for (const row of rows) {
+          const cat = (row as any).category || 'other';
+          if (!seen.has(cat) && picked.length < 5) {
+            seen.add(cat);
+            picked.push(row);
+          }
+        }
+        // Fill remaining slots if not enough diversity
+        for (const row of rows) {
+          if (picked.length >= 5) break;
+          if (!picked.includes(row)) picked.push(row);
+        }
+
+        // Resolve signed URLs
+        const enriched: FeaturedAsset[] = await Promise.all(
+          picked.slice(0, 5).map(async (row, idx) => {
+            const files = (row as any).asset_files as Array<{ file_level: string; storage_bucket: string; storage_path: string }> | null;
+            let photoUrl: string | null = null;
+
+            if (files && files.length > 0) {
+              const thumbFile =
+                files.find((f) => f.file_level === 'thumbnail') ||
+                files.find((f) => f.file_level === 'preview');
+              if (thumbFile) {
+                photoUrl = await getSignedStorageUrl(thumbFile.storage_bucket, thumbFile.storage_path, 7200);
+              }
+            }
+
+            const speciesData = (row as any).species;
+            const scientificName = speciesData?.scientific_name || null;
+
+            return {
+              id: row.id,
+              slug: row.slug,
+              title: row.title,
+              scientificName,
+              category: (row as any).category || null,
+              licenseType: (row as any).license_type || null,
+              isVerified: (row as any).is_verified ?? false,
+              isRealPhoto: (row as any).is_real_photo ?? true,
+              photoUrl,
+              photoAlt: `${row.title}${scientificName ? ` — ${scientificName}` : ''} seafood photo`,
+              span: SPANS[idx] || 'col-span-1 row-span-1',
+            };
+          })
+        );
+
+        setAssets(enriched);
+      } catch {
+        // Keep empty state
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchFeaturedAssets();
+  }, []);
+
   return (
     <section className="py-20 max-w-screen-2xl mx-auto px-4 lg:px-8 xl:px-10 2xl:px-16">
       <div className="flex items-end justify-between mb-10">
@@ -189,16 +236,32 @@ export default function FeaturedMedia() {
         </Link>
       </div>
 
-      {/* Bento grid: 4 cols, 2 rows */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-auto">
-        {featuredAssets.map((asset) => (
-          <FeaturedAssetCard
-            key={asset.id}
-            asset={asset}
-            span={asset.span}
-          />
-        ))}
-      </div>
+      {loading ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-auto">
+          {Array.from({ length: 5 }).map((_, i) => (
+            <div
+              key={`skel-${i}`}
+              className={`rounded-2xl border border-border bg-card animate-pulse overflow-hidden ${SPANS[i]}`}
+            >
+              <div className={`bg-muted ${i === 0 ? 'h-72' : 'h-44'}`} />
+              <div className="p-3 space-y-2">
+                <div className="h-3 bg-muted rounded w-3/4" />
+                <div className="h-3 bg-muted rounded w-1/2" />
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : assets.length > 0 ? (
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 auto-rows-auto">
+          {assets.map((asset) => (
+            <FeaturedAssetCard key={asset.id} asset={asset} />
+          ))}
+        </div>
+      ) : (
+        <div className="text-center py-16 text-muted-foreground">
+          <p className="text-sm">Assets loading — check back shortly.</p>
+        </div>
+      )}
 
       <div className="mt-8 flex justify-center">
         <Link href="/library" className="btn-primary">

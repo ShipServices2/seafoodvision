@@ -7,11 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import {
-  ClipboardCheck, Upload, Fish, Tag, BookOpen, BarChart2,
-  Clock, CheckCircle2, XCircle, AlertTriangle, HelpCircle,
-  GitMerge, Zap, TrendingUp, Users, ArrowRight, RefreshCw
-} from 'lucide-react';
+import { ClipboardCheck, Upload, Fish, Tag, BookOpen, ChartBar as BarChart2, Clock, CircleCheck as CheckCircle2, Circle as XCircle, TriangleAlert as AlertTriangle, Circle as HelpCircle, GitMerge, Zap, TrendingUp, Users, ArrowRight, RefreshCw } from 'lucide-react';
 
 interface ReviewStats {
   totalAssets: number;

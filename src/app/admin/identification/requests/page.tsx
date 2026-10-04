@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Loader2, Filter } from 'lucide-react';
+import { ChevronRight, Loader as Loader2, ListFilter as Filter } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import { STATUS_LABELS } from '@/lib/identification/types';
 import type { IdentificationStatus } from '@/lib/identification/types';

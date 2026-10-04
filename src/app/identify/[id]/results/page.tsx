@@ -3,10 +3,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import {
-  ArrowLeft, AlertCircle, Loader2, CheckCircle, ThumbsUp, ThumbsDown,
-  HelpCircle, Users, ExternalLink, Fish, Eye, Info
-} from 'lucide-react';
+import { ArrowLeft, CircleAlert as AlertCircle, Loader as Loader2, CircleCheck as CheckCircle, ThumbsUp, ThumbsDown, Circle as HelpCircle, Users, ExternalLink, Fish, Eye, Info, Zap } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 import {
   CONFIDENCE_LABELS, CONFIDENCE_COLORS, STATUS_LABELS
@@ -22,8 +19,10 @@ interface CandidateRow {
   candidate_type: string;
   rank: number;
   confidence_level: string;
+  confidence_score: number | null;
   match_reasons: { code: string; label: string; detail?: string }[];
   source_type: string;
+  model_name: string | null;
   status: string;
   species?: {
     id: string;
@@ -139,13 +138,25 @@ export default function IdentifyResultsPage() {
           </p>
         </div>
 
-        {/* Visual AI notice */}
-        <div className="bg-muted/40 border border-border rounded-xl p-4 mb-6 flex items-start gap-3">
-          <Eye size={16} className="text-muted-foreground shrink-0 mt-0.5" />
-          <p className="text-sm text-muted-foreground">
-            <strong className="text-foreground">Visual AI comparison is not yet enabled.</strong> Candidates are based on your hints and Seafood Vision structured data only.
-          </p>
-        </div>
+        {/* Visual AI notice — dynamic based on source */}
+        {candidates.length > 0 && candidates[0]?.source_type === 'openai_vision' ? (
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 flex items-start gap-3">
+            <Eye size={16} className="text-blue-600 shrink-0 mt-0.5" />
+            <p className="text-sm text-blue-800">
+              <strong>Analysed by OpenAI Vision (GPT-4o)</strong> — candidates are based on real visual analysis of your photo.
+              {candidates.some(c => (c.confidence_score ?? 0) < 40) && (
+                <span className="block mt-1 text-blue-700">Some candidates have low confidence — identification is probable, not confirmed.</span>
+              )}
+            </p>
+          </div>
+        ) : (
+          <div className="bg-muted/40 border border-border rounded-xl p-4 mb-6 flex items-start gap-3">
+            <Eye size={16} className="text-muted-foreground shrink-0 mt-0.5" />
+            <p className="text-sm text-muted-foreground">
+              <strong className="text-foreground">Candidates based on metadata hints.</strong> Visual AI analysis was not available for this request.
+            </p>
+          </div>
+        )}
 
         {/* Candidates */}
         {candidates.length === 0 ? (
@@ -183,9 +194,14 @@ export default function IdentifyResultsPage() {
                       )}
                     </div>
                   </div>
-                  <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border shrink-0 ${CONFIDENCE_COLORS[candidate.confidence_level as ConfidenceLevel] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
-                    {CONFIDENCE_LABELS[candidate.confidence_level as ConfidenceLevel] || candidate.confidence_level}
-                  </span>
+                  <div className="flex flex-col items-end gap-1 shrink-0">
+                    <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${CONFIDENCE_COLORS[candidate.confidence_level as ConfidenceLevel] || 'bg-gray-50 text-gray-600 border-gray-200'}`}>
+                      {CONFIDENCE_LABELS[candidate.confidence_level as ConfidenceLevel] || candidate.confidence_level}
+                    </span>
+                    {candidate.confidence_score != null && (
+                      <span className="text-xs text-muted-foreground font-mono">{candidate.confidence_score}%</span>
+                    )}
+                  </div>
                 </div>
 
                 {candidate.species?.category && (
@@ -213,21 +229,33 @@ export default function IdentifyResultsPage() {
 
                 {/* Source note */}
                 <p className="text-xs text-muted-foreground mb-3">
-                  Source: <span className="text-foreground">{candidate.source_type === 'structured_search' ? 'Seafood Vision structured search' : 'User metadata hints'}</span>
-                  {' · '}
-                  <span className="italic">Related verified media</span> (not AI visual match)
+                  Source:{' '}
+                  <span className="text-foreground">
+                    {candidate.source_type === 'openai_vision'
+                      ? `OpenAI Vision${candidate.model_name ? ` (${candidate.model_name})` : ''}`
+                      : candidate.source_type === 'structured_search' ?'Seafood Vision structured search' :'User metadata hints'}
+                  </span>
                 </p>
 
                 {/* Links */}
                 {candidate.species?.slug && (
-                  <Link
-                    href={`/species/${candidate.species.slug}`}
-                    className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
-                    target="_blank"
-                  >
-                    <ExternalLink size={11} />
-                    View species fact sheet
-                  </Link>
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <Link
+                      href={`/species/${candidate.species.slug}`}
+                      className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
+                      target="_blank"
+                    >
+                      <ExternalLink size={11} />
+                      View species fact sheet
+                    </Link>
+                    <Link
+                      href={`/hub/${candidate.species.slug}?from=identify&identify_id=${id}`}
+                      className="inline-flex items-center gap-1.5 text-xs font-semibold bg-secondary/10 text-secondary hover:bg-secondary hover:text-white px-2.5 py-1 rounded-lg transition-colors"
+                    >
+                      <Zap size={11} />
+                      Open Intelligence Hub
+                    </Link>
+                  </div>
                 )}
               </div>
             ))}

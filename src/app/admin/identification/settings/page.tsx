@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { ChevronRight, Settings, AlertCircle } from 'lucide-react';
+import { ChevronRight, Settings, CircleAlert as AlertCircle } from 'lucide-react';
 
 export default function AdminIdentificationSettingsPage() {
   return (

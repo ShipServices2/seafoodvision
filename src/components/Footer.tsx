@@ -94,7 +94,7 @@ export default function Footer() {
           {/* Brand */}
           <div className="lg:col-span-2">
             <div className="flex items-center gap-2.5 mb-4">
-              <AppLogo size={36} />
+              <AppLogo size={40} />
               <span className="font-bold text-lg tracking-tight text-white">
                 SeafoodVision
               </span>

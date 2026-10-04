@@ -23,9 +23,7 @@ export function resolveSubscriptionSelection(
   const billingCycle: SubscriptionBillingCycle =
     rawBillingCycle === 'annual' || rawBillingCycle === 'monthly'
       ? rawBillingCycle
-      : suffixCycle === 'annual'
-        ? 'annual'
-        : 'monthly';
+      : suffixCycle === 'annual' ?'annual' :'monthly';
 
   return {
     planCode: canonicalPlanCode(rawPlanCode),

@@ -22,11 +22,8 @@ export function getDodoRuntimeConfig(): DodoRuntimeConfig {
   const apiKeyFound = runtimeValue('DODO_PAYMENTS_API_KEY') !== null;
   const webhookSecretFound = runtimeValue('DODO_PAYMENTS_WEBHOOK_SECRET') !== null;
   const rawEnvironment = runtimeValue('DODO_PAYMENTS_ENVIRONMENT')?.toLowerCase() ?? 'test';
-  const environment: DodoRuntimeEnvironment = rawEnvironment === 'test'
-    ? 'test'
-    : rawEnvironment === 'production' || rawEnvironment === 'live'
-      ? 'production'
-      : 'invalid';
+  const environment: DodoRuntimeEnvironment = rawEnvironment === 'test' ?'test'
+    : rawEnvironment === 'production'|| rawEnvironment === 'live' ?'production' :'invalid';
   const environmentValid = environment !== 'invalid';
   const enabledValue = (
     runtimeValue('DODO_PAYMENTS_ENABLED')
@@ -80,12 +77,25 @@ export function assertDodoConfigured(): void {
   }
 }
 
+/** Removes accidental double-scheme prefixes like "https://https://" */
+function sanitizeUrl(raw: string): string {
+  return raw.replace(/^(https?:\/\/)+/, (match) => {
+    // Keep only the last occurrence of the scheme
+    const scheme = match.endsWith('https://') ? 'https://' : 'http://';
+    return scheme;
+  });
+}
+
 export function getDodoReturnUrl(): string {
-  return process.env.DODO_PAYMENTS_RETURN_URL?.trim()
-    || `${process.env.NEXT_PUBLIC_SITE_URL?.trim()}/checkout/success`;
+  const raw =
+    process.env.DODO_PAYMENTS_RETURN_URL?.trim() ||
+    `${process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? ''}/checkout/success`;
+  return sanitizeUrl(raw);
 }
 
 export function getDodoCancelUrl(): string {
-  return process.env.DODO_PAYMENTS_CANCEL_URL?.trim()
-    || `${process.env.NEXT_PUBLIC_SITE_URL?.trim()}/checkout/cancel`;
+  const raw =
+    process.env.DODO_PAYMENTS_CANCEL_URL?.trim() ||
+    `${process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? ''}/checkout/cancel`;
+  return sanitizeUrl(raw);
 }

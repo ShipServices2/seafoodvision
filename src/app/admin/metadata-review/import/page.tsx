@@ -6,11 +6,7 @@ import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
-import {
-  Upload, FileText, CheckCircle2, XCircle, AlertTriangle,
-  ArrowLeft, Play, Eye, Loader2, Info, Tag, Fish, GitMerge, Package,
-  ShieldCheck, Database, Lock, BarChart2
-} from 'lucide-react';
+import { Upload, FileText, CircleCheck as CheckCircle2, Circle as XCircle, TriangleAlert as AlertTriangle, ArrowLeft, Play, Eye, Loader as Loader2, Info, Tag, Fish, GitMerge, Package, ShieldCheck, Database, Lock, ChartBar as BarChart2 } from 'lucide-react';
 
 // Phase 7.16 — Metadata Enrichment Pack (608 assets)
 const PHASE_716_FILES = [

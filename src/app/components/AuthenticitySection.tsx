@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, Camera, Shield, XCircle } from 'lucide-react';
+import { CircleCheck as CheckCircle2, Camera, Shield, Circle as XCircle } from 'lucide-react';
 
 const verificationSteps = [
   {

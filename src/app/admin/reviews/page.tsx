@@ -3,7 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { ArrowLeft, Search, CheckCircle, RotateCcw, History, Award, ChevronRight, RefreshCw } from 'lucide-react';
+import { ArrowLeft, Search, CircleCheck as CheckCircle, RotateCcw, History, Award, ChevronRight, RefreshCw } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
 import Header from '@/components/Header';

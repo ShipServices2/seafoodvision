@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { XCircle, ArrowLeft, RefreshCw, ShoppingCart } from 'lucide-react';
+import { Circle as XCircle, ArrowLeft, RefreshCw, ShoppingCart } from 'lucide-react';
 
 export default function CheckoutCancelContent() {
   const searchParams = useSearchParams();

@@ -5,7 +5,7 @@ import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { CheckCircle2, Clock, RefreshCw, AlertCircle, ArrowRight } from 'lucide-react';
+import { CircleCheck as CheckCircle2, Clock, RefreshCw, CircleAlert as AlertCircle, ArrowRight } from 'lucide-react';
 
 type OrderStatus = 'draft' | 'pending' | 'paid' | 'failed' | 'cancelled' | 'refunded' | 'partially_refunded' | 'disputed';
 

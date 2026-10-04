@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { ChevronRight, Loader2, Users, CheckCircle, AlertCircle, Eye } from 'lucide-react';
+import { ChevronRight, Loader as Loader2, Users, CircleCheck as CheckCircle, CircleAlert as AlertCircle, Eye } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
 
 interface ReviewRow {

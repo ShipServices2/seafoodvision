@@ -7,10 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import {
-  ArrowLeft, Search, CheckCircle2, XCircle, GitMerge,
-  Plus, Loader2, RefreshCw, AlertTriangle, Hash
-} from 'lucide-react';
+import { ArrowLeft, Search, CircleCheck as CheckCircle2, Circle as XCircle, GitMerge, Plus, Loader as Loader2, RefreshCw, TriangleAlert as AlertTriangle, Hash } from 'lucide-react';
 
 interface Keyword {
   id: string;

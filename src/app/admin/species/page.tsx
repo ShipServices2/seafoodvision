@@ -3,10 +3,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import {
-  ArrowLeft, Plus, Search, Edit2, Link2, Merge, Eye, ChevronRight,
-  X, Save, Check, AlertTriangle, FileText, Image, ShoppingBag, Tag
-} from 'lucide-react';
+import { ArrowLeft, Plus, Search, CreditCard as Edit2, Link2, Merge, Eye, ChevronRight, X, Save, Check, TriangleAlert as AlertTriangle, FileText, Image, ShoppingBag, Tag } from 'lucide-react';
 import { useAuth } from '@/contexts/AuthContext';
 import {
   adminFetchSpeciesList,

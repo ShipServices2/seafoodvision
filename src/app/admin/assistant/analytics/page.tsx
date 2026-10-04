@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { BarChart2, ChevronLeft, TrendingUp, Clock, Globe, MessageSquare, AlertCircle } from 'lucide-react';
+import { ChartBar as BarChart2, ChevronLeft, TrendingUp, Clock, Globe, MessageSquare, CircleAlert as AlertCircle } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

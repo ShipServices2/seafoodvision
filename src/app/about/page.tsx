@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
-import { Fish, Camera, Globe2, ShieldCheck } from 'lucide-react';
+import { Fish, Camera, Globe as Globe2, ShieldCheck } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 
 

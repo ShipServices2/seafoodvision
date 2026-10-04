@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { Layers, Zap, CheckCircle2, XCircle, HelpCircle, AlertTriangle } from 'lucide-react';
+import { Layers, Zap, CircleCheck as CheckCircle2, Circle as XCircle, Circle as HelpCircle, TriangleAlert as AlertTriangle } from 'lucide-react';
 
 type BatchSize = 50 | 100 | 250 | 500;
 type BulkAction = 'approve' | 'reject' | 'mark_unknown';

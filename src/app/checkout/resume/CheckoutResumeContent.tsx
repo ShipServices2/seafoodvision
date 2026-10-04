@@ -6,7 +6,7 @@ import Link from 'next/link';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
-import { ArrowRight, RefreshCw, AlertCircle, ShoppingCart, CheckCircle2, Settings } from 'lucide-react';
+import { ArrowRight, RefreshCw, CircleAlert as AlertCircle, ShoppingCart, CircleCheck as CheckCircle2, Settings } from 'lucide-react';
 import { resolveSubscriptionSelection } from '@/lib/payments/subscriptionPlanResolution';
 
 type ResumeState =
@@ -37,8 +37,7 @@ export default function CheckoutResumeContent() {
     : assetId && licenseTypeCode && unitProductCode
     ? 'asset_license'
     : creditPackCode
-    ? 'credit_pack'
-    : 'unknown';
+    ? 'credit_pack' :'unknown';
 
   const [state, setState] = useState<ResumeState>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);

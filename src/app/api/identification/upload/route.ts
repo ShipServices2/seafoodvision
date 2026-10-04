@@ -1,7 +1,9 @@
-'use server';
-
 import { createClient } from '@/lib/supabase/server';
 import { NextRequest, NextResponse } from 'next/server';
+
+// Disable Next.js route cache — always process fresh uploads
+export const dynamic = 'force-dynamic';
+export const revalidate = 0;
 
 export async function POST(request: NextRequest) {
   try {
@@ -35,12 +37,14 @@ export async function POST(request: NextRequest) {
     // Build storage path
     const userId = user?.id || 'anonymous';
     const timestamp = Date.now();
-    const ext = file.name.split('.').pop() || 'jpg';
+    const ext = file.name.split('.').pop()?.toLowerCase() || 'jpg';
     const uploadPath = `${userId}/${timestamp}.${ext}`;
 
     // Upload to Supabase Storage
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
+
+    console.log(`[upload/route] Uploading to storage | path=${uploadPath} | size=${file.size} | type=${file.type}`);
 
     const { error: uploadError } = await supabase.storage
       .from('identification-uploads')
@@ -50,9 +54,14 @@ export async function POST(request: NextRequest) {
       });
 
     if (uploadError) {
-      // If bucket doesn't exist yet, create the request without storage path
-      console.warn('Storage upload failed (bucket may not exist):', uploadError.message);
+      console.error('[upload/route] Storage upload failed:', uploadError.message);
+      return NextResponse.json(
+        { error: `Image upload failed: ${uploadError.message}. Please try again.` },
+        { status: 500 }
+      );
     }
+
+    console.log(`[upload/route] Storage upload success | path=${uploadPath}`);
 
     // Create identification request
     const retentionUntil = consentForRetention
@@ -63,7 +72,7 @@ export async function POST(request: NextRequest) {
       .from('identification_requests')
       .insert({
         user_id: user?.id || null,
-        upload_path: uploadError ? null : uploadPath,
+        upload_path: uploadPath,
         original_filename: null, // Privacy: don't store original filename
         media_type: 'photo',
         file_size: file.size,
@@ -90,7 +99,7 @@ export async function POST(request: NextRequest) {
       created_by: user?.id || null,
     });
 
-    return NextResponse.json({ requestId: req.id, uploadPath: uploadError ? null : uploadPath });
+    return NextResponse.json({ requestId: req.id, uploadPath });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : 'Unknown error';
     return NextResponse.json({ error: message }, { status: 500 });

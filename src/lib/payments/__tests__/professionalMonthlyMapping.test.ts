@@ -6,8 +6,7 @@ import { validateSubscriptionPurchase } from '../CommercialValidationService';
 const root = process.cwd();
 const repairMigration = readFileSync(join(
   root,
-  'supabase/migrations/20260720220000_repair_professional_monthly_test_mapping.sql'
-), 'utf8');
+  'supabase/migrations/20260720220000_repair_professional_monthly_test_mapping.sql' ),'utf8');
 const certainMappingsMigration = readFileSync(join(
   root,
   'supabase/migrations/20260719120000_dodo_test_certain_mappings.sql'

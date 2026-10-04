@@ -2,7 +2,7 @@
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import Link from 'next/link';
-import { Send, Sparkles, BookOpen, Fish, Package, Globe, FileText, ThumbsUp, ThumbsDown, Copy, Bookmark, RefreshCw, ChevronRight, AlertTriangle, Info, CheckCircle, Clock, X, Plus, History, Star, HelpCircle } from 'lucide-react';
+import { Send, Sparkles, BookOpen, Fish, Package, Globe, FileText, ThumbsUp, ThumbsDown, Copy, Bookmark, RefreshCw, ChevronRight, TriangleAlert as AlertTriangle, Info, CircleCheck as CheckCircle, Clock, X, Plus, History, Star, Circle as HelpCircle } from 'lucide-react';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';

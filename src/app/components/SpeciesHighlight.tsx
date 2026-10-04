@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ArrowRight, Image as ImageIcon } from 'lucide-react';
 import { createClient } from '@/lib/supabase/client';
+import { getSignedStorageUrl } from '@/lib/supabase/assetService';
 
 interface SpeciesCard {
   id: string;
@@ -14,21 +15,23 @@ interface SpeciesCard {
   category: string | null;
   mediaCount: number | null;
   faoArea: string | null;
-  emoji: string;
+  photoUrl: string | null;
+  photoAlt: string;
   bgColor: string;
 }
 
-const speciesEmoji: Record<string, { emoji: string; bgColor: string }> = {
-  'sardina-pilchardus': { emoji: '🐠', bgColor: 'bg-gradient-to-br from-blue-100 to-blue-50' },
-  'scomber-scombrus': { emoji: '🐟', bgColor: 'bg-gradient-to-br from-teal-100 to-teal-50' },
-  'thunnus-albacares': { emoji: '🐡', bgColor: 'bg-gradient-to-br from-yellow-100 to-amber-50' },
-  'octopus-vulgaris': { emoji: '🐙', bgColor: 'bg-gradient-to-br from-purple-100 to-purple-50' },
-  'loligo-vulgaris': { emoji: '🦑', bgColor: 'bg-gradient-to-br from-indigo-100 to-indigo-50' },
-  'sepia-officinalis': { emoji: '🦑', bgColor: 'bg-gradient-to-br from-slate-100 to-slate-50' },
-  'penaeus-monodon': { emoji: '🦐', bgColor: 'bg-gradient-to-br from-orange-100 to-orange-50' },
+const categoryBg: Record<string, string> = {
+  Fish: 'bg-gradient-to-br from-blue-50 to-blue-100',
+  Crustaceans: 'bg-gradient-to-br from-orange-50 to-orange-100',
+  Cephalopods: 'bg-gradient-to-br from-purple-50 to-purple-100',
+  Molluscs: 'bg-gradient-to-br from-teal-50 to-teal-100',
+  'Fillets & Portions': 'bg-gradient-to-br from-red-50 to-red-100',
+  'Frozen Products': 'bg-gradient-to-br from-cyan-50 to-cyan-100',
+  Packaging: 'bg-gradient-to-br from-slate-50 to-slate-100',
+  Aquaculture: 'bg-gradient-to-br from-emerald-50 to-emerald-100',
 };
 
-const defaultMeta = { emoji: '🐠', bgColor: 'bg-gradient-to-br from-blue-100 to-blue-50' };
+const defaultBg = 'bg-gradient-to-br from-blue-50 to-blue-100';
 
 export default function SpeciesHighlight() {
   const [speciesList, setSpeciesList] = useState<SpeciesCard[]>([]);
@@ -38,6 +41,7 @@ export default function SpeciesHighlight() {
     const fetchSpecies = async () => {
       try {
         const supabase = createClient();
+
         const { data: species } = await supabase
           .from('species')
           .select('id, slug, common_name, scientific_name, family, category, fao_areas')
@@ -49,8 +53,9 @@ export default function SpeciesHighlight() {
           return;
         }
 
-        const withCounts = await Promise.all(
+        const withPhotos = await Promise.all(
           species.map(async (sp) => {
+            // Count assets for this species
             const { count } = await supabase
               .from('assets')
               .select('*', { count: 'exact', head: true })
@@ -58,7 +63,39 @@ export default function SpeciesHighlight() {
               .eq('is_demo', false)
               .in('review_status', ['approved', 'commercial', 'editorial']);
 
-            const meta = speciesEmoji[sp.slug] || defaultMeta;
+            // Fetch first real photo asset for this species
+            const { data: assetRows } = await supabase
+              .from('assets')
+              .select('id, title, asset_files(file_level, storage_bucket, storage_path)')
+              .eq('species_id', sp.id)
+              .eq('is_demo', false)
+              .eq('is_real_photo', true)
+              .in('review_status', ['approved', 'commercial', 'editorial'])
+              .limit(5);
+
+            let photoUrl: string | null = null;
+            let photoAlt = sp.common_name;
+
+            if (assetRows && assetRows.length > 0) {
+              for (const asset of assetRows) {
+                const files = (asset as any).asset_files as Array<{ file_level: string; storage_bucket: string; storage_path: string }> | null;
+                if (!files || files.length === 0) continue;
+                const thumbFile =
+                  files.find((f) => f.file_level === 'thumbnail') ||
+                  files.find((f) => f.file_level === 'preview');
+                if (thumbFile) {
+                  const url = await getSignedStorageUrl(thumbFile.storage_bucket, thumbFile.storage_path, 7200);
+                  if (url) {
+                    photoUrl = url;
+                    photoAlt = `${sp.common_name} (${sp.scientific_name}) — real seafood photo`;
+                    break;
+                  }
+                }
+              }
+            }
+
+            const bgColor = categoryBg[sp.category || ''] || defaultBg;
+
             return {
               id: sp.id,
               slug: sp.slug,
@@ -68,12 +105,14 @@ export default function SpeciesHighlight() {
               category: sp.category,
               mediaCount: count ?? 0,
               faoArea: sp.fao_areas?.[0] || null,
-              ...meta,
+              photoUrl,
+              photoAlt,
+              bgColor,
             };
           })
         );
 
-        setSpeciesList(withCounts);
+        setSpeciesList(withPhotos);
       } catch {
         // Keep empty state
       } finally {
@@ -96,9 +135,9 @@ export default function SpeciesHighlight() {
           </div>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {Array.from({ length: 7 }).map((_, i) => (
+          {Array.from({ length: 8 }).map((_, i) => (
             <div key={`skeleton-${i}`} className="bg-card rounded-2xl border border-border overflow-hidden animate-pulse">
-              <div className="h-28 bg-muted" />
+              <div className="h-36 bg-muted" />
               <div className="p-4 space-y-2">
                 <div className="h-4 bg-muted rounded w-3/4" />
                 <div className="h-3 bg-muted rounded w-1/2" />
@@ -162,12 +201,25 @@ export default function SpeciesHighlight() {
             href={`/species/${species?.slug}`}
             className="group bg-card rounded-2xl border border-border overflow-hidden card-hover shadow-card"
           >
-            <div className={`h-28 ${species?.bgColor} flex items-center justify-center relative`}>
-              <span className="text-5xl">{species?.emoji}</span>
-              {species?.mediaCount !== null && species.mediaCount > 0 && (
-                <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-white/80 backdrop-blur-sm rounded-full px-2 py-0.5">
-                  <ImageIcon size={10} className="text-muted-foreground" />
-                  <span className="text-xs font-mono-data font-medium text-muted-foreground">
+            <div className={`h-36 relative overflow-hidden ${!species?.photoUrl ? species?.bgColor : ''}`}>
+              {species?.photoUrl ? (
+                <img
+                  src={species.photoUrl}
+                  alt={species.photoAlt}
+                  loading="lazy"
+                  className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                />
+              ) : (
+                <div className={`w-full h-full ${species?.bgColor} flex items-center justify-center`}>
+                  <span className="text-muted-foreground/20 text-3xl font-bold select-none">
+                    {species?.commonName?.charAt(0)}
+                  </span>
+                </div>
+              )}
+              {species?.mediaCount !== null && species.mediaCount !== undefined && species.mediaCount > 0 && (
+                <div className="absolute bottom-2 right-2 flex items-center gap-1 bg-black/50 backdrop-blur-sm rounded-full px-2 py-0.5">
+                  <ImageIcon size={10} className="text-white/80" />
+                  <span className="text-xs font-mono-data font-medium text-white/90">
                     {species.mediaCount}
                   </span>
                 </div>

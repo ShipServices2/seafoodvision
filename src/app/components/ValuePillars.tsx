@@ -1,5 +1,5 @@
 import React from 'react';
-import { CheckCircle2, BookOpen, Globe2, Shield } from 'lucide-react';
+import { CircleCheck as CheckCircle2, BookOpen, Globe as Globe2, Shield } from 'lucide-react';
 import Icon from '@/components/ui/AppIcon';
 
 

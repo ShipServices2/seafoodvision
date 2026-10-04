@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Fish, Mail, ArrowRight, ArrowLeft, CheckCircle2 } from 'lucide-react';
+import { Fish, Mail, ArrowRight, ArrowLeft, CircleCheck as CheckCircle2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { sendPasswordResetEmail } from '@/lib/supabase/auth';
 
