@@ -185,7 +185,7 @@ export async function handlePaymentSucceeded(
     payment_type:
       order.order_type === 'subscription' ?'subscription'
         : order.order_type === 'credit_pack' ?'credit_pack' :'one_time',
-    environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production',
+    environment: (process.env.DODO_PAYMENTS_ENVIRONMENT?.trim() || 'test') as 'test' | 'production',
     raw_status: String(data['status'] ?? 'succeeded'),
     succeeded_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -455,7 +455,7 @@ export async function handleSubscriptionActivated(
     order_id: order.id,
     external_subscription_id: externalSubscriptionId,
     status: 'active',
-    environment: (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production',
+    environment: (process.env.DODO_PAYMENTS_ENVIRONMENT?.trim() || 'test') as 'test' | 'production',
     billing_cycle: ((order.metadata as Record<string, unknown>)?.billingCycle as string) ?? 'monthly',
     current_period_start: periodStart,
     current_period_end: periodEnd,
@@ -625,7 +625,7 @@ export async function handleRefundIssued(
       updated_at: new Date().toISOString(),
     })
     .eq('provider', 'dodo_payments')
-    .eq('environment', (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as 'test' | 'production')
+    .eq('environment', (process.env.DODO_PAYMENTS_ENVIRONMENT?.trim() || 'test') as 'test' | 'production')
     .eq('external_payment_id', externalPaymentId)
     .select('id, order_id, user_id, currency, amount')
     .maybeSingle();

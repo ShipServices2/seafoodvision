@@ -143,7 +143,7 @@ describe('certain unit-product mappings resolve through server validation', () =
         assets: [result({
           id: 'asset-1', media_type: 'photo', review_status: 'approved',
           publication_status: 'published', commercial_use: true,
-          license_type: 'commercial', restrictions: null, is_demo: false,
+          license_type: 'commercial', restrictions: null, is_demo: false, width_px: 6000, height_px: 4000,
           asset_readiness: {
             technical_quality: true, rights_verified: true, original_available: true,
             license_ready: true, publication_ready: true,

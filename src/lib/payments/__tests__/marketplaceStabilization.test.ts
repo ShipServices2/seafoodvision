@@ -59,6 +59,8 @@ const commercialAsset = {
   license_type: 'commercial',
   restrictions: null,
   is_demo: false,
+  width_px: 4000,
+  height_px: 3000,
   asset_readiness: {
     technical_quality: true,
     rights_verified: true,

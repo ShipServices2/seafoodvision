@@ -16,6 +16,8 @@ import CollectionModal from '@/app/asset-detail/components/CollectionModal';
 import { useAuth } from '@/contexts/AuthContext';
 import AddToCartButton from '@/components/AddToCartButton';
 import { isV1HiddenUnitProduct } from '@/lib/v1Scope';
+import { UNIT_PRODUCTS, LICENSE_TYPES } from '@/lib/pricingConfig';
+import { isHdResolution } from '@/lib/assetOffers';
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -29,33 +31,53 @@ function formatDimensions(w: number | null, h: number | null): string {
   return `${w.toLocaleString()} × ${h.toLocaleString()} px`;
 }
 
-// License options shown when asset is commercially available
-const ALL_LICENSE_OPTIONS = [
+// License options shown when asset is commercially available.
+// Prices come from pricingConfig (launch prices). WEB-resolution photos are sold as "Photo Web" only;
+// HD photos (>= 4 MP) add "Photo HD" and the extended licence.
+const eur = (amount: number | undefined) => `${amount ?? 0}€`;
+const unitPrice = (id: string) => UNIT_PRODUCTS.find((p) => p.id === id)?.price;
+const extendedLicensePrice = LICENSE_TYPES.find((l) => l.id === 'extended')?.price ?? undefined;
+
+interface LicenseOption {
+  code: string;
+  name: string;
+  unitProductCode: string;
+  description: string;
+  price: string;
+}
+
+const ALL_LICENSE_OPTIONS: (LicenseOption & { hdOnly: boolean })[] = [
   {
     code: 'commercial',
     name: 'Photo Web',
     unitProductCode: 'photo_web',
     description: 'Web-optimised (72 dpi, up to 1920px)',
-    price: '5€',
+    price: eur(unitPrice('photo_web')),
+    hdOnly: false,
   },
   {
     code: 'commercial',
     name: 'Photo HD',
     unitProductCode: 'photo_hd',
     description: 'High-definition (300 dpi, up to 4K)',
-    price: '20€',
+    price: eur(unitPrice('photo_hd')),
+    hdOnly: true,
   },
   {
-    code: 'commercial',
-    name: 'Photo Ultra HD',
-    unitProductCode: 'photo_ultrahd',
-    description: 'Full resolution (up to 8K)',
-    price: '40€',
+    code: 'extended',
+    name: 'Photo HD — Extended licence',
+    unitProductCode: 'photo_hd_extended',
+    description: 'HD file with extended rights (print runs, broadcast, merchandise)',
+    price: eur(extendedLicensePrice),
+    hdOnly: true,
   },
 ];
 
-// V1 scope: Ultra HD is not sold.
-const LICENSE_OPTIONS = ALL_LICENSE_OPTIONS.filter((option) => !isV1HiddenUnitProduct(option.unitProductCode));
+function getLicenseOptions(asset: AssetRow): LicenseOption[] {
+  const hd = isHdResolution(asset.width_px, asset.height_px);
+  // V1 scope: Ultra HD is not sold.
+  return ALL_LICENSE_OPTIONS.filter((o) => (hd || !o.hdOnly) && !isV1HiddenUnitProduct(o.unitProductCode));
+}
 
 interface CommercialCriterion {
   key: string;
@@ -66,7 +88,9 @@ interface CommercialCriterion {
 }
 
 function getCommercialCriteria(asset: AssetRow): CommercialCriterion[] {
-  const hasOriginalFile = (asset.asset_files ?? []).some((f) => f.file_level === 'original');
+  // 'original' rows of asset_files are never readable by visitors (RLS), so availability comes from the public readiness flag
+  const readiness = Array.isArray(asset.asset_readiness) ? asset.asset_readiness[0] : asset.asset_readiness;
+  const hasOriginalFile = !!readiness?.original_available || (asset.asset_files ?? []).some((f) => f.file_level === 'original');
 
   return [
     {
@@ -172,7 +196,7 @@ export default function AssetSlugPage() {
   async function handleBuyLicense() {
     if (!asset || !selectedLicense) return;
 
-    const licenseOption = LICENSE_OPTIONS.find((l) => l.unitProductCode === selectedLicense);
+    const licenseOption = licenseOptions.find((l) => l.unitProductCode === selectedLicense);
     if (!licenseOption) return;
 
     // If not logged in, redirect to sign-in with checkout intent
@@ -231,6 +255,7 @@ export default function AssetSlugPage() {
   const emoji = categoryEmoji[asset?.category || ''] || '🐠';
   const bgColor = 'from-blue-200 via-blue-100 to-slate-100';
 
+  const licenseOptions = asset ? getLicenseOptions(asset) : [];
   const criteria = asset ? getCommercialCriteria(asset) : [];
   const { ok: isReady, blockers } = isCommerciallyReady(criteria);
 
@@ -366,7 +391,7 @@ export default function AssetSlugPage() {
 
                       {/* License selector */}
                       <div className="flex flex-col gap-2">
-                        {LICENSE_OPTIONS.map((opt) => (
+                        {licenseOptions.map((opt) => (
                           <button
                             key={opt.unitProductCode}
                             onClick={() => setSelectedLicense(opt.unitProductCode)}
@@ -406,7 +431,7 @@ export default function AssetSlugPage() {
                       </button>
 
                       {selectedLicense && (() => {
-                        const option = LICENSE_OPTIONS.find((entry) => entry.unitProductCode === selectedLicense);
+                        const option = licenseOptions.find((entry) => entry.unitProductCode === selectedLicense);
                         return option ? (
                           <AddToCartButton
                             item={{

@@ -1,5 +1,6 @@
 import { createServiceClient } from '@/lib/supabase/server';
 import { canonicalPlanCode } from './subscriptionPlanResolution';
+import { isUnitProductAvailableForResolution } from '@/lib/assetOffers';
 
 
 
@@ -47,6 +48,8 @@ export interface CommercialAssetSnapshot {
   license_type: string | null;
   restrictions: string | null;
   is_demo: boolean | null;
+  width_px?: number | null;
+  height_px?: number | null;
   asset_readiness:
     | {
         technical_quality: boolean | null;
@@ -131,7 +134,7 @@ export async function validateAssetLicensePurchase(
   const [{ data: asset }, { data: license }, { data: product }] = await Promise.all([
     client.from('assets').select(`
       id, public_asset_id, title, slug, media_type, review_status, publication_status,
-      commercial_use, license_type, restrictions, is_demo,
+      commercial_use, license_type, restrictions, is_demo, width_px, height_px,
       asset_readiness(technical_quality, rights_verified, original_available, license_ready, publication_ready),
       asset_files(file_level, storage_bucket, storage_path, mime_type)
     `).eq('id', params.assetId).maybeSingle(),
@@ -168,6 +171,10 @@ export async function validateAssetLicensePurchase(
     if (!isValidCurrency(product.currency)) blockers.push('unit product currency is invalid');
     if (product.license_type_code && product.license_type_code !== params.licenseTypeCode) {
       blockers.push('unit product does not match the requested license');
+    }
+    // HD products need an HD-resolution original (WEB-resolution photos are sold as Photo Web only)
+    if (asset && !isUnitProductAvailableForResolution(params.unitProductCode, asset.width_px, asset.height_px)) {
+      blockers.push('this photo is not available in HD resolution');
     }
   }
 

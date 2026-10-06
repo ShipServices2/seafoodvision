@@ -96,7 +96,7 @@ export class CartError extends Error {
 }
 
 function environment(): Environment {
-  return (process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test') as Environment;
+  return (process.env.DODO_PAYMENTS_ENVIRONMENT?.trim() || 'test') as Environment;
 }
 
 function orderNumber(): string {

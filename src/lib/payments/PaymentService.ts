@@ -77,7 +77,7 @@ function generateOrderNumber(): string {
  */
 export async function createOrder(params: CreateOrderParams): Promise<OrderRecord> {
   const supabase = createServiceClient();
-  const environment = process.env.DODO_PAYMENTS_ENVIRONMENT ?? 'test';
+  const environment = (process.env.DODO_PAYMENTS_ENVIRONMENT?.trim() || 'test');
   const metadata = {
     ...(params.metadata ?? {}),
     ...(params.checkoutKey ? { checkout_key: params.checkoutKey } : {}),

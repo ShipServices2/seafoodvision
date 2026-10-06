@@ -60,6 +60,7 @@ export interface AssetRow {
   } | null;
   asset_keywords?: { keywords: { term: string } }[];
   asset_files?: AssetFile[];
+  asset_readiness?: { original_available: boolean | null } | { original_available: boolean | null }[] | null;
 }
 
 export interface AssetFilters {
@@ -321,7 +322,7 @@ export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {
   const { data, error } = await supabase
     .from('assets')
     .select(
-      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`
+      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes), asset_readiness(original_available)`
     )
     .eq('slug', slug)
     // Only return publicly visible assets for the public detail page
