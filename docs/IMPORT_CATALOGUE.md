@@ -64,7 +64,7 @@ Pour tout retraiter malgré l'état déjà enregistré (par exemple après un ch
 Select-String -Path C:\Projects\SeafoodVision\exports\import_journal.jsonl -Pattern '"status":"(error|skip)"'
 ```
 
-Les erreurs réseau passagères sont retentées 4 fois automatiquement ; si une photo reste en erreur, relancer la commande de l'étape 2 suffit.
+Les erreurs réseau passagères sont retentées 6 fois automatiquement (délais 2, 4, 8, 16, 30, 60 s ; IPv4, délai d'attente 60 s ; pause de 2 min après 20 échecs réseau consécutifs, reprise automatique) ; si une photo reste en erreur, relancer la commande de l'étape 2 suffit.
 
 Journal complet : `exports\import_journal.jsonl` (une ligne JSON par photo). Résumé de fin : affiché à la fin de la commande.
 
@@ -73,6 +73,18 @@ Journal complet : `exports\import_journal.jsonl` (une ligne JSON par photo). Ré
 ```powershell
 node scripts\import_prep\import_photos.js --only-file exports\import_trial_50.csv --apply
 node scripts\import_prep\import_photos.js --apply --limit 100        # les 100 premières photos du manifeste
+```
+
+## 6bis. Import par lots (à lancer dans l'ordre)
+
+Les lots sont créés par `node scripts\import_prep\make_batches.js` (rapport : `exports\lot_1_report.txt`).
+Lot 1 = 1 000 photos de produits de la mer (807 HD + 193 WEB) ; lots 2 et 3 = le reste (1 632 + 1 631 photos). Relancer une commande reprend où elle s'était arrêtée.
+
+```powershell
+cd C:\Projects\SeafoodVision
+node scripts\import_prep\import_photos.js --only-file exports\lot_1_mvp.csv --apply --concurrency 3
+node scripts\import_prep\import_photos.js --only-file exports\lot_2_web.csv --apply --concurrency 3
+node scripts\import_prep\import_photos.js --only-file exports\lot_3_web.csv --apply --concurrency 3
 ```
 
 ## Paiements
