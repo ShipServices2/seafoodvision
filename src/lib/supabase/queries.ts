@@ -32,13 +32,15 @@ export async function fetchCatalogStats(): Promise<CatalogStats> {
           .from('assets')
           .select('*', { count: 'exact', head: true })
           .eq('is_demo', false)
-          .in('review_status', publicStatuses),
+          .in('review_status', publicStatuses)
+          .eq('publication_status', 'published'),
         supabase
           .from('assets')
           .select('*', { count: 'exact', head: true })
           .eq('is_demo', false)
           .eq('is_verified', true)
-          .in('review_status', publicStatuses),
+          .in('review_status', publicStatuses)
+          .eq('publication_status', 'published'),
         supabase
           .from('species')
           .select('*', { count: 'exact', head: true })
@@ -52,13 +54,15 @@ export async function fetchCatalogStats(): Promise<CatalogStats> {
           .select('*', { count: 'exact', head: true })
           .eq('is_demo', false)
           .eq('media_type', 'video')
-          .in('review_status', publicStatuses),
+          .in('review_status', publicStatuses)
+          .eq('publication_status', 'published'),
         supabase
           .from('assets')
           .select('*', { count: 'exact', head: true })
           .eq('is_demo', false)
           .eq('media_type', 'photo')
-          .in('review_status', publicStatuses),
+          .in('review_status', publicStatuses)
+          .eq('publication_status', 'published'),
       ]);
 
     return {
@@ -129,7 +133,7 @@ export async function fetchSpeciesAssets(
     .select('*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)')
     .eq('species_id', speciesId)
     .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
-    .neq('publication_status', 'archived')
+    .eq('publication_status', 'published')
     .order('created_at', { ascending: false })
     .limit(limit);
 
@@ -147,6 +151,7 @@ export async function fetchSpeciesMediaCount(speciesId: string): Promise<number>
     .select('*', { count: 'exact', head: true })
     .eq('species_id', speciesId)
     .eq('is_demo', false)
+    .eq('publication_status', 'published')
     .in('review_status', ['approved', 'commercial', 'editorial']);
 
   if (error) return 0;

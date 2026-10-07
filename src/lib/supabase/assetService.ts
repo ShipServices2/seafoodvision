@@ -189,7 +189,7 @@ export async function fetchAssets(
     )
     // Only show publicly visible assets (defense-in-depth alongside RLS)
     .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
-    .neq('publication_status', 'archived');
+    .eq('publication_status', 'published');
 
   // Text search — searches text columns; alias search handled separately below
   if (filters.query) {
@@ -295,7 +295,7 @@ export async function fetchAssets(
           `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`
         )
         .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
-        .neq('publication_status', 'archived')
+        .eq('publication_status', 'published')
         .not('search_aliases', 'is', null)
         .contains('search_aliases', [q])
         .limit(pageSize);
@@ -327,7 +327,7 @@ export async function fetchAssetBySlug(slug: string): Promise<AssetRow | null> {
     .eq('slug', slug)
     // Only return publicly visible assets for the public detail page
     .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
-    .neq('publication_status', 'archived')
+    .eq('publication_status', 'published')
     .maybeSingle();
 
   if (error) {
@@ -348,6 +348,7 @@ export async function fetchSimilarAssets(
     .from('assets')
     .select(`id, slug, title, category, is_verified, is_real_photo, species!fk_assets_species(common_name, scientific_name), asset_files(id, file_level, storage_bucket, storage_path)`)
     .neq('id', currentId)
+    .eq('publication_status', 'published')
     .order('created_at', { ascending: false })
     .limit(limit);
 
