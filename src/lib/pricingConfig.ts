@@ -8,7 +8,7 @@ export type BillingCycle = 'monthly' | 'annual';
 export type PlanId = 'free' | 'explorer' | 'professional' | 'business' | 'enterprise';
 export type LicenseId = 'editorial' | 'commercial' | 'extended' | 'exclusive';
 export type CreditPackId = 'credits_100' | 'credits_250' | 'credits_500' | 'credits_1000';
-export type UnitProductId = 'photo_web' | 'photo_hd' | 'photo_ultrahd' | 'video' | 'view_360' | 'pack_10';
+export type UnitProductId = 'photo_web' | 'photo_hd' | 'photo_hd_extended' | 'photo_ultrahd' | 'video' | 'view_360' | 'pack_10';
 
 // ─── SUBSCRIPTION PLANS ─────────────────────────────────────
 
@@ -183,55 +183,57 @@ export const SUBSCRIPTION_PLANS: SubscriptionPlan[] = [
 // ─── UNIT SALES ──────────────────────────────────────────────
 
 export interface UnitProduct {
-  id: UnitProductId;
+  id: UnitProductId; // = unit_products.product_code
   name: string;
   description: string;
-  price: number;
   currency: string;
   dodoProductId?: string; // Dodo Payments product ID (set via admin/commerce/mappings)
 }
 
+// NO PRICE HERE: prices (price, list_price, promo_ends_at) live in the database table unit_products,
+// which is the single source of truth. Read them with useUnitPrices() (client) or fetch from unit_products (server),
+// and display them with <PriceTag /> (struck-through normal price + end date of the promotion).
 export const UNIT_PRODUCTS: UnitProduct[] = [
   {
     id: 'photo_web',
     name: 'Photo Web',
-    description: 'Web-optimised image (72 dpi, up to 1920px)',
-    price: 5,
+    description: 'Web-optimised image (JPEG, up to 1920px, no watermark)',
     currency: 'EUR',
   },
   {
     id: 'photo_hd',
     name: 'Photo HD',
-    description: 'High-definition image (300 dpi, up to 4K)',
-    price: 20,
+    description: 'High-definition original file (no watermark)',
+    currency: 'EUR',
+  },
+  {
+    id: 'photo_hd_extended',
+    name: 'Photo HD + extended licence',
+    description: 'HD original with extended rights (print runs, broadcast, merchandise)',
     currency: 'EUR',
   },
   {
     id: 'photo_ultrahd',
     name: 'Photo Ultra HD',
     description: 'Ultra HD image (full resolution, up to 8K)',
-    price: 40,
     currency: 'EUR',
   },
   {
     id: 'video',
     name: 'Video',
     description: 'Professional video clip (MP4, up to 4K)',
-    price: 75,
     currency: 'EUR',
   },
   {
     id: 'view_360',
     name: 'Vue 360°',
     description: 'Interactive 360° product view',
-    price: 50,
     currency: 'EUR',
   },
   {
     id: 'pack_10',
-    name: 'Pack 10 images',
-    description: 'Bundle of 10 web-resolution images',
-    price: 150,
+    name: 'Pack 10 Photos HD',
+    description: 'Every 10 standard HD photos in your cart are billed as one pack, automatically',
     currency: 'EUR',
   },
 ];
@@ -298,7 +300,7 @@ export const LICENSE_TYPES: LicenseType[] = [
     name: 'Extended',
     badge: 'extended',
     description: 'Broader rights for large-scale commercial and multi-channel use.',
-    price: 299,
+    price: null, // price of "Photo HD + extended licence": unit_products.photo_hd_extended (database)
     currency: 'EUR',
     rights: [
       'All Commercial rights',

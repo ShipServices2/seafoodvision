@@ -172,7 +172,7 @@ function CartPageContent() {
                         <button aria-label="Increase quantity" disabled={!!busy || cart.locked || item.quantity >= 10} onClick={() => mutate(`/api/cart/items/${item.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ quantity: item.quantity + 1 }) }, item.id)} className="rounded border p-1 disabled:opacity-40"><Plus size={14} /></button>
                       </div>
                     ) : <span className="text-xs text-muted-foreground">Quantity 1</span>}
-                    <div className="text-right"><p className="font-mono text-sm">{item.unitPrice.toFixed(2)} {cart.currency}</p><p className="font-semibold">{item.subtotal.toFixed(2)} {cart.currency}</p></div>
+                    <div className="text-right"><p className="font-mono text-sm">{item.listPrice !== null && <s className="mr-1.5 text-xs text-muted-foreground">{item.listPrice.toFixed(2)}</s>}{item.unitPrice.toFixed(2)} {cart.currency}</p>{item.listPrice !== null && item.promoEndsAt && <p className="text-[11px] text-muted-foreground">Launch price until {new Date(item.promoEndsAt).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })}</p>}<p className="font-semibold">{item.subtotal.toFixed(2)} {cart.currency}</p></div>
                   </div>
                 </article>
               ))}
@@ -180,6 +180,15 @@ function CartPageContent() {
 
             <aside className="h-fit rounded-2xl border bg-card p-5 lg:sticky lg:top-24">
               <div className="mb-4 flex justify-between"><span>{cart.lineCount} line{cart.lineCount === 1 ? '' : 's'}</span><span>{cart.quantityCount} item{cart.quantityCount === 1 ? '' : 's'}</span></div>
+              {cart.discount > 0 && cart.pack && (
+                <>
+                  <div className="mb-2 flex justify-between text-sm text-muted-foreground"><span>Subtotal</span><span>{cart.subtotal.toFixed(2)} {cart.currency}</span></div>
+                  <div className="mb-2 flex justify-between text-sm text-green-700"><span>Pack 10 Photos HD × {cart.pack.packs} ({cart.pack.size} HD photos each at {cart.pack.price.toFixed(2)} {cart.currency})</span><span>−{cart.discount.toFixed(2)} {cart.currency}</span></div>
+                </>
+              )}
+              {cart.pack === null && cart.items.filter((i) => i.productCode === 'photo_hd').length >= 6 && (
+                <p className="mb-2 text-xs text-muted-foreground">Every 10 standard HD photos are billed as one Pack 10 Photos HD, automatically.</p>
+              )}
               <div className="mb-5 flex justify-between border-t pt-4 text-lg font-bold"><span>Total</span><span>{cart.total.toFixed(2)} {cart.currency}</span></div>
               {notice && <p role="status" className="mb-3 flex gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700"><CheckCircle2 size={16} className="shrink-0" />{notice}</p>}
               {error && <p role="alert" className="mb-3 rounded-lg bg-red-50 p-3 text-sm text-red-700">{error}</p>}

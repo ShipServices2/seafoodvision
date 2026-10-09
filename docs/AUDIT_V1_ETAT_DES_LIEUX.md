@@ -381,3 +381,56 @@ Branche `v1/etape-5-especes`. Rien n'est supprimé : on masque (`species.is_publ
 - 32 espèces sans fiche masquées (`is_public = false`) : rien n'est supprimé, leurs photos restent publiées et en vente. Au total 24 espèces visibles, 37 masquées.
 - Fiches prioritaires à rédiger plus tard : `litopenaeus-vannamei`, `gadus-morhua`, `coryphaena-hippurus`, `merluccius-spp`.
 - Aucune migration ; Dodo reste en TEST.
+
+## Étape 6 — Commerce (9 oct. 2026)
+
+Procédures (fichiers web, tunnel cloudflared, achats test) : `docs/ETAPE_6_COMMERCE.md`. Dodo reste en **TEST**.
+
+### Comptages exacts (l'API REST plafonne une réponse à 1000 lignes)
+- 1215 assets, **1061 publiés** ; 1189 originaux, 1189 aperçus, 1185 miniatures. Les chiffres 332 + 398 + 270 = 1000 étaient tronqués.
+- Aucun asset publié sans original ni sans aperçu. Les 4 assets sans miniature (SV-IMP-0127, 0133, 0139, 0141) sont en `draft` : rien à régénérer.
+- 216 publiés ont un grand côté ≤ 1920 px (leur fichier web est l'original nettoyé), 845 sont plus grands.
+
+### Faille corrigée : une Photo Web livrait l'original HD
+- `/api/downloads/[entitlementId]` choisissait le fichier parmi `original|hd|full` sans lire `allowed_resolution`. Désormais : `web` → fichier `web` ; `hd` / `ultrahd` / extended → `original` ; valeur absente ou inconnue → `web`. Si le fichier web manque, la route répond 404 `WEB_FILE_NOT_AVAILABLE` : **pas de repli sur l'original**, aucun quota consommé.
+- URL signée : **300 s** par défaut (`DOWNLOAD_SIGNED_URL_DURATION`, plafonné à 3600), servie en pièce jointe sous le nom `<ID public>-web.jpg` / `-hd.jpg`.
+- Tests : sur l'ancienne route, 4 des tests de téléchargement échouent ; sur la nouvelle, tous passent.
+
+### Migrations appliquées (`supabase db push`, liste vérifiée à blanc : exactement ces trois)
+1. `20261009100000` : `unit_products.list_price` et `promo_ends_at` (+ contrainte `list_price >= price`) ; prix normaux 15 / 39 / 299 / 290 (web, HD, HD + extended, pack), fin de promotion 2027-01-31.
+2. `20261009110000` : niveau de fichier `web` ; les policies de lecture publique et authentifiée de `asset_files` passent de `file_level != 'original'` à la liste blanche `preview`, `thumbnail` (sinon le chemin du fichier web aurait été lisible). Vérifié avec la clé anon : 1061 aperçus, 1061 miniatures, 0 original, 0 fichier web ; l'URL publique et le téléchargement anonyme du fichier web sont refusés.
+3. `20261009120000` : `pack_10` devient « Pack 10 Photos HD » (résolution `hd`, `pack_size` 10, quota 1 par photo).
+- **Migration 4 (reportée à la V2, abonnements)** : `DROP` de la contrainte `payment_product_mappings_internal_product_type_internal_pro_key`. Non appliquée.
+
+### Fichiers web (Photo Web)
+- 1920 px max, JPEG q85, sans filigrane, GPS et numéros de série retirés, copyright IPTC/XMP conservé ou ajouté ; bucket privé `asset-originals`, chemin `web/<sha[0:2]>/<sha>.jpg`. Original déjà ≤ 1920 px et JPEG : l'original nettoyé, sans recompression.
+- Scripts dans `C:\Projects\SeafoodVision\scripts\import_prep\` (hors de ce dépôt) : `generate_web_files.js` (idempotent, concurrence 3, reprise réseau) et génération intégrée à `import_photos.js` pour les lots 2 et 3.
+- Fait en essai réel : 2 fichiers (SV-IMP, 1440 × 1920) ; les 1059 autres publiés restent à générer par l'utilisateur.
+
+### Pack 10 Photos HD (remise automatique)
+- Seules les Photo HD standard comptent. Par bloc de 10 : un produit Dodo « Pack 10 Photos HD » (150 €), le reste à l'unité (12 HD = 1 pack + 2 × 20 € = 190 €). Chaque photo reste une ligne de commande : le webhook crée donc une licence et un droit de téléchargement par photo.
+- `orders.discount_amount` et `total_amount` sont recalculés à chaque modification du panier ; au paiement, le panier Dodo est construit avec le pack et une garde refuse le paiement si le total Dodo diffère du total en base. `pack_10` ne peut pas être ajouté comme ligne (« pack products are applied automatically at checkout »).
+
+### Licence PDF
+- `GET /api/licenses/[licenseId]/pdf` (pdf-lib 1.17.1) : numéro `SVL-<année>-<12 hex>` dérivé de l'identifiant de licence, numéro de commande, acheteur, ID public de la photo, type de licence, résolution livrée, date, conditions (`license_types`), concédant. Générée à la première demande (pas dans le webhook), stockée dans le bucket privé `license-documents`, réutilisée ensuite ; bouton sur `/account/licenses`.
+- Concédant : constante `LICENSOR_NAME` (`src/lib/licensing/config.ts`, « SeafoodVision » par défaut, surchargeable par la variable `LICENSOR_NAME`). **À remplacer par la société avant la mise en ligne.**
+- Le bucket `license-documents` est créé au premier usage par le code (service role, privé, PDF uniquement, 2 Mo) et non par une migration. À formaliser en migration si l'on veut tout versionner.
+- Mise en page non vérifiée à l'œil (pas de rendu PDF disponible dans l'environnement de travail) ; structure et contenu testés.
+
+### Prix : la base est la source de vérité
+- `pricingConfig.ts` ne contient plus aucun prix d'unité ; `/pricing`, la fiche photo, la carte espèce et le panier lisent `unit_products` et affichent prix barré + « Launch price until 31 Jan 2027 ». L'extended (299 = 299) n'est pas barré. Prix de l'extended retiré de `LICENSE_TYPES` (null).
+- **Après le 31/01/2027, il faudra changer les prix à la main dans la base ET dans Dodo** : l'affichage de la promotion s'arrête seul, mais les produits Dodo ont un prix fixe (5 / 20 / 150 €…) et `unit_products.price` est ce que le panier facture. Rien ne bloque la vente à l'ancien prix.
+
+### Dodo TEST : produits et mappings
+- Créé : « Photo HD + licence étendue » (299 €, paiement unique, taxe incluse). Renommé : « Pack 10 images » → « Pack 10 Photos HD » (150 €) et passé en **taxe incluse**, comme Photo HD, pour que le total affiché soit le total payé.
+- Mappings `one_time_asset_license` (environnement test) : `photo_hd_extended` et `pack_10` ajoutés.
+- **Erreur de mapping corrigée** : les ids de **Photo Web** et **Photo Ultra HD** en base avaient des I majuscules à la place de l minuscules (`…cviI5DWtIC` au lieu de `…cvil5DWtlC`, `…wTCalm9m` au lieu de `…wTCaIm9m`) : ils n'existaient pas dans Dodo et un achat de Photo Web aurait échoué. Remplacés par les ids lus dans l'API Dodo. Les 5 mappings photo, les 4 packs de crédits et les 3 abonnements mensuels ont été comparés un à un aux produits Dodo : tous exacts.
+- Les anciennes migrations (`20260719120000`, `20260721160000`, `20260721180000`) et `docs/sprint-1-5-dodo-test-mappings-report.md` portent toujours les ids erronés : sans effet sur la base actuelle, mais à corriger avant de rejouer l'historique sur une base neuve.
+- Mappings des crédits et des abonnements : non touchés.
+
+### Webhook
+- Signature Standard Webhooks vérifiée (valide : 200 et traitement ; signature invalide, corps modifié, en-tête manquant, horodatage périmé : 401 sans rien enregistrer ; secret absent : 503 ; doublon : acquitté sans second traitement ; échec de traitement : 500 pour que Dodo réessaie). `DODO_PAYMENTS_WEBHOOK_SECRET` est vide dans `.env.local` : à saisir (procédure dans `docs/ETAPE_6_COMMERCE.md`).
+
+### Résultats
+- `type-check` : OK. `lint` : 0 erreur, 289 avertissements (inchangé). `test` : **17 suites, 353 tests OK** (+5 suites, +66 tests : webhook, accès aux téléchargements, pack, prix, licence PDF). `build` : OK. Redémarrage propre sur le port 4028 (arrêt, suppression de `.next`, `npm run dev`).
+- Les 31 commandes existantes (13 draft, 10 pending, 8 cancelled) n'ont pas été touchées.

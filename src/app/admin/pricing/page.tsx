@@ -8,6 +8,7 @@ import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { useEffect } from 'react';
 import { Settings, DollarSign, CreditCard, Package, Shield, Save, RotateCcw, CircleCheck as CheckCircle2 } from 'lucide-react';
+import { useUnitPrices } from '@/lib/useUnitPrices';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, LICENSE_TYPES, type SubscriptionPlan, type UnitProduct, type CreditPack, type LicenseType,  } from '@/lib/pricingConfig';
 import Icon from '@/components/ui/AppIcon';
 
@@ -61,9 +62,15 @@ export default function AdminPricingPage() {
     }))
   );
 
-  const [units, setUnits] = useState<EditableUnit[]>(
-    UNIT_PRODUCTS.map((u) => ({ id: u.id, name: u.name, price: u.price }))
-  );
+  // Unit prices are read from the database (unit_products), the single source of truth.
+  const unitPrices = useUnitPrices();
+  const unitsFromDb = (): EditableUnit[] =>
+    UNIT_PRODUCTS.map((u) => ({ id: u.id, name: u.name, price: unitPrices?.[u.id]?.price ?? 0 }));
+  const [units, setUnits] = useState<EditableUnit[]>(unitsFromDb);
+  useEffect(() => {
+    if (unitPrices) setUnits(unitsFromDb());
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [unitPrices]);
 
   const [credits, setCredits] = useState<EditableCreditPack[]>(
     CREDIT_PACKS.map((c) => ({ id: c.id, credits: c.credits, price: c.price }))
@@ -95,7 +102,7 @@ export default function AdminPricingPage() {
       id: p.id, name: p.name, monthlyPrice: p.monthlyPrice,
       annualPrice: p.annualPrice, downloads: p.downloads,
     })));
-    setUnits(UNIT_PRODUCTS.map((u) => ({ id: u.id, name: u.name, price: u.price })));
+    setUnits(unitsFromDb());
     setCredits(CREDIT_PACKS.map((c) => ({ id: c.id, credits: c.credits, price: c.price })));
     setLicenses(LICENSE_TYPES.map((l) => ({ id: l.id, name: l.name, price: l.price, description: l.description })));
   };

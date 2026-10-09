@@ -6,12 +6,15 @@ import { useRouter } from 'next/navigation';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { CircleCheck as CheckCircle2, Circle as XCircle, ArrowRight, Zap, ChartBar as BarChart2, Circle as HelpCircle, GitCompare, CreditCard, Package } from 'lucide-react';
+import PriceTag from '@/components/PriceTag';
+import { useUnitPrices } from '@/lib/useUnitPrices';
 import { SUBSCRIPTION_PLANS, UNIT_PRODUCTS, CREDIT_PACKS, annualSavings, type BillingCycle } from '@/lib/pricingConfig';
 import { useAuth } from '@/contexts/AuthContext';
 import { isV1HiddenOfferText, isV1HiddenUnitProduct, isV1ScopeEnabled } from '@/lib/v1Scope';
 
 
 export default function PricingPage() {
+  const unitPrices = useUnitPrices();
   const [billing, setBilling] = useState<BillingCycle>('monthly');
   const [purchasingPack, setPurchasingPack] = useState<string | null>(null);
   const [purchaseError, setPurchaseError] = useState<string | null>(null);
@@ -206,7 +209,9 @@ export default function PricingPage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
             {UNIT_PRODUCTS.filter((product) => !isV1HiddenUnitProduct(product.id)).map((product) => (
               <div key={product.id} className="bg-card border border-border rounded-xl p-4 text-center hover:border-secondary/40 hover:shadow-sm transition-all duration-150">
-                <div className="text-xl font-extrabold text-foreground font-mono-data mb-1">{product.price}€</div>
+                <div className="text-xl font-extrabold text-foreground font-mono-data mb-1 flex justify-center">
+                  <PriceTag unit={unitPrices?.[product.id]} showEnd className="!items-center" />
+                </div>
                 <div className="text-sm font-semibold text-foreground mb-1">{product.name}</div>
                 <div className="text-xs text-muted-foreground leading-tight">{product.description}</div>
                 <Link href="/library?licenseType=commercial" className="mt-3 inline-flex text-xs font-semibold text-secondary hover:underline">Select an asset →</Link>

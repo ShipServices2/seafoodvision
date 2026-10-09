@@ -3,6 +3,13 @@ import { DodoPaymentsProvider } from './dodo/DodoPaymentsProvider';
 import { getDodoCancelUrl, getDodoReturnUrl } from './dodo/config';
 import { updateOrderCheckoutRef } from './PaymentService';
 import {
+  buildDodoProductCart,
+  computePackPricing,
+  productCartTotal,
+  type PackOffer,
+  type PackPricing,
+} from './packPricing';
+import {
   assertCommercialValidation,
   validateAssetLicensePurchase,
   validateCreditPackPurchase,
@@ -45,6 +52,9 @@ export interface CartLine {
   licenseName: string | null;
   format: string | null;
   credits: number | null;
+  /** Normal price while a launch promotion runs (shown struck through), else null. */
+  listPrice: number | null;
+  promoEndsAt: string | null;
   validationError: string | null;
 }
 
@@ -56,6 +66,9 @@ export interface CartSnapshot {
   total: number;
   lineCount: number;
   quantityCount: number;
+  /** Pack 10 Photos HD discount already taken off `subtotal` (0 when no complete block of 10 HD photos). */
+  discount: number;
+  pack: (PackPricing & { size: number; price: number }) | null;
   locked: boolean;
   checkoutUrl?: string;
   items: CartLine[];
@@ -142,6 +155,8 @@ function emptyCart(): CartSnapshot {
     total: 0,
     lineCount: 0,
     quantityCount: 0,
+    discount: 0,
+    pack: null,
     locked: false,
     items: [],
   };
@@ -168,6 +183,8 @@ function mapCart(order: Record<string, any> | null): CartSnapshot {
         licenseName: metadata.licenseName ? String(metadata.licenseName) : null,
         format: metadata.format ? String(metadata.format) : null,
         credits: metadata.credits ? Number(metadata.credits) : null,
+        listPrice: metadata.listPrice ? Number(metadata.listPrice) : null,
+        promoEndsAt: metadata.promoEndsAt ? String(metadata.promoEndsAt) : null,
         validationError: metadata.validationError ? String(metadata.validationError) : null,
       };
     })
@@ -181,6 +198,8 @@ function mapCart(order: Record<string, any> | null): CartSnapshot {
     total: Number(order.total_amount ?? 0),
     lineCount: items.length,
     quantityCount: items.reduce((sum, item) => sum + item.quantity, 0),
+    discount: Number(order.discount_amount ?? 0),
+    pack: (orderMetadata.pack_pricing as CartSnapshot['pack']) ?? null,
     locked: order.status !== 'draft',
     checkoutUrl: typeof orderMetadata.checkout_url === 'string' ? orderMetadata.checkout_url : undefined,
     items,
@@ -250,7 +269,7 @@ async function resolveRequest(request: CartItemRequest, client = createServiceCl
     const normalized = validation.normalized_product as {
       asset: { id: string; title?: string };
       license: { id: string; name: string; code: string };
-      product: { id: string; name: string; product_code: string; resolution_allowed?: string };
+      product: { id: string; name: string; product_code: string; resolution_allowed?: string; list_price?: number | string | null; promo_ends_at?: string | null };
     };
     return {
       itemType: 'asset_license',
@@ -268,6 +287,10 @@ async function resolveRequest(request: CartItemRequest, client = createServiceCl
         licenseName: normalized.license.name,
         licenseTypeCode: normalized.license.code,
         format: normalized.product.resolution_allowed ?? normalized.product.product_code,
+        listPrice: normalized.product.list_price != null && Number(normalized.product.list_price) > validation.authoritative_price
+          && normalized.product.promo_ends_at && new Date(normalized.product.promo_ends_at) >= new Date()
+          ? Number(normalized.product.list_price) : null,
+        promoEndsAt: normalized.product.promo_ends_at ?? null,
       },
     };
   }
@@ -296,15 +319,57 @@ async function resolveRequest(request: CartItemRequest, client = createServiceCl
   };
 }
 
+/** The active "Pack 10 Photos HD" offer (price, block size, Dodo product), or null when it is not configured for this environment. */
+export async function loadPackOffer(client = createServiceClient()): Promise<PackOffer | null> {
+  const { data: product } = await client
+    .from('unit_products')
+    .select('id, price, pack_size, is_active')
+    .eq('product_code', 'pack_10')
+    .maybeSingle();
+  if (!product?.is_active || !product.pack_size || !(Number(product.price) > 0)) return null;
+  const { data: mapping } = await client
+    .from('payment_product_mappings')
+    .select('dodo_product_id')
+    .eq('internal_product_type', 'one_time_asset_license')
+    .eq('internal_product_id', product.id)
+    .eq('environment', environment())
+    .eq('is_active', true)
+    .is('billing_cycle', null)
+    .maybeSingle();
+  if (!mapping?.dodo_product_id) return null;
+  return {
+    productId: String(product.id),
+    size: Number(product.pack_size),
+    price: Number(product.price),
+    dodoProductId: String(mapping.dodo_product_id),
+  };
+}
+
 async function recalculate(orderId: string, client = createServiceClient()): Promise<void> {
-  const { data: items, error } = await client.from('order_items').select('quantity, unit_price').eq('order_id', orderId);
+  const { data: items, error } = await client.from('order_items').select('quantity, unit_price, metadata').eq('order_id', orderId);
   if (error) throw new CartError('cart_recalculate_failed', `Unable to recalculate cart: ${error.message}`, 500);
   const subtotal = Math.round((items ?? []).reduce(
     (sum, item) => sum + Number(item.unit_price) * Number(item.quantity), 0
   ) * 100) / 100;
+  const offer = await loadPackOffer(client);
+  const pricing = computePackPricing(
+    (items ?? []).map((item) => ({
+      productCode: String(((item.metadata ?? {}) as Record<string, unknown>).productCode ?? ''),
+      unitPrice: Number(item.unit_price),
+      quantity: Number(item.quantity),
+    })),
+    offer
+  );
+  const total = Math.round((subtotal - pricing.discount) * 100) / 100;
+  const { data: current } = await client.from('orders').select('metadata').eq('id', orderId).maybeSingle();
+  const metadata = { ...((current?.metadata ?? {}) as Record<string, unknown>) };
+  if (offer && pricing.packs > 0) metadata.pack_pricing = { ...pricing, size: offer.size, price: offer.price };
+  else delete metadata.pack_pricing;
   const { error: updateError } = await client.from('orders').update({
     subtotal,
-    total_amount: subtotal,
+    discount_amount: pricing.discount,
+    total_amount: total,
+    metadata,
     updated_at: new Date().toISOString(),
   }).eq('id', orderId).eq('status', 'draft');
   if (updateError) throw new CartError('cart_recalculate_failed', `Unable to update cart total: ${updateError.message}`, 500);
@@ -498,12 +563,28 @@ export async function initiateCartCheckout(params: { userId: string; userEmail: 
   let providerSessionCreated = false;
   try {
     const refreshed = await findActiveCart(params.userId, client);
-    const productCart = ((refreshed?.order_items ?? []) as Array<Record<string, any>>).map((item) => {
+    const orderItems = ((refreshed?.order_items ?? []) as Array<Record<string, any>>).map((item) => {
       const itemMetadata = (item.metadata ?? {}) as Record<string, unknown>;
       const productId = String(itemMetadata.dodoProductId ?? '');
       if (!productId) throw new CartError('mapping_missing', `Dodo mapping is missing for cart line ${item.id}`, 409);
-      return { productId, quantity: Number(item.quantity) };
+      return {
+        dodoProductId: productId,
+        productCode: String(itemMetadata.productCode ?? ''),
+        unitPrice: Number(item.unit_price),
+        quantity: Number(item.quantity),
+      };
     });
+    // Complete blocks of 10 standard HD photos are billed as Dodo "Pack 10 Photos HD" products, the rest per photo.
+    const packOffer = await loadPackOffer(client);
+    const productCart = buildDodoProductCart(orderItems, packOffer);
+    // Guard: what Dodo will charge must equal the order total stored in the database.
+    const dodoPrices = new Map<string, number>();
+    for (const item of orderItems) dodoPrices.set(item.dodoProductId, item.unitPrice);
+    if (packOffer) dodoPrices.set(packOffer.dodoProductId, packOffer.price);
+    const expected = productCartTotal(productCart, dodoPrices);
+    if (!Number.isFinite(expected) || Math.abs(expected - Number(refreshed?.total_amount ?? 0)) > 0.005) {
+      throw new CartError('cart_total_mismatch', 'Cart total does not match the payment provider cart. Please review your cart.', 409);
+    }
     const result = await provider.createCheckout({
       orderId: String(order.id),
       userId: params.userId,

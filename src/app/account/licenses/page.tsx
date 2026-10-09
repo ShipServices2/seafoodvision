@@ -7,7 +7,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import { createClient } from '@/lib/supabase/client';
-import { FileText, CircleCheck as CheckCircle2, Circle as XCircle, Clock } from 'lucide-react';
+import { FileText, CircleCheck as CheckCircle2, Circle as XCircle, Clock, Download } from 'lucide-react';
 
 interface PurchasedLicense {
   id: string;
@@ -37,6 +37,8 @@ export default function AccountLicensesPage() {
   const router = useRouter();
   const [licenses, setLicenses] = useState<PurchasedLicense[]>([]);
   const [fetching, setFetching] = useState(true);
+  const [pdfBusy, setPdfBusy] = useState<string | null>(null);
+  const [pdfError, setPdfError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!loading && !user) router.replace('/auth?next=/account/licenses');
@@ -55,6 +57,33 @@ export default function AccountLicensesPage() {
         setFetching(false);
       });
   }, [user]);
+
+  // The certificate is generated on the first request, then stored privately and reused.
+  const downloadCertificate = async (licenseId: string) => {
+    setPdfBusy(licenseId);
+    setPdfError(null);
+    try {
+      const res = await fetch(`/api/licenses/${licenseId}/pdf`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setPdfError(body.error ?? 'Unable to generate the licence certificate');
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = /filename="([^"]+)"/.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? 'SeafoodVision-licence.pdf';
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch {
+      setPdfError('Network error while generating the licence certificate');
+    } finally {
+      setPdfBusy(null);
+    }
+  };
 
   if (loading) return null;
 
@@ -79,6 +108,7 @@ export default function AccountLicensesPage() {
           </div>
         </div>
 
+        {pdfError && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">{pdfError}</p>}
         {fetching ? (
           <div className="flex justify-center py-20">
             <div className="w-8 h-8 border-2 border-border border-t-secondary rounded-full animate-spin" />
@@ -114,6 +144,16 @@ export default function AccountLicensesPage() {
                         Purchased {new Date(lic.purchased_at).toLocaleDateString()}
                       </p>
                     </div>
+                    {lic.status === 'active' && (
+                      <button
+                        onClick={() => downloadCertificate(lic.id)}
+                        disabled={pdfBusy === lic.id}
+                        className="shrink-0 inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-muted disabled:opacity-50"
+                      >
+                        <Download className="w-3.5 h-3.5" />
+                        {pdfBusy === lic.id ? 'Preparing…' : 'Licence PDF'}
+                      </button>
+                    )}
                   </div>
                 </div>
               );

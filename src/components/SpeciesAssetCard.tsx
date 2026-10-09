@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { ImageOff } from 'lucide-react';
 import type { Asset } from '@/lib/supabase/types';
 import { getSignedStorageUrl } from '@/lib/supabase/assetService';
+import PriceTag from '@/components/PriceTag';
+import type { UnitPrice } from '@/lib/unitPrices';
 
 interface SpeciesAssetCardProps {
   asset: Asset;
@@ -14,11 +16,11 @@ interface SpeciesAssetCardProps {
   // Legacy — kept for backward compat
   thumbnailUrl?: string | null;
   emoji: string;
-  /** Starting price (Photo Web) in EUR */
-  price?: number;
+  /** Starting price (Photo Web) from the database, shown with its struck-through normal price while the promotion runs */
+  priceUnit?: UnitPrice | null;
 }
 
-export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath, emoji, price }: SpeciesAssetCardProps) {
+export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath, emoji, priceUnit }: SpeciesAssetCardProps) {
   const [imgError, setImgError] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
 
@@ -60,7 +62,11 @@ export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath
       <div className="p-2">
         <p className="text-xs font-semibold text-foreground line-clamp-1">{asset.title}</p>
         <p className="text-xs text-muted-foreground mt-0.5">{asset.product_form || asset.category}</p>
-        {price !== undefined && <p className="text-xs font-semibold text-secondary mt-1">From {price}€</p>}
+        {priceUnit && (
+          <p className="text-xs font-semibold text-secondary mt-1 flex items-baseline gap-1">
+            From <PriceTag unit={priceUnit} className="!inline-flex" />
+          </p>
+        )}
       </div>
     </Link>
   );

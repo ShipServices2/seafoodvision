@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, createServiceClient } from '@/lib/supabase/server';
+import { deliveredFileLevel, downloadSignedUrlDuration } from '@/lib/downloads/fileSelection';
 
-const SIGNED_URL_DURATION = parseInt(process.env.DOWNLOAD_SIGNED_URL_DURATION ?? '3600', 10);
+const SIGNED_URL_DURATION = downloadSignedUrlDuration();
 
 export async function GET(
   request: NextRequest,
@@ -103,16 +104,17 @@ export async function GET(
     }
   }
 
-  // 8. Find original HD file in storage
-  const resolution = entitlement.allowed_resolution ?? entitlement.resolution_allowed ?? 'hd';
+  // 8. Find the file this entitlement is allowed to receive.
+  // Photo Web -> the 1920 px 'web' file; HD -> the original. A web buyer never gets the original, even when the web file is missing.
+  const resolution = entitlement.allowed_resolution ?? entitlement.resolution_allowed ?? 'web';
+  const fileLevel = deliveredFileLevel(resolution);
   const { data: assetFile } = await supabase
     .from('asset_files')
     .select('storage_bucket, storage_path, file_level, mime_type')
     .eq('asset_id', entitlement.asset_id)
-    .in('file_level', ['original', 'hd', 'full'])
-    .order('file_level', { ascending: true })
+    .eq('file_level', fileLevel)
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (!assetFile) {
     await logDownloadEvent(supabase, {
@@ -122,11 +124,13 @@ export async function GET(
       ip,
       userAgent,
       resolution,
-      result: 'rejected:original_not_available',
+      result: fileLevel === 'web' ? 'rejected:web_file_not_available' : 'rejected:original_not_available',
       duration: SIGNED_URL_DURATION,
     });
     return NextResponse.json(
-      { error: 'Original not yet available', code: 'ORIGINAL_NOT_AVAILABLE' },
+      fileLevel === 'web'
+        ? { error: 'Web file not yet available', code: 'WEB_FILE_NOT_AVAILABLE' }
+        : { error: 'Original not yet available', code: 'ORIGINAL_NOT_AVAILABLE' },
       { status: 404 }
     );
   }
@@ -151,10 +155,13 @@ export async function GET(
     );
   }
 
-  // 10. Generate signed URL
+  // 10. Generate a short-lived signed URL (default 300 s), served as an attachment named after the public photo id
+  const { data: assetRow } = await supabase.from('assets').select('public_asset_id').eq('id', entitlement.asset_id).maybeSingle();
+  const extension = assetFile.storage_path.split('.').pop() ?? 'jpg';
+  const downloadName = `${assetRow?.public_asset_id ?? 'seafoodvision'}-${fileLevel === 'web' ? 'web' : 'hd'}.${extension}`;
   const { data: signedData, error: signedError } = await supabase.storage
     .from(assetFile.storage_bucket)
-    .createSignedUrl(assetFile.storage_path, SIGNED_URL_DURATION);
+    .createSignedUrl(assetFile.storage_path, SIGNED_URL_DURATION, { download: downloadName });
 
   if (signedError || !signedData?.signedUrl) {
     // Release the reserved quota when URL generation fails.
@@ -195,7 +202,8 @@ export async function GET(
   return NextResponse.json({
     signedUrl: signedData.signedUrl,
     expiresIn: SIGNED_URL_DURATION,
-    fileName: assetFile.storage_path.split('/').pop(),
+    fileName: downloadName,
+    fileLevel,
     mimeType: assetFile.mime_type,
     downloadsRemaining: maxDownloads - downloadsUsed - 1,
   });

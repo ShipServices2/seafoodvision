@@ -22,7 +22,7 @@ import {
 } from '@/lib/supabase/encyclopediaQueries';
 import { fetchSpeciesAssets } from '@/lib/supabase/queries';
 import { getAssetThumbnailFile, getAssetPreviewFile, getSignedStorageUrl } from '@/lib/supabase/assetService';
-import { UNIT_PRODUCTS } from '@/lib/pricingConfig';
+import { useUnitPrices } from '@/lib/useUnitPrices';
 import type { Asset } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
@@ -30,7 +30,6 @@ import Footer from '@/components/Footer';
 import SpeciesAssetCard from '@/components/SpeciesAssetCard';
 import { isV1HiddenPath } from '@/lib/v1Scope';
 
-const webPhotoPrice = UNIT_PRODUCTS.find((p) => p.id === 'photo_web')?.price;
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://seafoodvis1067.builtwithrocket.new';
 
@@ -159,6 +158,7 @@ function TagList({ items, color = 'bg-muted text-muted-foreground' }: { items: s
 }
 
 export default function SpeciesDetailClient() {
+  const webPhotoUnit = useUnitPrices()?.photo_web;
   const params = useParams();
   const slug = params?.slug as string;
 
@@ -352,7 +352,7 @@ export default function SpeciesDetailClient() {
                           thumbnailBucket={thumbFile?.storage_bucket || null}
                           thumbnailPath={thumbFile?.storage_path || null}
                           emoji={emoji}
-                          price={webPhotoPrice}
+                          priceUnit={webPhotoUnit}
                         />
                       );
                     })}
@@ -704,7 +704,7 @@ export default function SpeciesDetailClient() {
                           thumbnailBucket={thumbFile?.storage_bucket || null}
                           thumbnailPath={thumbFile?.storage_path || null}
                           emoji={emoji}
-                          price={webPhotoPrice}
+                          priceUnit={webPhotoUnit}
                         />
                       );
                     })}

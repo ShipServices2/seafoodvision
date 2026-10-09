@@ -11,7 +11,7 @@ export type AssetMediaType = 'photo' | 'video' | 'document' | 'illustration';
 export type AssetReviewStatus =
   | 'draft' |'imported' |'under_review' |'approved' |'preview_only' |'editorial' |'commercial' |'restricted' |'rejected' |'archived';
 
-export type FileLevel = 'original' | 'preview' | 'thumbnail';
+export type FileLevel = 'original' | 'web' | 'preview' | 'thumbnail';
 
 export type LicenseType = 'web' | 'editorial' | 'commercial' | 'extended' | 'enterprise';
 

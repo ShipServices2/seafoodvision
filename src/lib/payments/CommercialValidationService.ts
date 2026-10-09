@@ -169,6 +169,8 @@ export async function validateAssetLicensePurchase(
     if (!product.is_active) blockers.push('unit product is inactive');
     if (!isValidMoney(product.price)) blockers.push('unit product price is invalid');
     if (!isValidCurrency(product.currency)) blockers.push('unit product currency is invalid');
+    // Packs are never sold as a line: the discount is applied automatically per block of pack_size Photo HD in the cart.
+    if (product.pack_size) blockers.push('pack products are applied automatically at checkout');
     if (product.license_type_code && product.license_type_code !== params.licenseTypeCode) {
       blockers.push('unit product does not match the requested license');
     }

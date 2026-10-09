@@ -5,7 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 export interface AssetFile {
   id: string;
   asset_id: string;
-  file_level: 'original' | 'preview' | 'thumbnail';
+  file_level: 'original' | 'web' | 'preview' | 'thumbnail';
   storage_bucket: string;
   storage_path: string;
   mime_type: string | null;

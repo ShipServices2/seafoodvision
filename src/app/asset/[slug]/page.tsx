@@ -16,7 +16,9 @@ import CollectionModal from '@/app/asset-detail/components/CollectionModal';
 import { useAuth } from '@/contexts/AuthContext';
 import AddToCartButton from '@/components/AddToCartButton';
 import { isV1HiddenUnitProduct } from '@/lib/v1Scope';
-import { UNIT_PRODUCTS, LICENSE_TYPES } from '@/lib/pricingConfig';
+import PriceTag from '@/components/PriceTag';
+import { useUnitPrices } from '@/lib/useUnitPrices';
+import { formatEur } from '@/lib/unitPrices';
 import { isHdResolution } from '@/lib/assetOffers';
 
 function formatFileSize(bytes: number | null): string {
@@ -32,18 +34,14 @@ function formatDimensions(w: number | null, h: number | null): string {
 }
 
 // License options shown when asset is commercially available.
-// Prices come from pricingConfig (launch prices). WEB-resolution photos are sold as "Photo Web" only;
-// HD photos (>= 4 MP) add "Photo HD" and the extended licence.
-const eur = (amount: number | undefined) => `${amount ?? 0}€`;
-const unitPrice = (id: string) => UNIT_PRODUCTS.find((p) => p.id === id)?.price;
-const extendedLicensePrice = LICENSE_TYPES.find((l) => l.id === 'extended')?.price ?? undefined;
+// Prices are read from the database (unit_products) at render time, see useUnitPrices() / <PriceTag />.
+// WEB-resolution photos are sold as "Photo Web" only; HD photos (>= 4 MP) add "Photo HD" and "Photo HD + extended licence".
 
 interface LicenseOption {
   code: string;
   name: string;
   unitProductCode: string;
   description: string;
-  price: string;
 }
 
 const ALL_LICENSE_OPTIONS: (LicenseOption & { hdOnly: boolean })[] = [
@@ -52,7 +50,6 @@ const ALL_LICENSE_OPTIONS: (LicenseOption & { hdOnly: boolean })[] = [
     name: 'Photo Web',
     unitProductCode: 'photo_web',
     description: 'Web-optimised (72 dpi, up to 1920px)',
-    price: eur(unitPrice('photo_web')),
     hdOnly: false,
   },
   {
@@ -60,15 +57,13 @@ const ALL_LICENSE_OPTIONS: (LicenseOption & { hdOnly: boolean })[] = [
     name: 'Photo HD',
     unitProductCode: 'photo_hd',
     description: 'High-definition (300 dpi, up to 4K)',
-    price: eur(unitPrice('photo_hd')),
     hdOnly: true,
   },
   {
     code: 'extended',
-    name: 'Photo HD — Extended licence',
+    name: 'Photo HD + extended licence',
     unitProductCode: 'photo_hd_extended',
     description: 'HD file with extended rights (print runs, broadcast, merchandise)',
-    price: eur(extendedLicensePrice),
     hdOnly: true,
   },
 ];
@@ -158,6 +153,7 @@ function isCommerciallyReady(criteria: CommercialCriterion[]): { ok: boolean; bl
 }
 
 export default function AssetSlugPage() {
+  const unitPrices = useUnitPrices();
   const params = useParams();
   const router = useRouter();
   const slug = params?.slug as string;
@@ -402,12 +398,18 @@ export default function AssetSlugPage() {
                           >
                             <div className="flex items-center justify-between mb-0.5">
                               <span className="text-sm font-semibold text-foreground">{opt.name}</span>
-                              <span className="text-sm font-bold text-secondary font-mono-data">{opt.price}</span>
+                              <PriceTag unit={unitPrices?.[opt.unitProductCode]} showEnd className="text-sm font-bold text-secondary font-mono-data" />
                             </div>
                             <p className="text-xs text-muted-foreground leading-relaxed">{opt.description}</p>
                           </button>
                         ))}
                       </div>
+
+                      {licenseOptions.some((o) => o.unitProductCode === 'photo_hd') && unitPrices?.pack_10 && (
+                        <p className="text-xs text-muted-foreground">
+                          10 HD photos in your cart = <strong>Pack 10 Photos HD at {formatEur(unitPrices.pack_10.price)}</strong>, applied automatically.
+                        </p>
+                      )}
 
                       <button
                         onClick={handleBuyLicense}

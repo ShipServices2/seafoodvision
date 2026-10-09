@@ -58,6 +58,8 @@ export default function AccountDownloadsPage() {
       if (!res.ok) {
         if (data.code === 'ORIGINAL_NOT_AVAILABLE') {
           setError('Original not yet available for this asset.');
+        } else if (data.code === 'WEB_FILE_NOT_AVAILABLE') {
+          setError('The web file for this photo is not available yet. Please try again later or contact support.');
         } else {
           setError(data.error ?? 'Download failed');
         }

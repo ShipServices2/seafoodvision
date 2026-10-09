@@ -24,7 +24,7 @@ const line = (overrides: Partial<CartLine> = {}): CartLine => ({
   id: 'line-1', itemType: 'credit_pack', internalProductId: 'pack-100', assetId: null,
   licenseTypeId: null, quantity: 1, unitPrice: 9, subtotal: 9, productCode: 'credits_100',
   productName: '100 credits', assetTitle: null, licenseName: null, format: null,
-  credits: 100, validationError: null, ...overrides,
+  credits: 100, listPrice: null, promoEndsAt: null, validationError: null, ...overrides,
 });
 
 describe('cart quantity and line identity rules', () => {
