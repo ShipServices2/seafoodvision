@@ -117,7 +117,7 @@ describe('a pack can never be bought as a line', () => {
       license_types: [{ data: { id: 'l1', code: 'commercial', name: 'Commercial', is_active: true, is_exclusive: false }, error: null }],
       unit_products: [{ data: {
         id: 'pack-id', product_code: 'pack_10', name: 'Pack 10 Photos HD', price: 150, currency: 'EUR', is_active: true,
-        license_type_code: null, resolution_allowed: 'hd', download_quota: 1, pack_size: 10,
+        license_type_code: null, resolution_allowed: 'hd', download_quota: 5, pack_size: 10,
       }, error: null }],
       payment_product_mappings: [{ data: { dodo_product_id: 'pdt_pack' }, error: null }],
     };

@@ -60,7 +60,7 @@ const call = (id: string) =>
 
 const entitlement = (resolution: string): Row => ({
   id: 'ent-1', user_id: 'buyer-1', asset_id: 'asset-1', status: 'active', valid_until: null,
-  downloads_used: 0, download_count: 0, max_downloads: 1, purchased_license_id: 'lic-1',
+  downloads_used: 0, download_count: 0, max_downloads: 5, purchased_license_id: 'lic-1',
   allowed_resolution: resolution, resolution_allowed: resolution,
 });
 
@@ -154,9 +154,24 @@ describe('GET /api/downloads/[entitlementId]: a Web purchase is never the origin
   });
 
   test('an exhausted entitlement gets no URL', async () => {
-    state.tables.download_entitlements = [{ ...entitlement('hd'), downloads_used: 1 }];
+    state.tables.download_entitlements = [{ ...entitlement('hd'), downloads_used: 5, download_count: 5 }];
     state.tables.asset_files = [originalFile, webFile];
     expect((await call('ent-1')).status).toBe(403);
     expect(state.signedCalls).toHaveLength(0);
+  });
+
+  test('5 downloads per purchased photo: the 5th is served, the 6th is refused', async () => {
+    state.tables.download_entitlements = [entitlement('web')];
+    state.tables.asset_files = [originalFile, webFile];
+    for (let n = 1; n <= 5; n++) {
+      const res = await call('ent-1');
+      expect(res.status).toBe(200);
+      expect((await res.json()).downloadsRemaining).toBe(5 - n);
+    }
+    expect(state.signedCalls).toHaveLength(5);
+    const sixth = await call('ent-1');
+    expect(sixth.status).toBe(403);
+    expect((await sixth.json()).error).toBe('Download quota exceeded');
+    expect(state.signedCalls).toHaveLength(5);
   });
 });

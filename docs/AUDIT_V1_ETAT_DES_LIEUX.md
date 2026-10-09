@@ -399,13 +399,16 @@ Procédures (fichiers web, tunnel cloudflared, achats test) : `docs/ETAPE_6_COMM
 ### Migrations appliquées (`supabase db push`, liste vérifiée à blanc : exactement ces trois)
 1. `20261009100000` : `unit_products.list_price` et `promo_ends_at` (+ contrainte `list_price >= price`) ; prix normaux 15 / 39 / 299 / 290 (web, HD, HD + extended, pack), fin de promotion 2027-01-31.
 2. `20261009110000` : niveau de fichier `web` ; les policies de lecture publique et authentifiée de `asset_files` passent de `file_level != 'original'` à la liste blanche `preview`, `thumbnail` (sinon le chemin du fichier web aurait été lisible). Vérifié avec la clé anon : 1061 aperçus, 1061 miniatures, 0 original, 0 fichier web ; l'URL publique et le téléchargement anonyme du fichier web sont refusés.
-3. `20261009120000` : `pack_10` devient « Pack 10 Photos HD » (résolution `hd`, `pack_size` 10, quota 1 par photo).
+3. `20261009120000` : `pack_10` devient « Pack 10 Photos HD » (résolution `hd`, `pack_size` 10).
 - **Migration 4 (reportée à la V2, abonnements)** : `DROP` de la contrainte `payment_product_mappings_internal_product_type_internal_pro_key`. Non appliquée.
 
 ### Fichiers web (Photo Web)
 - 1920 px max, JPEG q85, sans filigrane, GPS et numéros de série retirés, copyright IPTC/XMP conservé ou ajouté ; bucket privé `asset-originals`, chemin `web/<sha[0:2]>/<sha>.jpg`. Original déjà ≤ 1920 px et JPEG : l'original nettoyé, sans recompression.
 - Scripts dans `C:\Projects\SeafoodVision\scripts\import_prep\` (hors de ce dépôt) : `generate_web_files.js` (idempotent, concurrence 3, reprise réseau) et génération intégrée à `import_photos.js` pour les lots 2 et 3.
 - Fait en essai réel : 2 fichiers (SV-IMP, 1440 × 1920) ; les 1059 autres publiés restent à générer par l'utilisateur.
+
+### Quota de téléchargement : 5 par photo achetée
+- `unit_products.download_quota` = 5 pour `photo_web`, `photo_hd`, `photo_hd_extended` et `pack_10` (mise à jour de lignes par l'API REST, pas de migration ; la migration 3 avait posé 1 sur `pack_10`, la valeur en base fait foi). Les autres produits restent à 1. Le webhook copie ce quota dans `download_entitlements.max_downloads` à l'achat : les droits déjà créés ne sont pas modifiés (il n'y en avait aucun). Le 6ᵉ téléchargement est refusé.
 
 ### Pack 10 Photos HD (remise automatique)
 - Seules les Photo HD standard comptent. Par bloc de 10 : un produit Dodo « Pack 10 Photos HD » (150 €), le reste à l'unité (12 HD = 1 pack + 2 × 20 € = 190 €). Chaque photo reste une ligne de commande : le webhook crée donc une licence et un droit de téléchargement par photo.
@@ -432,5 +435,5 @@ Procédures (fichiers web, tunnel cloudflared, achats test) : `docs/ETAPE_6_COMM
 - Signature Standard Webhooks vérifiée (valide : 200 et traitement ; signature invalide, corps modifié, en-tête manquant, horodatage périmé : 401 sans rien enregistrer ; secret absent : 503 ; doublon : acquitté sans second traitement ; échec de traitement : 500 pour que Dodo réessaie). `DODO_PAYMENTS_WEBHOOK_SECRET` est vide dans `.env.local` : à saisir (procédure dans `docs/ETAPE_6_COMMERCE.md`).
 
 ### Résultats
-- `type-check` : OK. `lint` : 0 erreur, 289 avertissements (inchangé). `test` : **17 suites, 353 tests OK** (+5 suites, +66 tests : webhook, accès aux téléchargements, pack, prix, licence PDF). `build` : OK. Redémarrage propre sur le port 4028 (arrêt, suppression de `.next`, `npm run dev`).
+- `type-check` : OK. `lint` : 0 erreur, 289 avertissements (inchangé). `test` : **17 suites, 354 tests OK** (+5 suites, +67 tests : webhook, accès aux téléchargements, pack, prix, licence PDF). `build` : OK. Redémarrage propre sur le port 4028 (arrêt, suppression de `.next`, `npm run dev`).
 - Les 31 commandes existantes (13 draft, 10 pending, 8 cancelled) n'ont pas été touchées.

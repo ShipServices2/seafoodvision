@@ -159,7 +159,7 @@ describe('certain unit-product mappings resolve through server validation', () =
         unit_products: [result({
           id: `id-${productCode}`, product_code: productCode, name: productCode,
           price, currency: 'EUR', is_active: true, license_type_code: 'commercial',
-          resolution_allowed: productCode, download_quota: productCode === 'pack_10' ? 10 : 1,
+          resolution_allowed: productCode, download_quota: ['photo_web', 'photo_hd', 'pack_10'].includes(productCode) ? 5 : 1,
         })],
         payment_product_mappings: [result({ dodo_product_id: productId })],
       }, filters);
