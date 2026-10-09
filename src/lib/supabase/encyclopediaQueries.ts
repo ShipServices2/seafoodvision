@@ -201,6 +201,7 @@ export async function fetchEncSpeciesList(opts: {
   let query = supabase
     .from('species')
     .select('*', { count: 'exact' })
+    .eq('is_public', true)
     .order('common_name', { ascending: true })
     .range(from, to);
 
@@ -255,6 +256,7 @@ export async function fetchEncSpeciesListWithNames(opts: {
   let query = supabase
     .from('species')
     .select('*', { count: 'exact' })
+    .eq('is_public', true)
     .order('common_name', { ascending: true })
     .range(from, to);
 
@@ -285,6 +287,7 @@ export async function fetchEncSpeciesBySlug(slug: string): Promise<EncSpecies | 
     .from('species')
     .select('*')
     .eq('slug', slug)
+    .eq('is_public', true)
     .maybeSingle();
   if (error) { console.error('fetchEncSpeciesBySlug error:', error.message); return null; }
   return data as EncSpecies | null;
@@ -365,6 +368,7 @@ export async function fetchRelatedSpecies(speciesId: string, limit = 4): Promise
     .from('species')
     .select('*')
     .neq('id', speciesId)
+    .eq('is_public', true)
     .or(`family.eq.${current.family},category.eq.${current.category}`)
     .limit(limit);
   if (error) return [];

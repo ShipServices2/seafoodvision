@@ -112,6 +112,8 @@ export default function LibraryContent() {
 
   // Read initial q param from URL (handles accents, spaces, URL encoding automatically)
   const initialQuery = searchParams.get('q') ?? '';
+  // ?species=<slug> (from a species page) filters the library on that species
+  const speciesSlug = searchParams.get('species') ?? '';
 
   const [filters, setFilters] = useState<FilterState>({ ...defaultFilters, query: initialQuery });
   const [sort, setSort] = useState<SortOption>('newest');
@@ -171,6 +173,7 @@ export default function LibraryContent() {
           faoArea: filters.faoArea,
           verified: filters.verified,
           realPhoto: filters.realPhoto,
+          speciesSlug: speciesSlug || undefined,
         },
         sort,
         currentPage,
@@ -184,7 +187,7 @@ export default function LibraryContent() {
     } finally {
       setLoading(false);
     }
-  }, [filters, sort, currentPage, itemsPerPage]);
+  }, [filters, sort, currentPage, itemsPerPage, speciesSlug]);
 
   // Semantic search when query changes
   useEffect(() => {
@@ -262,6 +265,15 @@ export default function LibraryContent() {
           Search Encyclopedia
         </Link>)}
       </div>
+
+      {speciesSlug && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-xl border border-secondary/30 bg-secondary/5 px-4 py-2.5 text-sm">
+          <span className="text-foreground">
+            Showing photos of one species: <span className="font-semibold">{assets[0]?.species || speciesSlug}</span>
+          </span>
+          <Link href="/library" className="font-semibold text-secondary hover:underline whitespace-nowrap">Show all photos</Link>
+        </div>
+      )}
 
       <LibraryToolbar
         filters={filters}

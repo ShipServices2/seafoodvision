@@ -98,6 +98,7 @@ export async function fetchSpeciesList(limit = 50): Promise<Species[]> {
   const { data, error } = await supabase
     .from('species')
     .select('*')
+    .eq('is_public', true)
     .order('common_name', { ascending: true })
     .limit(limit);
 
@@ -114,6 +115,7 @@ export async function fetchSpeciesBySlug(slug: string): Promise<Species | null> 
     .from('species')
     .select('*')
     .eq('slug', slug)
+    .eq('is_public', true)
     .maybeSingle();
 
   if (error) {

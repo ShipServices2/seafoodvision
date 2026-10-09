@@ -347,3 +347,37 @@ Branche `v1/etape-2-recentrage` (non commitée au moment de l'écriture). Libell
 - `npm run dev` (port 4028) : `/`, `/library`, `/species`, `/discover`, `/pricing`, `/enterprise`, `/contact` → 200 ; `/identify`, `/assistant`, `/knowledge`, `/hub` → 404 ; `/admin` et `/admin/reviews` → 307 vers `/auth`.
 - Remarque : juste après `npm run build`, le serveur dev renvoyait 500 partout (erreur Turbopack `next/font/google`, cache `.next` périmé). Après suppression de `.next`, tout est revenu normal. Si cela se reproduit, supprimer `.next` avant `npm run dev`.
 - Non testé : le rendu de `/admin` et `/admin/reviews` une fois connecté (nécessite une session admin) ; à regarder dans le navigateur.
+
+## Étape 5 — Espèces et collections
+
+Branche `v1/etape-5-especes`. Rien n'est supprimé : on masque (`species.is_public = false`) ou on passe en `draft`.
+
+### Fiches espèces
+- 24 fiches publiées avec description (habitat, profondeur, aire de répartition et taille maximale d'après FishBase), famille alignée sur FishBase, `seo_title` et `seo_description`. Aucun nombre de photos dans les textes SEO.
+- Lecture publique : les requêtes espèces filtrent sur `is_public = true` (`queries.ts`, `encyclopediaQueries.ts`, `SpeciesHighlight.tsx`).
+- 56 espèces visibles sur 61 ; masquées : `penaeus-monodon`, `loligo-vulgaris`, `scomber-scombrus` (démo), `cyneglossus-cyneglossus` et `unclassified` (aucune photo publiée).
+- Constat : seules 3 espèces portent `is_demo = true` en base (et non 7). 32 espèces visibles n'ont pas encore de fiche rédigée (description vide) ; elles restent visibles avec leurs photos.
+
+### Penaeus monodon
+- Fiche masquée. Ses 10 photos non démo (dont SV-IMP-0020 et SV-IMP-0349) sont en `draft` et absentes de toutes les collections ; les 2 photos SV-DEMO sont `archived`.
+
+### Collections
+- 8 collections actives (`is_active = true`), `asset_count` égal au nombre d'éléments, tous publiés (829 liens au total).
+- Aperçus et miniatures de SV-IMP-0092, 0122 et 0123 régénérés (7 oct. 2026, 20:21 UTC).
+
+### Résultats
+- `type-check` : OK. `lint` : 0 erreur, 289 avertissements. `test` : 12 suites, 287 tests OK. `build` : OK.
+- Visibilité publique vérifiée avec la clé anon : SV-IMP-0020 et SV-IMP-0349 invisibles, `penaeus-monodon` masquée, 8 collections lisibles.
+- Aucune migration de schéma ajoutée.
+
+### Reprise de l'étape 5 (9 oct. 2026) — fiches espèces
+- Logo, `no_image.png` et favicon restaurés depuis `c26b3d4`.
+- Photo principale réelle sur la fiche espèce (aperçu filigrané, URL signée) ; grille de 6 photos « From 5€ » et bouton « View all photos ».
+- Photothèque : filtre `?species=<slug>`.
+- Badge unique basé sur `validation_status` ; champs vides masqués dans « Species Data ».
+- Noms FAO : 24 fiches renommées (ex. `sardinella-aurita` → Round sardinella), début des descriptions aligné ; `genus` rempli ; catégories au pluriel (Fish, Crustaceans, Cephalopods, Molluscs — `cymbium-spp` passe de « Other seafood » à Molluscs).
+- 24 fiches en `validation_status = verified` et `is_validated = true` ; `taxonomic_status` reste vide.
+- Codes FAO alpha-3 posés sur 13 espèces (SKJ, YFT, TUN, SAL, BON, PIL, SAA, MAS, OCC, CTC, LHT, SWO, GFB) ; les 11 autres restent vides et sont masqués à l'affichage.
+- 32 espèces sans fiche masquées (`is_public = false`) : rien n'est supprimé, leurs photos restent publiées et en vente. Au total 24 espèces visibles, 37 masquées.
+- Fiches prioritaires à rédiger plus tard : `litopenaeus-vannamei`, `gadus-morhua`, `coryphaena-hippurus`, `merluccius-spp`.
+- Aucune migration ; Dodo reste en TEST.

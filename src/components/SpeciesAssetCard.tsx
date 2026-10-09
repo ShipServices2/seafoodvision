@@ -14,9 +14,11 @@ interface SpeciesAssetCardProps {
   // Legacy — kept for backward compat
   thumbnailUrl?: string | null;
   emoji: string;
+  /** Starting price (Photo Web) in EUR */
+  price?: number;
 }
 
-export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath, emoji }: SpeciesAssetCardProps) {
+export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath, emoji, price }: SpeciesAssetCardProps) {
   const [imgError, setImgError] = useState(false);
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
 
@@ -58,6 +60,7 @@ export default function SpeciesAssetCard({ asset, thumbnailBucket, thumbnailPath
       <div className="p-2">
         <p className="text-xs font-semibold text-foreground line-clamp-1">{asset.title}</p>
         <p className="text-xs text-muted-foreground mt-0.5">{asset.product_form || asset.category}</p>
+        {price !== undefined && <p className="text-xs font-semibold text-secondary mt-1">From {price}€</p>}
       </div>
     </Link>
   );

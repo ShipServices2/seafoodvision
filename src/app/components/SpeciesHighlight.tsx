@@ -46,6 +46,7 @@ export default function SpeciesHighlight() {
           .from('species')
           .select('id, slug, common_name, scientific_name, family, category, fao_areas')
           .eq('is_validated', true)
+          .eq('is_public', true)
           .limit(8);
 
         if (!species || species.length === 0) {

@@ -21,13 +21,16 @@ import {
   type EncDocument,
 } from '@/lib/supabase/encyclopediaQueries';
 import { fetchSpeciesAssets } from '@/lib/supabase/queries';
-import { getAssetThumbnailFile } from '@/lib/supabase/assetService';
+import { getAssetThumbnailFile, getAssetPreviewFile, getSignedStorageUrl } from '@/lib/supabase/assetService';
+import { UNIT_PRODUCTS } from '@/lib/pricingConfig';
 import type { Asset } from '@/lib/supabase/types';
 import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 
 import SpeciesAssetCard from '@/components/SpeciesAssetCard';
 import { isV1HiddenPath } from '@/lib/v1Scope';
+
+const webPhotoPrice = UNIT_PRODUCTS.find((p) => p.id === 'photo_web')?.price;
 
 const SITE_URL = process.env.NEXT_PUBLIC_SITE_URL || 'https://seafoodvis1067.builtwithrocket.new';
 
@@ -170,6 +173,17 @@ export default function SpeciesDetailPage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('overview');
+  const [heroUrl, setHeroUrl] = useState<string | null>(null);
+
+  // Hero image: first published photo that has a watermarked preview (signed URL, never the original)
+  useEffect(() => {
+    const heroAsset = assets.find((a) => getAssetPreviewFile(a)?.file_level === 'preview');
+    const file = heroAsset ? getAssetPreviewFile(heroAsset) : null;
+    if (!file) { setHeroUrl(null); return; }
+    let cancelled = false;
+    getSignedStorageUrl(file.storage_bucket, file.storage_path, 3600).then((url) => { if (!cancelled) setHeroUrl(url); });
+    return () => { cancelled = true; };
+  }, [assets]);
 
   useEffect(() => {
     if (!slug) return;
@@ -270,21 +284,21 @@ export default function SpeciesDetailPage() {
             <span className="text-foreground font-medium truncate max-w-[200px]">{species.common_name}</span>
           </nav>
 
-          {/* Hero */}
-          <div className={`relative rounded-2xl overflow-hidden mb-8 bg-gradient-to-br ${color} h-52 flex items-center justify-center`}>
-            <span className="text-9xl">{emoji}</span>
-            <div className="absolute top-4 left-4 flex gap-2">
-              {species.is_validated && (
-                <span className="flex items-center gap-1 text-xs bg-green-100 text-green-700 border border-green-200 px-2.5 py-1 rounded-full font-semibold">
-                  <CheckCircle size={11} /> Verified
-                </span>
-              )}
-              {species.is_demo && (
+          {/* Hero: a real published photo (watermarked preview) when available, otherwise the illustration */}
+          <div className={`relative rounded-2xl overflow-hidden mb-8 bg-gradient-to-br ${color} h-52 sm:h-72 flex items-center justify-center`}>
+            {heroUrl ? (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={heroUrl} alt={`${species.common_name} (${species.scientific_name})`} className="w-full h-full object-cover" onError={() => setHeroUrl(null)} />
+            ) : (
+              <span className="text-9xl">{emoji}</span>
+            )}
+            {species.is_demo && (
+              <div className="absolute top-4 left-4 flex gap-2">
                 <span className="flex items-center gap-1 text-xs bg-purple-100 text-purple-700 border border-purple-200 px-2.5 py-1 rounded-full font-semibold">
                   <Layers size={11} /> Demonstration species data
                 </span>
-              )}
-            </div>
+              </div>
+            )}
           </div>
 
           {/* Identity + metadata */}
@@ -297,8 +311,9 @@ export default function SpeciesDetailPage() {
                 {species.order_name && <span className="text-sm bg-muted text-muted-foreground px-3 py-1 rounded-full">{species.order_name}</span>}
                 {species.category && <span className="text-sm bg-secondary/10 text-secondary px-3 py-1 rounded-full">{species.category}</span>}
                 {species.genus && <span className="text-sm bg-muted text-muted-foreground px-3 py-1 rounded-full font-mono-data italic">{species.genus}</span>}
-                {species.validation_status && (
-                  <span className={`text-xs px-2.5 py-1 rounded-full border font-medium ${STATUS_BADGE[species.validation_status] || STATUS_BADGE.suggested}`}>
+                {species.validation_status && species.validation_status !== 'unverified' && (
+                  <span className={`flex items-center gap-1 text-xs px-2.5 py-1 rounded-full border font-semibold capitalize ${STATUS_BADGE[species.validation_status] || STATUS_BADGE.suggested}`}>
+                    {species.validation_status === 'verified' && <CheckCircle size={11} />}
                     {species.validation_status.replace('_', ' ')}
                   </span>
                 )}
@@ -317,18 +332,45 @@ export default function SpeciesDetailPage() {
                   Open Seafood Intelligence Hub
                 </Link>
               </div>)}
+
+              {/* Published photos of this species: price + link to the photo page */}
+              {assets.length > 0 && (
+                <section className="mt-8" aria-labelledby="species-photos-heading">
+                  <div className="flex items-center justify-between gap-3 mb-3">
+                    <h2 id="species-photos-heading" className="text-base font-semibold text-foreground">Photos of {species.common_name}</h2>
+                    <Link href={`/library?species=${encodeURIComponent(species.slug)}`} className="text-sm font-semibold text-secondary hover:underline whitespace-nowrap">
+                      View all photos →
+                    </Link>
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                    {assets.slice(0, 6).map((asset) => {
+                      const thumbFile = getAssetThumbnailFile(asset);
+                      return (
+                        <SpeciesAssetCard
+                          key={asset.id}
+                          asset={asset}
+                          thumbnailBucket={thumbFile?.storage_bucket || null}
+                          thumbnailPath={thumbFile?.storage_path || null}
+                          emoji={emoji}
+                          price={webPhotoPrice}
+                        />
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
             </div>
 
             <div className="bg-card rounded-xl border border-border p-5 space-y-3 h-fit">
               <h3 className="text-sm font-semibold text-foreground border-b border-border pb-2">Species Data</h3>
               <InfoRow label="Scientific Name" value={species.scientific_name} mono italic />
-              <InfoRow label="Genus" value={species.genus || '—'} mono />
-              <InfoRow label="Family" value={species.family || '—'} />
+              {species.genus && <InfoRow label="Genus" value={species.genus} mono italic />}
+              {species.family && <InfoRow label="Family" value={species.family} />}
               {species.order_name && <InfoRow label="Order" value={species.order_name} />}
-              <InfoRow label="Category" value={species.category || '—'} />
-              <InfoRow label="FAO Alpha-3" value={species.fao_alpha3_code || '—'} mono />
-              <InfoRow label="FAO Areas" value={species.fao_areas?.join(', ') || '—'} mono />
-              <InfoRow label="Taxonomic Status" value={species.taxonomic_status || '—'} />
+              {species.category && <InfoRow label="Category" value={species.category} />}
+              {species.fao_alpha3_code && <InfoRow label="FAO Alpha-3" value={species.fao_alpha3_code} mono />}
+              {species.fao_areas && species.fao_areas.length > 0 && <InfoRow label="FAO Areas" value={species.fao_areas.join(', ')} mono />}
+              {species.taxonomic_status && <InfoRow label="Taxonomic Status" value={species.taxonomic_status} />}
             </div>
           </div>
 
@@ -662,12 +704,13 @@ export default function SpeciesDetailPage() {
                           thumbnailBucket={thumbFile?.storage_bucket || null}
                           thumbnailPath={thumbFile?.storage_path || null}
                           emoji={emoji}
+                          price={webPhotoPrice}
                         />
                       );
                     })}
                   </div>
                   <div className="mt-4 text-center">
-                    <Link href={`/library?species=${encodeURIComponent(species.common_name)}`} className="text-sm text-secondary font-medium hover:underline">
+                    <Link href={`/library?species=${encodeURIComponent(species.slug)}`} className="text-sm text-secondary font-medium hover:underline">
                       View all in library →
                     </Link>
                   </div>

@@ -68,6 +68,7 @@ export interface AssetFilters {
   mediaType?: string[];
   category?: string[];
   species?: string[];
+  speciesSlug?: string;
   productForm?: string[];
   productState?: string[];
   orientation?: string[];
@@ -181,15 +182,21 @@ export async function fetchAssets(
 ): Promise<{ assets: AssetRow[]; total: number }> {
   const supabase = createClient();
 
+  // With a species filter the join becomes an inner join so that only that species' assets are returned
+  const speciesJoin = filters.speciesSlug ? 'species!fk_assets_species!inner' : 'species!fk_assets_species';
   let query = supabase
     .from('assets')
     .select(
-      `*, species!fk_assets_species(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`,
+      `*, ${speciesJoin}(id, slug, common_name, scientific_name, family, category), asset_keywords(keywords(term)), asset_files(id, file_level, storage_bucket, storage_path, mime_type, width_px, height_px, file_size_bytes)`,
       { count: 'exact' }
     )
     // Only show publicly visible assets (defense-in-depth alongside RLS)
     .in('review_status', ['approved', 'commercial', 'editorial', 'preview_only'])
     .eq('publication_status', 'published');
+
+  if (filters.speciesSlug) {
+    query = query.eq('species.slug', filters.speciesSlug);
+  }
 
   // Text search — searches text columns; alias search handled separately below
   if (filters.query) {
@@ -286,7 +293,7 @@ export async function fetchAssets(
 
   // If a text query is present, also search by search_aliases (validated species names)
   // and merge results (dedup by id), boosting total count
-  if (filters.query && page === 1) {
+  if (filters.query && page === 1 && !filters.speciesSlug) {
     try {
       const q = filters.query.toLowerCase().trim();
       const { data: aliasData } = await supabase
