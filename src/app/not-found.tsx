@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import Icon from '@/components/ui/AppIcon';
 
@@ -47,6 +48,13 @@ export default function NotFound() {
                         <Icon name="HomeIcon" size={16} />
                         Back to Home
                     </button>
+
+                    <Link
+                        href="/species"
+                        className="inline-flex items-center justify-center gap-2 border border-border bg-background text-foreground px-6 py-3 rounded-lg font-medium hover:bg-accent hover:text-accent-foreground transition-colors duration-200"
+                    >
+                        View all species
+                    </Link>
                 </div>
             </div>
         </div>
