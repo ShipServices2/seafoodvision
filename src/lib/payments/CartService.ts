@@ -583,7 +583,7 @@ export async function validateCart(userId: string): Promise<CartValidationResult
   };
 }
 
-export async function initiateCartCheckout(params: { userId: string; userEmail: string }) {
+export async function initiateCartCheckout(params: { userId: string; userEmail: string; origin?: string }) {
   const validation = await validateCart(params.userId);
   if (!validation.valid) throw new CartError('cart_invalid', 'Cart contains invalid lines', 409);
   if (validation.priceChanged) throw new CartError('price_changed', 'Cart prices changed. Review and confirm the updated total.', 409);
@@ -643,8 +643,8 @@ export async function initiateCartCheckout(params: { userId: string; userEmail: 
       amount: Number(refreshed?.total_amount ?? 0),
       currency: String(refreshed?.currency ?? 'EUR'),
       productName: `SeafoodVision cart (${productCart.length} lines)`,
-      successUrl: `${getDodoReturnUrl()}?order=${order.id}&type=cart`,
-      cancelUrl: `${getDodoCancelUrl()}?order=${order.id}&type=cart`,
+      successUrl: `${getDodoReturnUrl(params.origin)}?order=${order.id}&type=cart`,
+      cancelUrl: `${getDodoCancelUrl(params.origin)}?order=${order.id}&type=cart`,
       metadata: { cart: CART_KIND },
       productCart,
     });

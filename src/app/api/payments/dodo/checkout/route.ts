@@ -68,6 +68,7 @@ export async function POST(request: NextRequest) {
       // Idempotency: if a pending order already exists for this user+plan+cycle
       // within the last 10 minutes, reuse it instead of creating a duplicate.
       const result = await initiateSubscriptionCheckout({
+        origin: request.nextUrl.origin,
         userId: user.id,
         userEmail: user.email ?? '',
         planCode,
@@ -80,6 +81,7 @@ export async function POST(request: NextRequest) {
     // ── Asset license checkout ─────────────────────────────
     if (assetId && licenseTypeCode && unitProductCode) {
       const result = await initiateAssetLicenseCheckout({
+        origin: request.nextUrl.origin,
         userId: user.id,
         userEmail: user.email ?? '',
         assetId,

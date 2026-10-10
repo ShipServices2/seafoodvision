@@ -40,6 +40,8 @@ function reuseCheckout(order: { id: string; reused?: boolean; checkoutUrl?: stri
 
 export async function initiateAssetLicenseCheckout(params: {
   userId: string;
+  /** Origin of the current request, used for the Dodo return URLs when NEXT_PUBLIC_SITE_URL is not set. */
+  origin?: string;
   userEmail: string;
   assetId: string;
   licenseTypeCode: string;
@@ -87,8 +89,8 @@ export async function initiateAssetLicenseCheckout(params: {
     amount: order.totalAmount,
     currency: order.currency,
     productName: `${normalized.product.name} — ${normalized.license.name}`,
-    successUrl: `${getDodoReturnUrl()}?order=${order.id}`,
-    cancelUrl: `${getDodoCancelUrl()}?order=${order.id}`,
+    successUrl: `${getDodoReturnUrl(params.origin)}?order=${order.id}`,
+    cancelUrl: `${getDodoCancelUrl(params.origin)}?order=${order.id}`,
     metadata: {
       orderId: order.id,
       assetId: normalized.asset.id,
@@ -101,6 +103,8 @@ export async function initiateAssetLicenseCheckout(params: {
 
 export async function initiateSubscriptionCheckout(params: {
   userId: string;
+  /** Origin of the current request, used for the Dodo return URLs when NEXT_PUBLIC_SITE_URL is not set. */
+  origin?: string;
   userEmail: string;
   planCode: string;
   billingCycle: 'monthly' | 'annual';
@@ -142,8 +146,8 @@ export async function initiateSubscriptionCheckout(params: {
     planId: plan.id,
     dodoPriceId: validation.dodo_product_id,
     billingCycle: params.billingCycle,
-    successUrl: `${getDodoReturnUrl()}?order=${order.id}`,
-    cancelUrl: `${getDodoCancelUrl()}?order=${order.id}`,
+    successUrl: `${getDodoReturnUrl(params.origin)}?order=${order.id}`,
+    cancelUrl: `${getDodoCancelUrl(params.origin)}?order=${order.id}`,
   });
   await updateOrderCheckoutRef(order.id, result.externalCheckoutId, result.checkoutUrl);
   return { checkoutUrl: result.checkoutUrl, orderId: order.id };
@@ -151,6 +155,8 @@ export async function initiateSubscriptionCheckout(params: {
 
 export async function initiateCreditPackCheckout(params: {
   userId: string;
+  /** Origin of the current request, used for the Dodo return URLs when NEXT_PUBLIC_SITE_URL is not set. */
+  origin?: string;
   userEmail: string;
   packCode: string;
 }): Promise<{ checkoutUrl: string; orderId: string }> {
@@ -193,8 +199,8 @@ export async function initiateCreditPackCheckout(params: {
     amount: order.totalAmount,
     currency: order.currency,
     productName: pack.name,
-    successUrl: `${getDodoReturnUrl()}?order=${order.id}&type=credits`,
-    cancelUrl: `${getDodoCancelUrl()}?order=${order.id}&type=credits`,
+    successUrl: `${getDodoReturnUrl(params.origin)}?order=${order.id}&type=credits`,
+    cancelUrl: `${getDodoCancelUrl(params.origin)}?order=${order.id}&type=credits`,
     metadata: {
       orderId: order.id,
       packCode: pack.pack_code,

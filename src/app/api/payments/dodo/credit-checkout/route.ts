@@ -22,6 +22,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await initiateCreditPackCheckout({
+        origin: request.nextUrl.origin,
       userId: user.id,
       userEmail: user.email ?? '',
       packCode,

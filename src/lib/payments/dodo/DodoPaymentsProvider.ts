@@ -22,7 +22,7 @@ import type {
   PaymentStatusResult,
   PaymentProviderConfig,
 } from '../types';
-import { getDodoConfig, getDodoRuntimeConfig } from './config';
+import { assertAbsoluteReturnUrls, getDodoConfig, getDodoRuntimeConfig } from './config';
 
 function createDodoClient(): DodoPayments {
   const apiKey = process.env.DODO_PAYMENTS_API_KEY?.trim();
@@ -44,6 +44,7 @@ export class DodoPaymentsProvider implements PaymentProvider {
   }
 
   async createCheckout(params: CreateCheckoutParams): Promise<CheckoutResult> {
+    assertAbsoluteReturnUrls(params);
     const config = getDodoConfig();
     // Checkout only requires the API key (isCheckoutReady), NOT the webhook secret.
     if (!config.isCheckoutReady) {
@@ -87,6 +88,7 @@ export class DodoPaymentsProvider implements PaymentProvider {
   async createSubscriptionCheckout(
     params: CreateSubscriptionCheckoutParams
   ): Promise<SubscriptionCheckoutResult> {
+    assertAbsoluteReturnUrls(params);
     const config = getDodoConfig();
     // Checkout only requires the API key (isCheckoutReady), NOT the webhook secret.
     if (!config.isCheckoutReady) {

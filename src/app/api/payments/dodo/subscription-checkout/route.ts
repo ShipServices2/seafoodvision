@@ -29,6 +29,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await initiateSubscriptionCheckout({
+        origin: request.nextUrl.origin,
       userId: user.id,
       userEmail: user.email ?? '',
       planCode,
