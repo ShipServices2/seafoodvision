@@ -20,7 +20,23 @@ interface CommerceOrder {
   metadata: Record<string, unknown> | null;
 }
 
-export function isWebhookEventDuplicate(processingStatus: string): boolean {
+/** An event left in `processing` for longer than this was abandoned (crash, restart, timeout) and is taken over. */
+export const STALE_PROCESSING_MS = 5 * 60 * 1000;
+
+/**
+ * Processed and in-flight events are duplicates. An event stuck in `processing` for more than STALE_PROCESSING_MS is not:
+ * it is retried like a failed one. Without a start time (`processingStartedAt` missing or unparsable) it stays in flight.
+ * Taking over is safe: fulfilment is idempotent per order and per order line (unique indexes, upserts).
+ */
+export function isWebhookEventDuplicate(
+  processingStatus: string,
+  processingStartedAt?: string | null,
+  now: number = Date.now()
+): boolean {
+  if (processingStatus === 'processing' && processingStartedAt) {
+    const started = Date.parse(processingStartedAt);
+    if (Number.isFinite(started) && now - started > STALE_PROCESSING_MS) return false;
+  }
   return ['processed', 'processing', 'ignored_duplicate'].includes(processingStatus);
 }
 
@@ -38,14 +54,15 @@ export async function recordWebhookEvent(
   // Check for existing event (idempotency)
   const { data: existing } = await supabase
     .from('payment_webhook_events')
-    .select('id, processing_status')
+    .select('id, processing_status, received_at')
     .eq('external_event_id', event.externalEventId)
     .maybeSingle();
 
   if (existing) {
-    // Processed and in-flight events are duplicates. Failed/received events are
-    // deliberately retried using the same durable event row.
-    const isDuplicate = isWebhookEventDuplicate(existing.processing_status);
+    // Processed and in-flight events are duplicates. Failed/received events, and events stuck in `processing` for
+    // more than STALE_PROCESSING_MS, are deliberately retried using the same durable event row.
+    // `received_at` is the start of the latest attempt (markWebhookProcessing refreshes it).
+    const isDuplicate = isWebhookEventDuplicate(existing.processing_status, existing.received_at);
     return { isDuplicate, webhookEventId: existing.id };
   }
 
@@ -76,7 +93,8 @@ export async function markWebhookProcessing(webhookEventId: string): Promise<voi
   const supabase = createServiceClient();
   await supabase
     .from('payment_webhook_events')
-    .update({ processing_status: 'processing' })
+    // received_at is refreshed so that a crash mid-processing can be detected as stale after STALE_PROCESSING_MS.
+    .update({ processing_status: 'processing', received_at: new Date().toISOString() })
     .eq('id', webhookEventId);
 }
 
