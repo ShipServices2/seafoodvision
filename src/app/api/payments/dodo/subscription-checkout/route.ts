@@ -1,3 +1,4 @@
+import { requestOrigin } from '@/lib/payments/dodo/config';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { initiateSubscriptionCheckout } from '@/lib/payments/CheckoutService';
@@ -29,7 +30,7 @@ export async function POST(request: NextRequest) {
     }
 
     const result = await initiateSubscriptionCheckout({
-        origin: request.nextUrl.origin,
+        origin: requestOrigin(request) ?? undefined,
       userId: user.id,
       userEmail: user.email ?? '',
       planCode,

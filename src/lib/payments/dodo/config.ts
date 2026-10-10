@@ -86,14 +86,40 @@ function sanitizeUrl(raw: string): string {
   });
 }
 
+/** Hosts a browser cannot reach: the wildcard bind addresses a dev server reports, and link-local addresses. */
+function isUnroutableHost(hostname: string): boolean {
+  const host = hostname.replace(/^\[|\]$/g, '').toLowerCase();
+  return host === '0.0.0.0' || host === '::' || host === '0:0:0:0:0:0:0:0'
+    || host === '255.255.255.255' || /^169\.254\./.test(host) || /^0\./.test(host);
+}
+
 function isAbsoluteHttpUrl(value: string | null | undefined): value is string {
   if (!value) return false;
   try {
     const url = new URL(value);
-    return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.host;
+    return (url.protocol === 'http:' || url.protocol === 'https:') && !!url.host && !isUnroutableHost(url.hostname);
   } catch {
     return false;
   }
+}
+
+/**
+ * Origin of the current request as the visitor's browser sees it: x-forwarded-proto/host (proxy, tunnel), then Host,
+ * then nextUrl.origin. A dev server bound to 0.0.0.0 reports that address as nextUrl.origin, which no browser can open.
+ * Unroutable candidates are skipped; null when none is usable.
+ */
+export function requestOrigin(request: { headers: { get(name: string): string | null }; nextUrl?: { origin: string } }): string | null {
+  const first = (name: string) => request.headers.get(name)?.split(',')[0]?.trim() || null;
+  const hosts = [first('x-forwarded-host'), first('host')];
+  const proto = first('x-forwarded-proto');
+  for (const host of hosts) {
+    if (!host) continue;
+    const scheme = proto === 'http' || proto === 'https' ? proto : (/^(localhost|127\.|\[::1\])/.test(host) ? 'http' : 'https');
+    const candidate = `${scheme}://${host}`;
+    if (isAbsoluteHttpUrl(candidate)) return candidate;
+  }
+  const fallback = request.nextUrl?.origin ?? null;
+  return isAbsoluteHttpUrl(fallback) ? fallback : null;
 }
 
 /**
@@ -103,6 +129,7 @@ function isAbsoluteHttpUrl(value: string | null | undefined): value is string {
 export function resolveSiteBase(requestOrigin?: string | null): string {
   const configured = sanitizeUrl(process.env.NEXT_PUBLIC_SITE_URL?.trim() ?? '');
   const candidate = isAbsoluteHttpUrl(configured) ? configured : (requestOrigin?.trim() ?? '');
+  // (a configured or request origin on 0.0.0.0 / an unspecified address fails isAbsoluteHttpUrl and is never used)
   if (!isAbsoluteHttpUrl(candidate)) {
     throw new Error('Cannot build Dodo return URLs: set NEXT_PUBLIC_SITE_URL to an absolute URL (e.g. https://example.com).');
   }

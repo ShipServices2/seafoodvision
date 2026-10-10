@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from '@jest/globals';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { assertAbsoluteReturnUrls, getDodoCancelUrl, getDodoReturnUrl, resolveSiteBase } from '../dodo/config';
+import { assertAbsoluteReturnUrls, getDodoCancelUrl, getDodoReturnUrl, requestOrigin, resolveSiteBase } from '../dodo/config';
 import { DodoPaymentsProvider } from '../dodo/DodoPaymentsProvider';
 
 // Dodo answers 400 "return_url: must be a valid URL" to any relative return/cancel URL.
@@ -57,6 +57,69 @@ describe('Dodo return and cancel URLs are always absolute', () => {
   });
 });
 
+// The dev server listens on 0.0.0.0, so nextUrl.origin is http://0.0.0.0:4028: unreachable from the browser.
+const req = (headers: Record<string, string>, origin = 'http://0.0.0.0:4028') => ({
+  headers: { get: (name: string) => headers[name.toLowerCase()] ?? null },
+  nextUrl: { origin },
+});
+
+describe('0.0.0.0 and other unroutable hosts are never used', () => {
+  test.each(['http://0.0.0.0:4028', 'http://[::]:4028', 'http://169.254.10.1', 'http://255.255.255.255'])('%s is not a usable base', (origin) => {
+    expect(() => resolveSiteBase(origin)).toThrow('absolute');
+    expect(() => getDodoReturnUrl(origin)).toThrow('absolute');
+  });
+
+  test('NEXT_PUBLIC_SITE_URL on 0.0.0.0 is ignored in favour of a routable origin', () => {
+    process.env.NEXT_PUBLIC_SITE_URL = 'http://0.0.0.0:4028';
+    expect(getDodoReturnUrl('http://localhost:4028')).toBe('http://localhost:4028/checkout/success');
+  });
+
+  test('a dedicated variable on 0.0.0.0 falls back to the base', () => {
+    process.env.DODO_PAYMENTS_RETURN_URL = 'http://0.0.0.0:4028/checkout/success';
+    expect(getDodoReturnUrl('http://localhost:4028')).toBe('http://localhost:4028/checkout/success');
+  });
+
+  test('the guard refuses 0.0.0.0 return URLs', () => {
+    expect(() => assertAbsoluteReturnUrls({ successUrl: 'http://0.0.0.0:4028/checkout/success', cancelUrl: 'http://localhost:4028/c' })).toThrow('absolute');
+  });
+
+  test('loopback names stay allowed (local development)', () => {
+    expect(resolveSiteBase('http://localhost:4028')).toBe('http://localhost:4028');
+    expect(resolveSiteBase('http://127.0.0.1:4028')).toBe('http://127.0.0.1:4028');
+  });
+});
+
+describe('requestOrigin prefers the forwarded host and the Host header over nextUrl.origin', () => {
+  test('Host header beats the 0.0.0.0 nextUrl.origin', () => {
+    expect(requestOrigin(req({ host: 'localhost:4028' }))).toBe('http://localhost:4028');
+  });
+
+  test('x-forwarded-host and x-forwarded-proto beat Host (tunnel)', () => {
+    expect(requestOrigin(req({ host: 'localhost:4028', 'x-forwarded-host': 'abc.trycloudflare.com', 'x-forwarded-proto': 'https' })))
+      .toBe('https://abc.trycloudflare.com');
+  });
+
+  test('a comma-separated forwarded list uses its first entry', () => {
+    expect(requestOrigin(req({ 'x-forwarded-host': 'shop.example.com, internal:3000', 'x-forwarded-proto': 'https, http' })))
+      .toBe('https://shop.example.com');
+  });
+
+  test('a Host of 0.0.0.0 is skipped; without any usable header, a routable nextUrl.origin is the fallback', () => {
+    expect(requestOrigin(req({ host: '0.0.0.0:4028' }, 'http://localhost:4028'))).toBe('http://localhost:4028');
+  });
+
+  test('nothing usable gives null, never 0.0.0.0', () => {
+    expect(requestOrigin(req({ host: '0.0.0.0:4028' }))).toBeNull();
+    expect(requestOrigin(req({}))).toBeNull();
+  });
+
+  test('the origin it returns builds absolute, routable return URLs', () => {
+    const origin = requestOrigin(req({ host: 'localhost:4028' }));
+    expect(getDodoReturnUrl(origin)).toBe('http://localhost:4028/checkout/success');
+    expect(getDodoCancelUrl(origin)).toBe('http://localhost:4028/checkout/cancel');
+  });
+});
+
 describe('the Dodo provider never sends a relative return URL', () => {
   const provider = new DodoPaymentsProvider();
   const base = { orderId: 'o1', userId: 'u1', userEmail: 'a@b.test', amount: 5, currency: 'EUR', productName: 'x' };
@@ -86,7 +149,8 @@ describe('every checkout passes the request origin when it builds return URLs', 
     'src/app/api/payments/dodo/checkout/route.ts',
     'src/app/api/payments/dodo/credit-checkout/route.ts',
     'src/app/api/payments/dodo/subscription-checkout/route.ts',
-  ])('%s forwards request.nextUrl.origin', (path) => {
-    expect(source(path)).toContain('origin: request.nextUrl.origin');
+  ])('%s forwards requestOrigin(request), never nextUrl.origin directly', (path) => {
+    expect(source(path)).toContain('origin: requestOrigin(request)');
+    expect(source(path)).not.toContain('request.nextUrl.origin');
   });
 });

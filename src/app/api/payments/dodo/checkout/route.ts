@@ -5,6 +5,7 @@
 // Idempotency: prevents double orders from double-click / refresh.
 // ============================================================
 
+import { requestOrigin } from '@/lib/payments/dodo/config';
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@/lib/supabase/server';
 import { initiateAssetLicenseCheckout, initiateSubscriptionCheckout } from '@/lib/payments/CheckoutService';
@@ -68,7 +69,7 @@ export async function POST(request: NextRequest) {
       // Idempotency: if a pending order already exists for this user+plan+cycle
       // within the last 10 minutes, reuse it instead of creating a duplicate.
       const result = await initiateSubscriptionCheckout({
-        origin: request.nextUrl.origin,
+        origin: requestOrigin(request) ?? undefined,
         userId: user.id,
         userEmail: user.email ?? '',
         planCode,
@@ -81,7 +82,7 @@ export async function POST(request: NextRequest) {
     // ── Asset license checkout ─────────────────────────────
     if (assetId && licenseTypeCode && unitProductCode) {
       const result = await initiateAssetLicenseCheckout({
-        origin: request.nextUrl.origin,
+        origin: requestOrigin(request) ?? undefined,
         userId: user.id,
         userEmail: user.email ?? '',
         assetId,
