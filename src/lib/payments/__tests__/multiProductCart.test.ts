@@ -23,7 +23,8 @@ const pricingPage = source('src/app/pricing/page.tsx');
 const line = (overrides: Partial<CartLine> = {}): CartLine => ({
   id: 'line-1', itemType: 'credit_pack', internalProductId: 'pack-100', assetId: null,
   licenseTypeId: null, quantity: 1, unitPrice: 9, subtotal: 9, productCode: 'credits_100',
-  productName: '100 credits', assetTitle: null, licenseName: null, format: null,
+  productName: '100 credits', assetTitle: null, licenseName: null, licenseTypeCode: null, productDescription: null,
+  alternatives: [], format: null,
   credits: 100, listPrice: null, promoEndsAt: null, validationError: null, ...overrides,
 });
 
@@ -134,7 +135,10 @@ describe('cart interface and accessibility contracts', () => {
     expect(header).toContain('cartCount');
     expect(header).toContain('lineCount');
   });
-  test('adds an asset purchase cart action', () => expect(assetPage).toContain('<AddToCartButton'));
+  test('adds "Add to cart" and "Buy now" actions on the photo page', () => {
+    expect(assetPage).toContain('Add to cart');
+    expect(assetPage).toContain('Buy now');
+  });
   test('keeps credit packs on direct checkout and sends generic media buyers to Library', () => {
     expect(pricingPage).not.toContain("itemType: 'credit_pack'");
     expect(pricingPage).toContain('credit_pack: packCode');

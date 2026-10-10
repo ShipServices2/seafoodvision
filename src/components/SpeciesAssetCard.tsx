@@ -16,7 +16,7 @@ interface SpeciesAssetCardProps {
   // Legacy — kept for backward compat
   thumbnailUrl?: string | null;
   emoji: string;
-  /** Starting price (Photo Web) from the database, shown with its struck-through normal price while the promotion runs */
+  /** Starting price (Digital Use) from the database, shown with its struck-through normal price while the promotion runs */
   priceUnit?: UnitPrice | null;
 }
 

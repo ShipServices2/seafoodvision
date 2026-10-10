@@ -1,5 +1,5 @@
-// Automatic "Pack 10 Photos HD" discount.
-// Only standard Photo HD lines (unit product `photo_hd`) count toward a pack: not Photo Web, not HD + extended licence.
+// Automatic "Pack 10 HD Print" discount.
+// Only HD Print lines (unit product `photo_hd`) count toward a pack: not Digital Use, not HD Extended.
 // Every complete block of `size` HD photos is billed as ONE Dodo pack product; the remainder is billed per photo
 // (12 HD photos = 1 pack + 2 x 20 EUR). Each photo stays its own order line, so the webhook still creates one licence
 // and one download entitlement per photo. Pure functions: no I/O, no rounding surprises (amounts are rounded to cents).

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { removeCartItem, updateCartItem } from '@/lib/payments/CartService';
+import { changeCartItemLicense, removeCartItem, updateCartItem } from '@/lib/payments/CartService';
 import { cartRouteError, requireCartUser } from '@/lib/payments/cartRoute';
 
 type Context = { params: Promise<{ itemId: string }> };
@@ -8,7 +8,12 @@ export async function PATCH(request: NextRequest, context: Context) {
   try {
     const user = await requireCartUser();
     const { itemId } = await context.params;
-    const body = await request.json() as { quantity?: unknown };
+    const body = await request.json() as { quantity?: unknown; unitProductCode?: unknown; licenseTypeCode?: unknown };
+    if (typeof body.unitProductCode === 'string' && typeof body.licenseTypeCode === 'string') {
+      return NextResponse.json(await changeCartItemLicense(user.id, itemId, {
+        unitProductCode: body.unitProductCode, licenseTypeCode: body.licenseTypeCode,
+      }));
+    }
     if (typeof body.quantity !== 'number') {
       return NextResponse.json({ error: 'Numeric quantity is required', code: 'invalid_request' }, { status: 400 });
     }

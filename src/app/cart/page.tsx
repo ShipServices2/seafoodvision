@@ -8,6 +8,7 @@ import Header from '@/components/Header';
 import Footer from '@/components/Footer';
 import { useAuth } from '@/contexts/AuthContext';
 import type { CartSnapshot, CartValidationResult } from '@/lib/payments/CartService';
+import { unitProductDisplay } from '@/lib/pricingConfig';
 
 export default function CartPage() {
   return (
@@ -154,10 +155,30 @@ function CartPageContent() {
                   <div className="flex items-start justify-between gap-4">
                     <div className="min-w-0">
                       <h2 className="font-semibold">{item.productName}</h2>
+                      {item.productDescription && <p className="text-xs text-muted-foreground">{item.productDescription}</p>}
                       {item.assetTitle && <p className="truncate text-sm text-muted-foreground">{item.assetTitle}</p>}
                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
                         {item.format && <span className="rounded-full bg-muted px-2 py-1">{item.format}</span>}
                         {item.licenseName && <span className="rounded-full bg-muted px-2 py-1">{item.licenseName}</span>}
+                        {item.itemType === 'asset_license' && item.alternatives.length > 1 && (
+                          <label className="flex items-center gap-1.5">
+                            <span>Licence</span>
+                            <select
+                              aria-label={`Change licence of ${item.assetTitle ?? item.productName}`}
+                              value={item.productCode}
+                              disabled={!!busy || cart.locked}
+                              onChange={(event) => {
+                                const next = item.alternatives.find((alt) => alt.unitProductCode === event.target.value);
+                                if (next) void mutate(`/api/cart/items/${item.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(next) }, item.id);
+                              }}
+                              className="rounded border bg-background px-2 py-1 text-xs text-foreground"
+                            >
+                              {item.alternatives.map((alt) => (
+                                <option key={alt.unitProductCode} value={alt.unitProductCode}>{unitProductDisplay(alt.unitProductCode)?.name ?? alt.unitProductCode}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
                         {item.credits && <span className="rounded-full bg-muted px-2 py-1">{item.credits} credits each</span>}
                       </div>
                     </div>
@@ -183,11 +204,11 @@ function CartPageContent() {
               {cart.discount > 0 && cart.pack && (
                 <>
                   <div className="mb-2 flex justify-between text-sm text-muted-foreground"><span>Subtotal</span><span>{cart.subtotal.toFixed(2)} {cart.currency}</span></div>
-                  <div className="mb-2 flex justify-between text-sm text-green-700"><span>Pack 10 Photos HD × {cart.pack.packs} ({cart.pack.size} HD photos each at {cart.pack.price.toFixed(2)} {cart.currency})</span><span>−{cart.discount.toFixed(2)} {cart.currency}</span></div>
+                  <div className="mb-2 flex justify-between text-sm text-green-700"><span>Pack 10 HD Print × {cart.pack.packs} ({cart.pack.size} HD Print photos each at {cart.pack.price.toFixed(2)} {cart.currency})</span><span>−{cart.discount.toFixed(2)} {cart.currency}</span></div>
                 </>
               )}
               {cart.pack === null && cart.items.filter((i) => i.productCode === 'photo_hd').length >= 6 && (
-                <p className="mb-2 text-xs text-muted-foreground">Every 10 standard HD photos are billed as one Pack 10 Photos HD, automatically.</p>
+                <p className="mb-2 text-xs text-muted-foreground">Every 10 HD Print photos are billed as one Pack 10 HD Print, automatically.</p>
               )}
               <div className="mb-5 flex justify-between border-t pt-4 text-lg font-bold"><span>Total</span><span>{cart.total.toFixed(2)} {cart.currency}</span></div>
               {notice && <p role="status" className="mb-3 flex gap-2 rounded-lg bg-green-50 p-3 text-sm text-green-700"><CheckCircle2 size={16} className="shrink-0" />{notice}</p>}

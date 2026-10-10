@@ -48,7 +48,7 @@ const faqs = [
       },
       {
         q: 'Can I buy individual assets without a subscription?',
-        a: 'Yes. Unit purchases are available: Photo Web (5€), Photo HD (20€), Photo Ultra HD (40€), Video (75€), Vue 360° (50€), and a Pack of 10 images (150€).',
+        a: 'Yes. Unit purchases are available: Digital Use (5€), HD Print (20€), HD Extended (299€), and a Pack 10 HD Print (150€).',
       },
     ],
   },

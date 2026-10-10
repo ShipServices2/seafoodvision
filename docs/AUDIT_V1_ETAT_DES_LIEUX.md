@@ -437,3 +437,21 @@ Procédures (fichiers web, tunnel cloudflared, achats test) : `docs/ETAPE_6_COMM
 ### Résultats
 - `type-check` : OK. `lint` : 0 erreur, 289 avertissements (inchangé). `test` : **17 suites, 354 tests OK** (+5 suites, +67 tests : webhook, accès aux téléchargements, pack, prix, licence PDF). `build` : OK. Redémarrage propre sur le port 4028 (arrêt, suppression de `.next`, `npm run dev`).
 - Les 31 commandes existantes (13 draft, 10 pending, 8 cancelled) n'ont pas été touchées.
+
+
+### Panier, boutons et renommage des offres photo
+- **Bouton « Buy License » grisé** : `selectedLicense` démarrait à `null` et le bouton exigeait `!selectedLicense` ; tant que le visiteur ne cliquait pas sur une offre, il restait inactif. L'offre active est maintenant dérivée (offre choisie, sinon la première) : une photo WEB n'a qu'une offre, présélectionnée.
+- **Fiche photo** : « Buy License » est remplacé par **Add to cart** (ajoute la photo avec la licence choisie, message de confirmation, le compteur de l'icône panier se met à jour) et **Buy now** (ajoute puis ouvre le panier ; si la photo y est déjà avec cette licence, il ouvre simplement le panier). Le paiement se fait uniquement depuis le panier : un seul paiement Dodo pour toutes les photos, remise du pack appliquée automatiquement.
+- **Doublon** : une même photo avec la même licence est refusée par le serveur (409 `already_in_cart`, « This photo is already in your cart with this licence. »). Avant, l'ajout était ignoré sans message. La même photo avec une autre licence reste une ligne distincte.
+- **Panier** : retrait d'une ligne (déjà présent) et **changement de licence** par ligne (liste déroulante limitée aux offres que la résolution de la photo permet) via `PATCH /api/cart/items/[id]` avec `unitProductCode` + `licenseTypeCode` ; le serveur revalide, refixe le prix et recalcule la remise du pack. Les paniers créés avant ce changement n'ont pas la liste des offres : la liste déroulante n'y apparaît qu'après un nouvel ajout.
+- **Noms client** (codes internes inchangés : `photo_web`, `photo_hd`, `photo_hd_extended`, `pack_10` ; aucune migration) :
+
+| Code | Nom | Sous-titre | Traduction FR (étape 8) |
+|------|-----|------------|-------------------------|
+| `photo_web` | Digital Use | Websites, social media, presentations — up to 1920 px | Usage numérique |
+| `photo_hd` | HD Print | Catalogues, brochures, trade fairs — full resolution | HD Impression |
+| `photo_hd_extended` | HD Extended | Packaging, advertising, large print runs — full resolution | HD Étendue |
+| `pack_10` | Pack 10 HD Print | — | Pack 10 HD Impression |
+
+  Source unique côté code : `UNIT_PRODUCTS` dans `src/lib/pricingConfig.ts` (`unitProductDisplay`), utilisée par la fiche photo, `/pricing` et le panier ; le panier affiche toujours ce nom, même pour une ligne créée sous l'ancien nom. `unit_products.name` / `description` mis à jour par l'API REST Supabase, et les 4 produits Dodo TEST renommés par l'API Dodo (`PATCH /products/{id}`). La licence PDF lit `unit_products.name` : elle affiche le nouveau nom. Les e-mails d'achat sont envoyés par Dodo à partir du nom du produit Dodo (aucun e-mail n'est envoyé par l'application). Les anciennes migrations gardent les anciens noms (`20261006100000` : « Photo HD — Extended licence ») : à rejouer sur une base neuve, relancer le renommage.
+- **À faire** : les licences PDF déjà générées gardent l'ancien nom de produit (fichiers stockés et réutilisés).

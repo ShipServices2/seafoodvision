@@ -169,12 +169,12 @@ export async function validateAssetLicensePurchase(
     if (!product.is_active) blockers.push('unit product is inactive');
     if (!isValidMoney(product.price)) blockers.push('unit product price is invalid');
     if (!isValidCurrency(product.currency)) blockers.push('unit product currency is invalid');
-    // Packs are never sold as a line: the discount is applied automatically per block of pack_size Photo HD in the cart.
+    // Packs are never sold as a line: the discount is applied automatically per block of pack_size HD Print photos in the cart.
     if (product.pack_size) blockers.push('pack products are applied automatically at checkout');
     if (product.license_type_code && product.license_type_code !== params.licenseTypeCode) {
       blockers.push('unit product does not match the requested license');
     }
-    // HD products need an HD-resolution original (WEB-resolution photos are sold as Photo Web only)
+    // HD products need an HD-resolution original (WEB-resolution photos are sold as Digital Use only)
     if (asset && !isUnitProductAvailableForResolution(params.unitProductCode, asset.width_px, asset.height_px)) {
       blockers.push('this photo is not available in HD resolution');
     }

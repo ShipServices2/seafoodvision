@@ -35,16 +35,16 @@ node scripts\import_prep\generate_web_files.js --status published --apply --conc
 
 Carte de test Dodo : `4242 4242 4242 4242`, date future, CVC quelconque. Utiliser un compte acheteur **différent** du compte admin, avec une photo en **résolution HD** (≥ 4 Mpx) pour les achats 2 à 4.
 
-Achats 1 à 3 : bouton **Buy License** de la fiche photo (paiement direct) ou « Add to cart » puis panier, au choix. Achat 4 : obligatoirement par le **panier** (« Add to cart » sur 12 photos).
+Achats 1 à 3 : **Buy now** (ajoute la photo et ouvre le panier) ou **Add to cart** puis panier, au choix. Dans tous les cas le paiement se fait depuis le **panier** (Validate cart, puis Secure checkout) : un seul paiement Dodo pour toutes les photos. Achat 4 : **Add to cart** sur 12 photos.
 
 Avant chaque achat : panier vide. Après chaque achat, dans le tableau de bord Dodo → Webhooks → l'endpoint → *Logs* : `payment.succeeded` doit afficher **200**.
 
 | # | Achat | Total attendu | À vérifier |
 |---|-------|---------------|------------|
-| 1 | **Photo Web** (une photo) | 5 € | Prix 15 € barré + « Launch price until 31 Jan 2027 » sur la fiche photo, `/pricing` et le panier. Après paiement : `orders.status = paid`, 1 `purchased_licenses` (`active`), 1 `download_entitlements` (`allowed_resolution = web`). `/account/downloads` → le fichier reçu fait **≤ 1920 px, sans filigrane**, nommé `SV-…-web.jpg`. **Ce n'est pas l'original** (comparer avec la taille de l'original HD). L'URL signée expire après 5 min. |
-| 2 | **Photo HD** | 20 € | Prix 39 € barré. 1 licence, 1 droit `allowed_resolution = hd`. Fichier reçu = **original pleine résolution**, nommé `SV-…-hd.jpg`. Chaque photo achetée donne **5 téléchargements** : le compteur « remaining » baisse à chaque clic et **un 6e téléchargement est refusé** (403 « Download quota exceeded »). |
-| 3 | **Photo HD + extended licence** | 299 € | Pas de prix barré (299 = 299). Licence de type *Extended* ; fichier = original ; `/account/licenses` → bouton **Licence PDF** : le PDF indique le type *Extended*, la résolution HD, le concédant `SeafoodVision`, un numéro `SVL-2026-…` et le numéro de commande. |
-| 4 | **Pack de 10** : mettre **12 photos HD** (HD standard, pas extended) dans le panier | 190 € = 150 € + 2 × 20 € | Panier : ligne « Pack 10 Photos HD × 1 … −50.00 EUR », total 190. Page de paiement Dodo : « Pack 10 Photos HD × 1 » et « Photo HD × 2 ». Après paiement : **12** licences et **12** droits de téléchargement (un par photo), `orders.total_amount = 190`, `discount_amount = 50`. |
+| 1 | **Digital Use** (une photo) | 5 € | Prix 15 € barré + « Launch price until 31 Jan 2027 » sur la fiche photo, `/pricing` et le panier. Après paiement : `orders.status = paid`, 1 `purchased_licenses` (`active`), 1 `download_entitlements` (`allowed_resolution = web`). `/account/downloads` → le fichier reçu fait **≤ 1920 px, sans filigrane**, nommé `SV-…-web.jpg`. **Ce n'est pas l'original** (comparer avec la taille de l'original HD). L'URL signée expire après 5 min. |
+| 2 | **HD Print** | 20 € | Prix 39 € barré. 1 licence, 1 droit `allowed_resolution = hd`. Fichier reçu = **original pleine résolution**, nommé `SV-…-hd.jpg`. Chaque photo achetée donne **5 téléchargements** : le compteur « remaining » baisse à chaque clic et **un 6e téléchargement est refusé** (403 « Download quota exceeded »). |
+| 3 | **HD Extended** | 299 € | Pas de prix barré (299 = 299). Licence de type *Extended* ; fichier = original ; `/account/licenses` → bouton **Licence PDF** : le PDF indique le type *Extended*, la résolution HD, le concédant `SeafoodVision`, un numéro `SVL-2026-…` et le numéro de commande. |
+| 4 | **Pack de 10** : mettre **12 photos HD** (HD Print, pas HD Extended) dans le panier | 190 € = 150 € + 2 × 20 € | Panier : ligne « Pack 10 HD Print × 1 … −50.00 EUR », total 190. Page de paiement Dodo : « Pack 10 HD Print × 1 » et « HD Print × 2 ». Après paiement : **12** licences et **12** droits de téléchargement (un par photo), `orders.total_amount = 190`, `discount_amount = 50`. |
 
 Contrôles communs :
 - `/account/licenses` : bouton **Licence PDF** → 1ʳᵉ demande : génération ; 2ᵉ demande : le **même** PDF (même numéro `SVL-…`), `purchased_licenses.metadata.licensePdf.path` renseigné.

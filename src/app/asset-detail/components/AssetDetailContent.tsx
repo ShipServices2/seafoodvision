@@ -28,15 +28,15 @@ const ALL_PHOTO_LICENSE_OPTIONS: PhotoLicenseOption[] = [
   {
     unitProductCode: 'photo_web',
     licenseTypeCode: 'commercial',
-    label: 'Photo Web',
-    description: 'Web-optimised (72 dpi, up to 1920px)',
+    label: 'Digital Use',
+    description: 'Websites, social media, presentations — up to 1920 px',
     price: 5,
   },
   {
     unitProductCode: 'photo_hd',
     licenseTypeCode: 'commercial',
-    label: 'Photo HD',
-    description: 'High-definition (300 dpi, up to 4K)',
+    label: 'HD Print',
+    description: 'Catalogues, brochures, trade fairs — full resolution',
     price: 20,
   },
   {

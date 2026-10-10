@@ -14,12 +14,12 @@ import AssetPreview from '@/app/asset-detail/components/AssetPreview';
 import SimilarAssets from '@/app/asset-detail/components/SimilarAssets';
 import CollectionModal from '@/app/asset-detail/components/CollectionModal';
 import { useAuth } from '@/contexts/AuthContext';
-import AddToCartButton from '@/components/AddToCartButton';
 import { isV1HiddenUnitProduct } from '@/lib/v1Scope';
 import PriceTag from '@/components/PriceTag';
 import { useUnitPrices } from '@/lib/useUnitPrices';
 import { formatEur } from '@/lib/unitPrices';
-import { isHdResolution } from '@/lib/assetOffers';
+import { PHOTO_OFFERS, isHdResolution } from '@/lib/assetOffers';
+import { unitProductDisplay } from '@/lib/pricingConfig';
 
 function formatFileSize(bytes: number | null): string {
   if (!bytes) return '—';
@@ -35,7 +35,8 @@ function formatDimensions(w: number | null, h: number | null): string {
 
 // License options shown when asset is commercially available.
 // Prices are read from the database (unit_products) at render time, see useUnitPrices() / <PriceTag />.
-// WEB-resolution photos are sold as "Photo Web" only; HD photos (>= 4 MP) add "Photo HD" and "Photo HD + extended licence".
+// Names and subtitles come from pricingConfig (unitProductDisplay); internal codes never change.
+// WEB-resolution photos are sold as "Digital Use" only; HD photos (>= 4 MP) add "HD Print" and "HD Extended".
 
 interface LicenseOption {
   code: string;
@@ -44,29 +45,13 @@ interface LicenseOption {
   description: string;
 }
 
-const ALL_LICENSE_OPTIONS: (LicenseOption & { hdOnly: boolean })[] = [
-  {
-    code: 'commercial',
-    name: 'Photo Web',
-    unitProductCode: 'photo_web',
-    description: 'Web-optimised (72 dpi, up to 1920px)',
-    hdOnly: false,
-  },
-  {
-    code: 'commercial',
-    name: 'Photo HD',
-    unitProductCode: 'photo_hd',
-    description: 'High-definition (300 dpi, up to 4K)',
-    hdOnly: true,
-  },
-  {
-    code: 'extended',
-    name: 'Photo HD + extended licence',
-    unitProductCode: 'photo_hd_extended',
-    description: 'HD file with extended rights (print runs, broadcast, merchandise)',
-    hdOnly: true,
-  },
-];
+const ALL_LICENSE_OPTIONS: (LicenseOption & { hdOnly: boolean })[] = PHOTO_OFFERS.map((offer) => ({
+  code: offer.licenseTypeCode,
+  unitProductCode: offer.unitProductCode,
+  name: unitProductDisplay(offer.unitProductCode)?.name ?? offer.unitProductCode,
+  description: unitProductDisplay(offer.unitProductCode)?.description ?? '',
+  hdOnly: offer.unitProductCode !== 'photo_web',
+}));
 
 function getLicenseOptions(asset: AssetRow): LicenseOption[] {
   const hd = isHdResolution(asset.width_px, asset.height_px);
@@ -165,7 +150,7 @@ export default function AssetSlugPage() {
   const [favorited, setFavorited] = useState(false);
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [selectedLicense, setSelectedLicense] = useState<string | null>(null);
-  const [checkoutLoading, setCheckoutLoading] = useState(false);
+  const [cartAction, setCartAction] = useState<'add' | 'buy' | null>(null);
   const [showBlockers, setShowBlockers] = useState(false);
 
   useEffect(() => {
@@ -189,56 +174,43 @@ export default function AssetSlugPage() {
     toast.success('Link copied to clipboard');
   };
 
-  async function handleBuyLicense() {
-    if (!asset || !selectedLicense) return;
+  // Add the selected licence to the persistent cart; `buyNow` then goes straight to the cart.
+  async function handleAddToCart(buyNow: boolean) {
+    if (!asset || !activeLicense || cartAction) return;
+    const item = {
+      itemType: 'asset_license' as const,
+      assetId: asset.id,
+      licenseTypeCode: activeLicense.code,
+      unitProductCode: activeLicense.unitProductCode,
+      quantity: 1,
+    };
 
-    const licenseOption = licenseOptions.find((l) => l.unitProductCode === selectedLicense);
-    if (!licenseOption) return;
-
-    // If not logged in, redirect to sign-in with checkout intent
+    // Not signed in: the cart page replays this one item after sign-in.
     if (!user) {
-      const intentParams = new URLSearchParams({
-        return_to: '/checkout/resume',
-        checkout_intent: '1',
-        asset_id: asset.id,
-        license_type: licenseOption.code,
-        unit_product: licenseOption.unitProductCode,
-      });
-      router.push(`/auth/sign-in?${intentParams.toString()}`);
+      const intent = encodeURIComponent(JSON.stringify(item));
+      router.push(`/auth/sign-in?return_to=${encodeURIComponent(`/cart?cart_intent=${intent}`)}`);
       return;
     }
 
-    setCheckoutLoading(true);
+    setCartAction(buyNow ? 'buy' : 'add');
     try {
-      const res = await fetch('/api/payments/dodo/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          assetId: asset.id,
-          licenseTypeCode: licenseOption.code,
-          unitProductCode: licenseOption.unitProductCode,
-        }),
+      const res = await fetch('/api/cart/items', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(item),
       });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error ?? 'Checkout failed');
+      const data = await res.json() as { error?: string; code?: string };
+      const alreadyInCart = data.code === 'already_in_cart';
+      if (!res.ok && !alreadyInCart) throw new Error(data.error ?? 'Unable to add this photo to the cart');
+      window.dispatchEvent(new Event('seafoodvision:cart-updated'));
+      if (buyNow) {
+        router.push('/cart');
+        return;
       }
-
-      const { checkoutUrl } = data as { checkoutUrl: string };
-
-      if (checkoutUrl.startsWith('http')) {
-        window.location.href = checkoutUrl;
-      } else {
-        router.push(checkoutUrl);
-      }
+      if (alreadyInCart) toast.info(data.error ?? 'This photo is already in your cart with this licence.');
+      else toast.success(`Added to cart — ${activeLicense.name}`);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Could not start checkout';
-      toast.error(msg);
-    } finally {
-      setCheckoutLoading(false);
+      toast.error(err instanceof Error ? err.message : 'Could not add this photo to the cart');
     }
+    setCartAction(null);
   }
 
   const keywords = asset?.asset_keywords?.map((ak) => ak.keywords?.term).filter(Boolean) || [];
@@ -252,6 +224,8 @@ export default function AssetSlugPage() {
   const bgColor = 'from-blue-200 via-blue-100 to-slate-100';
 
   const licenseOptions = asset ? getLicenseOptions(asset) : [];
+  // A single offer (WEB-resolution photo) is preselected; otherwise the first one until the visitor picks another.
+  const activeLicense = licenseOptions.find((o) => o.unitProductCode === selectedLicense) ?? licenseOptions[0] ?? null;
   const criteria = asset ? getCommercialCriteria(asset) : [];
   const { ok: isReady, blockers } = isCommerciallyReady(criteria);
 
@@ -392,7 +366,7 @@ export default function AssetSlugPage() {
                             key={opt.unitProductCode}
                             onClick={() => setSelectedLicense(opt.unitProductCode)}
                             className={`w-full text-left rounded-xl border p-3 transition-all duration-150 ${
-                              selectedLicense === opt.unitProductCode
+                              activeLicense?.unitProductCode === opt.unitProductCode
                                 ? 'border-secondary bg-secondary/5 ring-1 ring-secondary/20' : 'border-border hover:border-secondary/40 hover:bg-muted/40'
                             }`}
                           >
@@ -407,49 +381,40 @@ export default function AssetSlugPage() {
 
                       {licenseOptions.some((o) => o.unitProductCode === 'photo_hd') && unitPrices?.pack_10 && (
                         <p className="text-xs text-muted-foreground">
-                          10 HD photos in your cart = <strong>Pack 10 Photos HD at {formatEur(unitPrices.pack_10.price)}</strong>, applied automatically.
+                          10 HD Print photos in your cart = <strong>Pack 10 HD Print at {formatEur(unitPrices.pack_10.price)}</strong>, applied automatically.
                         </p>
                       )}
 
-                      <button
-                        onClick={handleBuyLicense}
-                        disabled={!selectedLicense || checkoutLoading}
-                        className={`w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold transition-all duration-150 ${
-                          selectedLicense && !checkoutLoading
-                            ? 'bg-secondary text-white hover:bg-secondary/90' : 'bg-muted text-muted-foreground cursor-not-allowed'
-                        }`}
-                      >
-                        {checkoutLoading ? (
-                          <>
-                            <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                            Creating order…
-                          </>
-                        ) : (
-                          <>
-                            {user ? <ShoppingCart size={15} /> : <Lock size={15} />}
-                            {user ? 'Buy License' : 'Sign in to Buy'}
-                          </>
-                        )}
-                      </button>
-
-                      {selectedLicense && (() => {
-                        const option = licenseOptions.find((entry) => entry.unitProductCode === selectedLicense);
-                        return option ? (
-                          <AddToCartButton
-                            item={{
-                              itemType: 'asset_license',
-                              assetId: asset.id,
-                              licenseTypeCode: option.code,
-                              unitProductCode: option.unitProductCode,
-                              quantity: 1,
-                            }}
-                            className="w-full flex items-center justify-center gap-2 rounded-xl border border-secondary px-4 py-2.5 text-sm font-semibold text-secondary transition-colors hover:bg-secondary/5 disabled:opacity-50"
-                          />
-                        ) : null;
-                      })()}
+                      <div className="flex flex-col gap-2">
+                        <button
+                          onClick={() => handleAddToCart(false)}
+                          disabled={!activeLicense || cartAction !== null}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold border border-secondary text-secondary hover:bg-secondary/5 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <ShoppingCart size={15} />
+                          {cartAction === 'add' ? 'Adding…' : 'Add to cart'}
+                        </button>
+                        <button
+                          onClick={() => handleAddToCart(true)}
+                          disabled={!activeLicense || cartAction !== null}
+                          className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl text-sm font-semibold bg-secondary text-white hover:bg-secondary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {cartAction === 'buy' ? (
+                            <>
+                              <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                              Opening cart…
+                            </>
+                          ) : (
+                            <>
+                              {user ? <ShoppingCart size={15} /> : <Lock size={15} />}
+                              {user ? 'Buy now' : 'Sign in to buy'}
+                            </>
+                          )}
+                        </button>
+                      </div>
 
                       <p className="text-xs text-muted-foreground text-center leading-relaxed">
-                        Secure checkout via Dodo Payments. License terms apply.{' '}
+                        Pay all the photos in your cart at once, securely via Dodo Payments. License terms apply.{' '}
                         <Link href="/licensing" className="text-secondary hover:underline">View terms</Link>
                       </p>
                     </>

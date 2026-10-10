@@ -9,6 +9,8 @@ import {
   type PackOffer,
   type PackPricing,
 } from './packPricing';
+import { unitProductDisplay } from '@/lib/pricingConfig';
+import { PHOTO_OFFERS, isUnitProductAvailableForResolution } from '@/lib/assetOffers';
 import {
   assertCommercialValidation,
   validateAssetLicensePurchase,
@@ -50,6 +52,11 @@ export interface CartLine {
   productName: string;
   assetTitle: string | null;
   licenseName: string | null;
+  licenseTypeCode: string | null;
+  /** Customer-facing subtitle of the product (Digital Use, HD Print, HD Extended). */
+  productDescription: string | null;
+  /** Unit products this photo can be switched to (resolution-dependent). Empty for credit packs. */
+  alternatives: Array<{ unitProductCode: string; licenseTypeCode: string }>;
   format: string | null;
   credits: number | null;
   /** Normal price while a launch promotion runs (shown struck through), else null. */
@@ -66,7 +73,7 @@ export interface CartSnapshot {
   total: number;
   lineCount: number;
   quantityCount: number;
-  /** Pack 10 Photos HD discount already taken off `subtotal` (0 when no complete block of 10 HD photos). */
+  /** Pack 10 HD Print discount already taken off `subtotal` (0 when no complete block of 10 HD photos). */
   discount: number;
   pack: (PackPricing & { size: number; price: number }) | null;
   locked: boolean;
@@ -178,7 +185,11 @@ function mapCart(order: Record<string, any> | null): CartSnapshot {
         unitPrice: Number(item.unit_price),
         subtotal: Number(item.total_price),
         productCode: String(metadata.productCode ?? ''),
-        productName: String(metadata.productName ?? 'Marketplace item'),
+        // Customer-facing names live in pricingConfig (the codes never change); order metadata may hold an older name.
+        productName: unitProductDisplay(String(metadata.productCode ?? ''))?.name ?? String(metadata.productName ?? 'Marketplace item'),
+        productDescription: unitProductDisplay(String(metadata.productCode ?? ''))?.description ?? null,
+        licenseTypeCode: metadata.licenseTypeCode ? String(metadata.licenseTypeCode) : null,
+        alternatives: Array.isArray(metadata.alternatives) ? (metadata.alternatives as CartLine['alternatives']) : [],
         assetTitle: metadata.assetTitle ? String(metadata.assetTitle) : null,
         licenseName: metadata.licenseName ? String(metadata.licenseName) : null,
         format: metadata.format ? String(metadata.format) : null,
@@ -267,7 +278,7 @@ async function resolveRequest(request: CartItemRequest, client = createServiceCl
     }
     assertCommercialValidation(validation, 'Asset cannot be added to cart');
     const normalized = validation.normalized_product as {
-      asset: { id: string; title?: string };
+      asset: { id: string; title?: string; width_px?: number | null; height_px?: number | null };
       license: { id: string; name: string; code: string };
       product: { id: string; name: string; product_code: string; resolution_allowed?: string; list_price?: number | string | null; promo_ends_at?: string | null };
     };
@@ -286,6 +297,9 @@ async function resolveRequest(request: CartItemRequest, client = createServiceCl
         assetTitle: normalized.asset.title ?? 'Seafood asset',
         licenseName: normalized.license.name,
         licenseTypeCode: normalized.license.code,
+        alternatives: PHOTO_OFFERS
+          .filter((offer) => isUnitProductAvailableForResolution(offer.unitProductCode, normalized.asset.width_px, normalized.asset.height_px))
+          .map(({ unitProductCode, licenseTypeCode }) => ({ unitProductCode, licenseTypeCode })),
         format: normalized.product.resolution_allowed ?? normalized.product.product_code,
         listPrice: normalized.product.list_price != null && Number(normalized.product.list_price) > validation.authoritative_price
           && normalized.product.promo_ends_at && new Date(normalized.product.promo_ends_at) >= new Date()
@@ -319,7 +333,7 @@ async function resolveRequest(request: CartItemRequest, client = createServiceCl
   };
 }
 
-/** The active "Pack 10 Photos HD" offer (price, block size, Dodo product), or null when it is not configured for this environment. */
+/** The active "Pack 10 HD Print" offer (price, block size, Dodo product), or null when it is not configured for this environment. */
 export async function loadPackOffer(client = createServiceClient()): Promise<PackOffer | null> {
   const { data: product } = await client
     .from('unit_products')
@@ -414,8 +428,45 @@ export async function addCartItem(userId: string, request: CartItemRequest): Pro
       metadata: { ...validated.metadata, dodoProductId: validated.dodoProductId },
     });
     if (error) throw new CartError('cart_add_failed', `Unable to add cart line: ${error.message}`, 500);
+  } else {
+    // The same photo with the same licence is never added twice.
+    throw new CartError('already_in_cart', 'This photo is already in your cart with this licence.', 409);
   }
 
+  await recalculate(order.id, client);
+  return mapCart(await findActiveCart(userId, client));
+}
+
+/** Switch a photo line to another licence (e.g. Digital Use -> HD Print). Re-validated and re-priced by the server. */
+export async function changeCartItemLicense(
+  userId: string,
+  itemId: string,
+  change: { licenseTypeCode: string; unitProductCode: string }
+): Promise<CartSnapshot> {
+  const client = createServiceClient();
+  const order = await requireDraftCart(userId, client);
+  const current = mapCart(order);
+  const item = current.items.find((line) => line.id === itemId);
+  if (!item) throw new CartError('item_not_found', 'Cart line was not found', 404);
+  if (item.itemType !== 'asset_license' || !item.assetId) {
+    throw new CartError('invalid_request', 'Only photo licences can be changed', 400);
+  }
+  const validated = await resolveRequest({
+    itemType: 'asset_license', assetId: item.assetId, licenseTypeCode: change.licenseTypeCode,
+    unitProductCode: change.unitProductCode, quantity: 1,
+  }, client);
+  if (cartLineIdentity(item) === cartLineIdentity(validated)) return current;
+  if (current.items.some((line) => line.id !== itemId && cartLineIdentity(line) === cartLineIdentity(validated))) {
+    throw new CartError('already_in_cart', 'This photo is already in your cart with this licence.', 409);
+  }
+  const { error } = await client.from('order_items').update({
+    internal_product_id: validated.internalProductId,
+    license_type_id: validated.licenseTypeId,
+    unit_price: validated.unitPrice,
+    total_price: validated.unitPrice,
+    metadata: { ...validated.metadata, dodoProductId: validated.dodoProductId },
+  }).eq('id', itemId).eq('order_id', order.id);
+  if (error) throw new CartError('cart_update_failed', `Unable to change the licence: ${error.message}`, 500);
   await recalculate(order.id, client);
   return mapCart(await findActiveCart(userId, client));
 }
@@ -574,7 +625,7 @@ export async function initiateCartCheckout(params: { userId: string; userEmail: 
         quantity: Number(item.quantity),
       };
     });
-    // Complete blocks of 10 standard HD photos are billed as Dodo "Pack 10 Photos HD" products, the rest per photo.
+    // Complete blocks of 10 standard HD photos are billed as Dodo "Pack 10 HD Print" products, the rest per photo.
     const packOffer = await loadPackOffer(client);
     const productCart = buildDodoProductCart(orderItems, packOffer);
     // Guard: what Dodo will charge must equal the order total stored in the database.

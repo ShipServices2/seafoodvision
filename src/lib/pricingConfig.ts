@@ -196,20 +196,20 @@ export interface UnitProduct {
 export const UNIT_PRODUCTS: UnitProduct[] = [
   {
     id: 'photo_web',
-    name: 'Photo Web',
-    description: 'Web-optimised image (JPEG, up to 1920px, no watermark)',
+    name: 'Digital Use',
+    description: 'Websites, social media, presentations — up to 1920 px',
     currency: 'EUR',
   },
   {
     id: 'photo_hd',
-    name: 'Photo HD',
-    description: 'High-definition original file (no watermark)',
+    name: 'HD Print',
+    description: 'Catalogues, brochures, trade fairs — full resolution',
     currency: 'EUR',
   },
   {
     id: 'photo_hd_extended',
-    name: 'Photo HD + extended licence',
-    description: 'HD original with extended rights (print runs, broadcast, merchandise)',
+    name: 'HD Extended',
+    description: 'Packaging, advertising, large print runs — full resolution',
     currency: 'EUR',
   },
   {
@@ -232,11 +232,17 @@ export const UNIT_PRODUCTS: UnitProduct[] = [
   },
   {
     id: 'pack_10',
-    name: 'Pack 10 Photos HD',
+    name: 'Pack 10 HD Print',
     description: 'Every 10 standard HD photos in your cart are billed as one pack, automatically',
     currency: 'EUR',
   },
 ];
+
+/** Customer-facing name and subtitle of a unit product, from its internal code (the codes never change). */
+export function unitProductDisplay(code: string): { name: string; description: string } | null {
+  const product = UNIT_PRODUCTS.find((entry) => entry.id === code);
+  return product ? { name: product.name, description: product.description } : null;
+}
 
 // ─── LICENSE TYPES ───────────────────────────────────────────
 
@@ -300,7 +306,7 @@ export const LICENSE_TYPES: LicenseType[] = [
     name: 'Extended',
     badge: 'extended',
     description: 'Broader rights for large-scale commercial and multi-channel use.',
-    price: null, // price of "Photo HD + extended licence": unit_products.photo_hd_extended (database)
+    price: null, // price of "HD Extended": unit_products.photo_hd_extended (database)
     currency: 'EUR',
     rights: [
       'All Commercial rights',
